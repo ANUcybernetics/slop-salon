@@ -112,3 +112,20 @@ def test_post_image_without_alt_fails(bsky_env, mock_atproto_client, tmp_path):
 
     assert result.exit_code != 0
     assert "alt" in (result.output + (result.stderr or "")).lower()
+
+
+def test_reply_to_thread(bsky_env, mock_atproto_client):
+    parent_uri = "at://did:plc:xyz/app.bsky.feed.post/abc123"
+    mock_atproto_client.get_posts.return_value = MagicMock(
+        posts=[MagicMock(uri=parent_uri, cid="cid-abc", record=MagicMock(reply=None))]
+    )
+
+    from slop_studio.tools.bsky import reply_app
+
+    result = runner.invoke(reply_app, ["--parent", parent_uri, "--text", "interesting"])
+
+    assert result.exit_code == 0, result.output
+    mock_atproto_client.send_post.assert_called_once()
+    _, kwargs = mock_atproto_client.send_post.call_args
+    assert "reply" in kwargs
+    assert kwargs["reply"]["parent"]["uri"] == parent_uri
