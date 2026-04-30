@@ -1,0 +1,15 @@
+# Maps op:// references in 1Password to env-var names for provisioning.
+# Run via: fnox exec --profile <agent> -- <command>
+
+[profiles.default]
+ANTHROPIC_API_KEY = "op://Slop Studio/anthropic/credential"
+GH_TOKEN = "op://Slop Studio/github/token"
+
+# Per-agent profiles inherit `default` and add Bluesky + Replicate creds.
+# Add one [profiles.<name>] block per agent.
+#
+# [profiles.boden]
+# inherit = "default"
+# BSKY_HANDLE = "boden.slopsalon.art"
+# BSKY_PASSWORD = "op://Slop Studio/bsky-boden/password"
+# REPLICATE_API_TOKEN = "op://Slop Studio/replicate-boden/token"
