@@ -213,3 +213,24 @@ def read_timeline(
     else:
         response = client.get_timeline(limit=limit)
     typer.echo(json.dumps(_dump_feed(response.feed), indent=2))
+
+
+# --- bsky-read-notifications ---
+
+read_notifications_app = typer.Typer(
+    add_completion=False,
+    help="Read replies, mentions, quotes, and likes on your account as JSON.",
+)
+
+
+@read_notifications_app.command()
+def read_notifications(
+    limit: int = typer.Option(20, "--limit", help="Number of notifications to return"),
+):
+    """Print recent notifications as JSON to stdout."""
+    import json
+
+    client = _get_client()
+    response = client.app.bsky.notification.list_notifications(params={"limit": limit})
+    payload = [item.model_dump(mode="json", exclude_none=True) for item in response.notifications]
+    typer.echo(json.dumps(payload, indent=2))

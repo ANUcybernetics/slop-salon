@@ -177,3 +177,20 @@ def test_read_timeline_specific_actor(bsky_env, mock_atproto_client):
 
     assert result.exit_code == 0, result.output
     mock_atproto_client.get_author_feed.assert_called_once()
+
+
+def test_read_notifications(bsky_env, mock_atproto_client):
+    mock_atproto_client.app.bsky.notification.list_notifications.return_value = MagicMock(
+        notifications=[MagicMock(model_dump=lambda **kw: {"reason": "reply", "uri": "at://x/y/z"})]
+    )
+
+    from slop_studio.tools.bsky import read_notifications_app
+
+    result = runner.invoke(read_notifications_app, ["--limit", "10"])
+
+    assert result.exit_code == 0, result.output
+    import json
+
+    data = json.loads(result.output)
+    assert isinstance(data, list)
+    assert data[0]["reason"] == "reply"
