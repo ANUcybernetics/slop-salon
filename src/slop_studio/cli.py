@@ -18,6 +18,7 @@ import shlex
 import typer
 
 from slop_studio.config import load_config
+from slop_studio.provision import provision_agent
 from slop_studio.sprites import SpritesClient
 
 app = typer.Typer(add_completion=False, help="Slop Studio admin CLI.")
@@ -199,3 +200,19 @@ def talk(
         typer.echo(result.stderr, err=True)
     if result.exit_code != 0:
         raise typer.Exit(code=result.exit_code)
+
+
+@app.command()
+def new(
+    name: str = typer.Argument(..., help="New agent name (must already be in slop_studio.toml)"),
+    yes_dns: bool = typer.Option(
+        False, "--yes-dns", help="Skip the manual DNS confirmation prompt"
+    ),
+    config_path: str = typer.Option(None, "--config"),
+):
+    """Provision a new agent end-to-end."""
+    provision_agent(
+        name,
+        config_path=config_path or "slop_studio.toml",
+        skip_dns_confirm=yes_dns,
+    )

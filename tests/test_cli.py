@@ -165,3 +165,21 @@ def test_talk_runs_slop_tick_with_prompt(fake_config):
         joined = " ".join(cmd)
         assert "slop-tick" in joined
         assert "your last three posts felt similar" in joined
+
+
+def test_new_invokes_provisioning(fake_config):
+    with patch("slop_studio.cli.provision_agent") as mock_provision:
+        result = runner.invoke(app, ["new", "boden", "--yes-dns"])
+
+        assert result.exit_code == 0, result.output
+        mock_provision.assert_called_once()
+        kwargs = mock_provision.call_args.kwargs or {}
+        args = mock_provision.call_args.args
+        # Either positional or keyword
+        if args:
+            assert args[0] == "boden"
+        else:
+            assert kwargs.get("name") == "boden" or kwargs.get("agent_name") == "boden"
+        assert kwargs.get("skip_dns_confirm") is True or "skip_dns_confirm=True" in str(
+            mock_provision.call_args
+        )
