@@ -3,11 +3,10 @@
 Each command is exposed as a separate typer app via [project.scripts].
 All commands read BSKY_HANDLE and BSKY_PASSWORD from env.
 """
+
 from __future__ import annotations
 
 import os
-import sys
-from pathlib import Path
 
 import typer
 from atproto import Client

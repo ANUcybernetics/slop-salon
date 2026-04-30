@@ -3,6 +3,7 @@
 Strategy: each command is a typer app; we invoke via CliRunner and
 mock atproto.Client at the import site so no real HTTP happens.
 """
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
@@ -35,9 +36,7 @@ def test_post_text_only(bsky_env, mock_atproto_client):
     result = runner.invoke(post_app, ["--text", "hello world"])
 
     assert result.exit_code == 0
-    mock_atproto_client.login.assert_called_once_with(
-        "boden.slopsalon.art", "test-password"
-    )
+    mock_atproto_client.login.assert_called_once_with("boden.slopsalon.art", "test-password")
     mock_atproto_client.send_post.assert_called_once()
     args, kwargs = mock_atproto_client.send_post.call_args
     assert kwargs.get("text") == "hello world" or (args and args[0] == "hello world")
@@ -48,6 +47,7 @@ def test_post_requires_handle_env(monkeypatch, mock_atproto_client):
     monkeypatch.setenv("BSKY_PASSWORD", "test-password")
 
     from slop_studio.tools.bsky import post_app
+
     result = runner.invoke(post_app, ["--text", "hello"])
 
     assert result.exit_code != 0
@@ -59,6 +59,7 @@ def test_post_requires_password_env(monkeypatch, mock_atproto_client):
     monkeypatch.delenv("BSKY_PASSWORD", raising=False)
 
     from slop_studio.tools.bsky import post_app
+
     result = runner.invoke(post_app, ["--text", "hello"])
 
     assert result.exit_code != 0

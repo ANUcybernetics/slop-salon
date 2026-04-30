@@ -29,6 +29,7 @@ replicate-run = "slop_studio.tools.replicate_run:app"
 dev = [
     "pytest>=8",
     "pytest-httpx>=0.30",
+    "ruff>=0.5",
 ]
 
 [build-system]
