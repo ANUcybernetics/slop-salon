@@ -39,6 +39,79 @@ def test_resolve_secrets_raises_on_fnox_failure():
             resolve_secrets_via_fnox("nonexistent")
 
 
+def test_apt_install_cmd_uses_required_packages():
+    from slop_salon.provision import _build_apt_install_cmd
+
+    cmd = _build_apt_install_cmd()
+    assert "apt-get update" in cmd
+    assert "apt-get install -y" in cmd
+    for pkg in ("git", "imagemagick", "ffmpeg", "python3.14"):
+        assert pkg in cmd
+
+
+def test_uv_install_cmd_installs_uv_and_slop_salon():
+    from slop_salon.provision import _build_uv_and_slop_install_cmd
+
+    cmd = _build_uv_and_slop_install_cmd()
+    assert "astral.sh/uv/install.sh" in cmd
+    assert "uv tool install" in cmd
+    assert "ANUcybernetics/slop-salon" in cmd
+
+
+def test_clone_and_symlink_cmd_includes_repo_and_symlink():
+    from slop_salon.provision import _build_clone_and_symlink_cmd
+
+    cmd = _build_clone_and_symlink_cmd("boden", "https://x@github.com/y/z.git")
+    assert "git clone" in cmd
+    assert "~/slop-salon-boden" in cmd
+    assert "ln -sf ~/slop-salon-boden/slop-tick ~/.local/bin/slop-tick" in cmd
+
+
+def test_pre_commit_install_cmd_uses_uv_not_pip():
+    from slop_salon.provision import _build_pre_commit_install_cmd
+
+    cmd = _build_pre_commit_install_cmd("boden")
+    assert "uv tool install pre-commit" in cmd
+    assert "pip install" not in cmd
+    assert "pre-commit install" in cmd
+
+
+def test_git_config_cmd_chmods_credentials():
+    from slop_salon.provision import _build_git_config_cmd
+
+    cmd = _build_git_config_cmd("boden", "ghp_secret")
+    assert "git config user.name" in cmd
+    assert "ghp_secret@github.com" in cmd
+    assert "chmod 600 ~/.git-credentials" in cmd
+
+
+def test_install_crontab_cmd_pipes_text_to_crontab():
+    from slop_salon.provision import _build_install_crontab_cmd
+
+    cmd = _build_install_crontab_cmd("AGENT_NAME=boden\n*/30 * * * * tick")
+    assert "| crontab -" in cmd
+    assert "AGENT_NAME=boden" in cmd
+
+
+def test_build_template_files_interpolates_placeholders(tmp_path):
+    from slop_salon.provision import _build_template_files
+
+    templates_dir = tmp_path / "templates"
+    templates_dir.mkdir()
+    (templates_dir / "CLAUDE.md").write_text("Hi {{name}} ({{handle}})")
+    (templates_dir / "SIBLINGS.md").write_text("Sibling: {{sibling_name}}")
+    soul = tmp_path / "SOUL.md"
+    soul.write_text("# Constitution")
+
+    files = _build_template_files(
+        templates_dir, soul, "boden", "boden.slopsalon.art", "other", "other.slopsalon.art"
+    )
+
+    assert files["SOUL.md"] == "# Constitution"
+    assert files["CLAUDE.md"] == "Hi boden (boden.slopsalon.art)"
+    assert files["SIBLINGS.md"] == "Sibling: other"
+
+
 def test_provision_calls_steps_in_order(tmp_path, monkeypatch):
     """The provisioner orchestrates 13 steps; verify the key external calls."""
     from slop_salon import provision
