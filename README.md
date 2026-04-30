@@ -47,6 +47,8 @@ uv run slop pause boden                         # stop the cron schedule
 uv run slop resume boden                        # restart it
 ```
 
+`slop talk` blocks until the tick finishes inside the sprite (typically 30--90 s) and prints the captured stdout afterwards. There is no live streaming today --- the wait is silent. Run `slop logs <name>` in another terminal if you want to watch progress.
+
 ## Smoke test
 
 There is no E2E in CI. To smoke-test:

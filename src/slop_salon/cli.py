@@ -72,14 +72,17 @@ def logs(
     sprite_id = _require_sprite_id(config, name)
     sprites = SpritesClient()
     # `.claude/` holds session transcripts; tail the most recent.
+    # Substitute the agent name client-side rather than relying on
+    # AGENT_NAME being in the sprite's interactive-shell env.
+    quoted_name = shlex.quote(name)
     result = sprites.exec(
         sprite_id,
         [
             "bash",
             "-lc",
-            "ls -t ~/slop-salon-$AGENT_NAME/.claude/ 2>/dev/null | head -5 | "
+            f"ls -t ~/slop-salon-{quoted_name}/.claude/ 2>/dev/null | head -5 | "
             'while read f; do echo "=== $f ==="; '
-            'cat ~/slop-salon-$AGENT_NAME/.claude/"$f"; done',
+            f'cat ~/slop-salon-{quoted_name}/.claude/"$f"; done',
         ],
     )
     typer.echo(result.stdout)
@@ -101,12 +104,14 @@ def diff(
     config = _config(config_path)
     sprite_id = _require_sprite_id(config, name)
     sprites = SpritesClient()
+    quoted_name = shlex.quote(name)
+    quoted_since = shlex.quote(since)
     result = sprites.exec(
         sprite_id,
         [
             "bash",
             "-lc",
-            f"cd ~/slop-salon-$AGENT_NAME && git log --since='{since}' --stat -p",
+            f"cd ~/slop-salon-{quoted_name} && git log --since={quoted_since} --stat -p",
         ],
     )
     typer.echo(result.stdout)

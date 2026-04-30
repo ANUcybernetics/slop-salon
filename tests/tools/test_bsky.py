@@ -23,10 +23,20 @@ def bsky_env(monkeypatch):
 
 @pytest.fixture
 def mock_atproto_client():
-    """Yield a mocked atproto.Client. Patches at the bsky module import path."""
-    with patch("slop_salon.tools.bsky.Client") as mock_class:
-        instance = MagicMock()
-        mock_class.return_value = instance
+    """Yield a mocked atproto.Client.
+
+    `autospec=True` traverses the real Client signatures, so passing a
+    non-existent kwarg (e.g. `reply` instead of `reply_to`) to a mocked
+    method raises immediately --- catching the kind of API drift that a
+    plain MagicMock silently absorbs.
+
+    `client.app` is patched to an unrestricted MagicMock because atproto
+    builds the `app.bsky.*` namespace dynamically at runtime; it isn't on
+    the class, so autospec can't see it.
+    """
+    with patch("slop_salon.tools.bsky.Client", autospec=True) as mock_class:
+        instance = mock_class.return_value
+        instance.app = MagicMock()
         yield instance
 
 

@@ -167,17 +167,23 @@ def provision_agent(
     )
 
     typer.echo("[9/13] pre-commit install")
-    _exec(f"cd ~/slop-salon-{name} && pip install pre-commit && pre-commit install")
+    _exec(
+        f"~/.local/bin/uv tool install pre-commit && cd ~/slop-salon-{name} && pre-commit install"
+    )
 
     typer.echo("[10/13] Env vars already pushed via create_sprite")
 
     typer.echo("[11/13] Configuring git in sprite")
+    # Token stored plain-text in ~/.git-credentials. Sprite is single-tenant
+    # so the blast radius is contained, but chmod 600 minimises accidental
+    # exposure. A cleaner long-term fix is `gh auth git-credential`.
     _exec(
         f"cd ~/slop-salon-{name} && "
         f"git config user.name {shlex.quote(name)} && "
         f"git config user.email {shlex.quote(f'{name}@slopsalon.art')} && "
         "git config credential.helper store && "
-        f"echo 'https://{gh_token}@github.com' > ~/.git-credentials"
+        f"echo 'https://{gh_token}@github.com' > ~/.git-credentials && "
+        "chmod 600 ~/.git-credentials"
     )
 
     typer.echo("[12/13] Installing crontab")
