@@ -13,6 +13,8 @@ Subcommands:
 
 from __future__ import annotations
 
+import shlex
+
 import typer
 
 from slop_studio.config import load_config
@@ -175,3 +177,25 @@ def resume(
         ["bash", "-lc", "crontab ~/.crontab.paused && echo resumed"],
     )
     typer.echo(result.stdout.strip() or "resumed")
+
+
+@app.command()
+def talk(
+    name: str = typer.Argument(..., help="Agent name"),
+    prompt: str = typer.Argument(..., help="One-shot prompt for the agent"),
+    config_path: str = typer.Option(None, "--config"),
+):
+    """Send a one-shot stateless prompt to an agent. Runs as a tick."""
+    config = _config(config_path)
+    sprite_id = _require_sprite_id(config, name)
+    sprites = SpritesClient()
+    quoted = shlex.quote(prompt)
+    result = sprites.exec(
+        sprite_id,
+        ["bash", "-lc", f"slop-tick {quoted}"],
+    )
+    typer.echo(result.stdout)
+    if result.stderr:
+        typer.echo(result.stderr, err=True)
+    if result.exit_code != 0:
+        raise typer.Exit(code=result.exit_code)

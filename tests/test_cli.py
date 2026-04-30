@@ -147,3 +147,21 @@ def test_resume_reinstalls_crontab(fake_config):
         assert result.exit_code == 0, result.output
         cmd = instance.exec.call_args[0][1]
         assert any("crontab" in part for part in cmd)
+
+
+def test_talk_runs_slop_tick_with_prompt(fake_config):
+    with patch("slop_studio.cli.SpritesClient") as mock_class:
+        instance = MagicMock()
+        instance.exec.return_value = MagicMock(stdout="(claude output)", stderr="", exit_code=0)
+        mock_class.return_value = instance
+
+        result = runner.invoke(app, ["talk", "boden", "your last three posts felt similar"])
+
+        assert result.exit_code == 0, result.output
+        assert "(claude output)" in result.output
+
+        cmd = instance.exec.call_args[0][1]
+        # The prompt should appear in the exec command
+        joined = " ".join(cmd)
+        assert "slop-tick" in joined
+        assert "your last three posts felt similar" in joined
