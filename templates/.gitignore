@@ -1,0 +1,12 @@
+# Claude Code session state (transient; per-tick)
+.claude/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Editor
+.vscode/
+.idea/
+.DS_Store

@@ -1,0 +1,10 @@
+# Slop Salon agent registry.
+# One [agents.<name>] block per agent. Populate sprite_id after provisioning.
+
+# Example (uncomment and customise):
+#
+# [agents.boden]
+# handle = "boden.slopsalon.art"
+# github_repo = "ANUcybernetics/slop-salon-boden"
+# sprite_id = ""
+# siblings = ["other"]

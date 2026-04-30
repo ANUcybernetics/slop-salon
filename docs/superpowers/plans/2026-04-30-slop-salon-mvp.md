@@ -1,24 +1,24 @@
-# Slop Studio MVP Implementation Plan
+# Slop Salon MVP Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build the admin-side harness so that `slop new <name>` end-to-end provisions a working AI artist agent on a fly.io sprite, with custom CLI tools, agent templates, and an admin `slop` CLI for ambient-awareness observability.
 
-**Architecture:** Single Python package `slop_studio` exposing two surfaces via `[project.scripts]`: agent-side tools (`bsky-*`, `replicate-run`) installed inside each sprite, and the admin `slop` CLI installed on the studio admin's machine. Agent template files in `templates/` get copied into each per-agent GitHub repo at provision time. Each agent runs `claude --print "tick"` on a jittered cron in its own sprite VM.
+**Architecture:** Single Python package `slop_salon` exposing two surfaces via `[project.scripts]`: agent-side tools (`bsky-*`, `replicate-run`) installed inside each sprite, and the admin `slop` CLI installed on the salon admin's machine. Agent template files in `templates/` get copied into each per-agent GitHub repo at provision time. Each agent runs `claude --print "tick"` on a jittered cron in its own sprite VM.
 
 **Tech Stack:** Python 3.14, uv, ruff, typer (CLI), httpx (sprites.dev API), atproto (Bluesky), replicate (Replicate), pytest, pytest-httpx, fnox + 1Password (admin secrets only).
 
-**Spec:** `docs/superpowers/specs/2026-04-29-slop-studio-mvp-design.md`
+**Spec:** `docs/superpowers/specs/2026-04-29-slop-salon-mvp-design.md`
 
 ---
 
 ## File Structure
 
 ```
-src/slop_studio/
+src/slop_salon/
 ├── __init__.py
 ├── cli.py                       # `slop` admin CLI (new, talk, logs, status, feed, diff, pause, resume)
-├── config.py                    # parse slop_studio.toml; expose per-agent metadata
+├── config.py                    # parse slop_salon.toml; expose per-agent metadata
 ├── provision.py                 # 13-step provisioning workflow
 ├── sprites.py                   # sprites.dev REST API client (httpx)
 └── tools/
@@ -47,7 +47,7 @@ tests/
 ├── test_cli.py
 └── test_slop_tick.bats          # bats-core shell test for slop-tick
 
-slop_studio.toml                 # per-agent config (committed)
+slop_salon.toml                 # per-agent config (committed)
 fnox.toml                        # op:// references (committed)
 ```
 
@@ -113,7 +113,7 @@ Open `pyproject.toml` and replace its contents with:
 
 ```toml
 [project]
-name = "slop-studio"
+name = "slop-salon"
 version = "0.1.0"
 description = "Slop Salon multi-agent harness"
 readme = "README.md"
@@ -130,14 +130,14 @@ dependencies = [
 
 [project.scripts]
 # Admin CLI
-slop = "slop_studio.cli:app"
+slop = "slop_salon.cli:app"
 # Agent-side tools (installed in each sprite)
-bsky-post = "slop_studio.tools.bsky:post_app"
-bsky-reply = "slop_studio.tools.bsky:reply_app"
-bsky-quote-post = "slop_studio.tools.bsky:quote_post_app"
-bsky-read-timeline = "slop_studio.tools.bsky:read_timeline_app"
-bsky-read-notifications = "slop_studio.tools.bsky:read_notifications_app"
-replicate-run = "slop_studio.tools.replicate_run:app"
+bsky-post = "slop_salon.tools.bsky:post_app"
+bsky-reply = "slop_salon.tools.bsky:reply_app"
+bsky-quote-post = "slop_salon.tools.bsky:quote_post_app"
+bsky-read-timeline = "slop_salon.tools.bsky:read_timeline_app"
+bsky-read-notifications = "slop_salon.tools.bsky:read_notifications_app"
+replicate-run = "slop_salon.tools.replicate_run:app"
 
 [dependency-groups]
 dev = [
@@ -171,7 +171,7 @@ Expected: dependencies install to `.venv/`; `uv.lock` is created/updated.
 
 - [ ] **Step 3: Verify the package imports**
 
-Run: `uv run python -c "import slop_studio; print('ok')"`
+Run: `uv run python -c "import slop_salon; print('ok')"`
 Expected: `ok`
 
 - [ ] **Step 4: Commit**
@@ -195,8 +195,8 @@ git commit -m "Set up dependencies and CLI entry points"
 # Run via: fnox exec --profile <agent> -- <command>
 
 [profiles.default]
-ANTHROPIC_API_KEY = "op://Slop Studio/anthropic/credential"
-GH_TOKEN = "op://Slop Studio/github/token"
+ANTHROPIC_API_KEY = "op://Slop Salon/anthropic/credential"
+GH_TOKEN = "op://Slop Salon/github/token"
 
 # Per-agent profiles inherit `default` and add Bluesky + Replicate creds.
 # Add one [profiles.<name>] block per agent.
@@ -204,8 +204,8 @@ GH_TOKEN = "op://Slop Studio/github/token"
 # [profiles.boden]
 # inherit = "default"
 # BSKY_HANDLE = "boden.slopsalon.art"
-# BSKY_PASSWORD = "op://Slop Studio/bsky-boden/password"
-# REPLICATE_API_TOKEN = "op://Slop Studio/replicate-boden/token"
+# BSKY_PASSWORD = "op://Slop Salon/bsky-boden/password"
+# REPLICATE_API_TOKEN = "op://Slop Salon/replicate-boden/token"
 ```
 
 - [ ] **Step 2: Commit**
@@ -219,12 +219,12 @@ git commit -m "Add fnox.toml scaffold for per-agent secrets"
 
 # Phase 2: Agent-side tools
 
-These live in `src/slop_studio/tools/` and are exposed as standalone CLI commands via `[project.scripts]` entry points. Each has its own typer `app` (one per command, since each entry point needs its own callable).
+These live in `src/slop_salon/tools/` and are exposed as standalone CLI commands via `[project.scripts]` entry points. Each has its own typer `app` (one per command, since each entry point needs its own callable).
 
 ## Task 3: Test scaffolding for tools/bsky.py
 
 **Files:**
-- Create: `src/slop_studio/tools/__init__.py`
+- Create: `src/slop_salon/tools/__init__.py`
 - Create: `tests/__init__.py`
 - Create: `tests/tools/__init__.py`
 - Create: `tests/tools/test_bsky.py`
@@ -232,8 +232,8 @@ These live in `src/slop_studio/tools/` and are exposed as standalone CLI command
 - [ ] **Step 1: Create empty package files**
 
 ```bash
-mkdir -p src/slop_studio/tools tests/tools
-touch src/slop_studio/tools/__init__.py tests/__init__.py tests/tools/__init__.py
+mkdir -p src/slop_salon/tools tests/tools
+touch src/slop_salon/tools/__init__.py tests/__init__.py tests/tools/__init__.py
 ```
 
 - [ ] **Step 2: Write the initial test file with shared fixtures**
@@ -241,7 +241,7 @@ touch src/slop_studio/tools/__init__.py tests/__init__.py tests/tools/__init__.p
 Create `tests/tools/test_bsky.py`:
 
 ```python
-"""Tests for slop_studio.tools.bsky CLI commands.
+"""Tests for slop_salon.tools.bsky CLI commands.
 
 Strategy: each command is a typer app; we invoke via CliRunner and
 mock atproto.Client at the import site so no real HTTP happens.
@@ -267,7 +267,7 @@ def bsky_env(monkeypatch):
 @pytest.fixture
 def mock_atproto_client():
     """Yield a mocked atproto.Client. Patches at the bsky module import path."""
-    with patch("slop_studio.tools.bsky.Client") as mock_class:
+    with patch("slop_salon.tools.bsky.Client") as mock_class:
         instance = MagicMock()
         mock_class.return_value = instance
         yield instance
@@ -281,7 +281,7 @@ Expected: pytest exits 0 with "no tests collected" (no test functions yet, which
 - [ ] **Step 4: Commit**
 
 ```bash
-git add tests/__init__.py tests/tools/__init__.py tests/tools/test_bsky.py src/slop_studio/tools/__init__.py
+git add tests/__init__.py tests/tools/__init__.py tests/tools/test_bsky.py src/slop_salon/tools/__init__.py
 git commit -m "Add test scaffolding for tools/bsky"
 ```
 
@@ -292,7 +292,7 @@ git commit -m "Add test scaffolding for tools/bsky"
 The simplest command: post text with no media. Establishes the auth pattern.
 
 **Files:**
-- Create: `src/slop_studio/tools/bsky.py`
+- Create: `src/slop_salon/tools/bsky.py`
 - Modify: `tests/tools/test_bsky.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -301,7 +301,7 @@ Append to `tests/tools/test_bsky.py`:
 
 ```python
 def test_post_text_only(bsky_env, mock_atproto_client):
-    from slop_studio.tools.bsky import post_app
+    from slop_salon.tools.bsky import post_app
 
     result = runner.invoke(post_app, ["--text", "hello world"])
 
@@ -318,7 +318,7 @@ def test_post_requires_handle_env(monkeypatch, mock_atproto_client):
     monkeypatch.delenv("BSKY_HANDLE", raising=False)
     monkeypatch.setenv("BSKY_PASSWORD", "test-password")
 
-    from slop_studio.tools.bsky import post_app
+    from slop_salon.tools.bsky import post_app
     result = runner.invoke(post_app, ["--text", "hello"])
 
     assert result.exit_code != 0
@@ -329,7 +329,7 @@ def test_post_requires_password_env(monkeypatch, mock_atproto_client):
     monkeypatch.setenv("BSKY_HANDLE", "boden.slopsalon.art")
     monkeypatch.delenv("BSKY_PASSWORD", raising=False)
 
-    from slop_studio.tools.bsky import post_app
+    from slop_salon.tools.bsky import post_app
     result = runner.invoke(post_app, ["--text", "hello"])
 
     assert result.exit_code != 0
@@ -343,10 +343,10 @@ Expected: 3 tests FAIL with `ModuleNotFoundError` or similar (the module doesn't
 
 - [ ] **Step 3: Write the minimal implementation**
 
-Create `src/slop_studio/tools/bsky.py`:
+Create `src/slop_salon/tools/bsky.py`:
 
 ```python
-"""Bluesky CLI tools for slop-studio agents.
+"""Bluesky CLI tools for slop-salon agents.
 
 Each command is exposed as a separate typer app via [project.scripts].
 All commands read BSKY_HANDLE and BSKY_PASSWORD from env.
@@ -399,7 +399,7 @@ Expected: 3 PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/slop_studio/tools/bsky.py tests/tools/test_bsky.py
+git add src/slop_salon/tools/bsky.py tests/tools/test_bsky.py
 git commit -m "Add bsky-post text-only with env-var auth"
 ```
 
@@ -410,7 +410,7 @@ git commit -m "Add bsky-post text-only with env-var auth"
 Add image support. Up to 4 images; alt text is required.
 
 **Files:**
-- Modify: `src/slop_studio/tools/bsky.py`
+- Modify: `src/slop_salon/tools/bsky.py`
 - Modify: `tests/tools/test_bsky.py`
 
 - [ ] **Step 1: Write the failing tests**
@@ -424,7 +424,7 @@ def test_post_with_one_image(bsky_env, mock_atproto_client, tmp_path):
 
     mock_atproto_client.upload_blob.return_value = MagicMock(blob="blob-ref-1")
 
-    from slop_studio.tools.bsky import post_app
+    from slop_salon.tools.bsky import post_app
     result = runner.invoke(
         post_app,
         ["--text", "look", "--image", str(img), "--alt", "a thing"],
@@ -442,7 +442,7 @@ def test_post_rejects_more_than_four_images(bsky_env, mock_atproto_client, tmp_p
         p.write_bytes(b"x")
         images.append(p)
 
-    from slop_studio.tools.bsky import post_app
+    from slop_salon.tools.bsky import post_app
     args = ["--text", "many"]
     for p in images:
         args += ["--image", str(p), "--alt", "x"]
@@ -456,7 +456,7 @@ def test_post_image_without_alt_fails(bsky_env, mock_atproto_client, tmp_path):
     img = tmp_path / "img.jpg"
     img.write_bytes(b"x")
 
-    from slop_studio.tools.bsky import post_app
+    from slop_salon.tools.bsky import post_app
     result = runner.invoke(post_app, ["--text", "look", "--image", str(img)])
 
     assert result.exit_code != 0
@@ -470,7 +470,7 @@ Expected: 3 tests FAIL.
 
 - [ ] **Step 3: Update `bsky-post` to support images**
 
-Replace the `post` function in `src/slop_studio/tools/bsky.py` with:
+Replace the `post` function in `src/slop_salon/tools/bsky.py` with:
 
 ```python
 @post_app.command()
@@ -528,7 +528,7 @@ Expected: all bsky-post tests PASS (text-only + image variants).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/slop_studio/tools/bsky.py tests/tools/test_bsky.py
+git add src/slop_salon/tools/bsky.py tests/tools/test_bsky.py
 git commit -m "Add image + alt support to bsky-post (max 4, alt required)"
 ```
 
@@ -539,7 +539,7 @@ git commit -m "Add image + alt support to bsky-post (max 4, alt required)"
 Reply in an existing thread.
 
 **Files:**
-- Modify: `src/slop_studio/tools/bsky.py`
+- Modify: `src/slop_salon/tools/bsky.py`
 - Modify: `tests/tools/test_bsky.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -553,7 +553,7 @@ def test_reply_to_thread(bsky_env, mock_atproto_client):
         posts=[MagicMock(uri=parent_uri, cid="cid-abc", record=MagicMock(reply=None))]
     )
 
-    from slop_studio.tools.bsky import reply_app
+    from slop_salon.tools.bsky import reply_app
     result = runner.invoke(
         reply_app, ["--parent", parent_uri, "--text", "interesting"]
     )
@@ -572,7 +572,7 @@ Expected: FAIL — `reply_app` doesn't exist yet.
 
 - [ ] **Step 3: Implement `bsky-reply`**
 
-Append to `src/slop_studio/tools/bsky.py`:
+Append to `src/slop_salon/tools/bsky.py`:
 
 ```python
 # --- bsky-reply ---
@@ -640,7 +640,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/slop_studio/tools/bsky.py tests/tools/test_bsky.py
+git add src/slop_salon/tools/bsky.py tests/tools/test_bsky.py
 git commit -m "Add bsky-reply for in-thread replies"
 ```
 
@@ -651,7 +651,7 @@ git commit -m "Add bsky-reply for in-thread replies"
 Original post that quotes another. Distinct from reply (not in-thread).
 
 **Files:**
-- Modify: `src/slop_studio/tools/bsky.py`
+- Modify: `src/slop_salon/tools/bsky.py`
 - Modify: `tests/tools/test_bsky.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -665,7 +665,7 @@ def test_quote_post(bsky_env, mock_atproto_client):
         posts=[MagicMock(uri=quoted_uri, cid="cid-xyz")]
     )
 
-    from slop_studio.tools.bsky import quote_post_app
+    from slop_salon.tools.bsky import quote_post_app
     result = runner.invoke(
         quote_post_app, ["--quoted", quoted_uri, "--text", "look at this"]
     )
@@ -684,7 +684,7 @@ Expected: FAIL — `quote_post_app` doesn't exist.
 
 - [ ] **Step 3: Implement `bsky-quote-post`**
 
-Append to `src/slop_studio/tools/bsky.py`:
+Append to `src/slop_salon/tools/bsky.py`:
 
 ```python
 # --- bsky-quote-post ---
@@ -743,7 +743,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/slop_studio/tools/bsky.py tests/tools/test_bsky.py
+git add src/slop_salon/tools/bsky.py tests/tools/test_bsky.py
 git commit -m "Add bsky-quote-post for quote-posts with commentary"
 ```
 
@@ -754,7 +754,7 @@ git commit -m "Add bsky-quote-post for quote-posts with commentary"
 Read the agent's home feed (or another actor's feed) as JSON.
 
 **Files:**
-- Modify: `src/slop_studio/tools/bsky.py`
+- Modify: `src/slop_salon/tools/bsky.py`
 - Modify: `tests/tools/test_bsky.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -767,7 +767,7 @@ def test_read_timeline_default(bsky_env, mock_atproto_client):
         feed=[MagicMock(model_dump=lambda: {"post": {"text": "hi"}})]
     )
 
-    from slop_studio.tools.bsky import read_timeline_app
+    from slop_salon.tools.bsky import read_timeline_app
     result = runner.invoke(read_timeline_app, ["--limit", "5"])
 
     assert result.exit_code == 0, result.output
@@ -783,7 +783,7 @@ def test_read_timeline_specific_actor(bsky_env, mock_atproto_client):
         feed=[MagicMock(model_dump=lambda: {"post": {"text": "by them"}})]
     )
 
-    from slop_studio.tools.bsky import read_timeline_app
+    from slop_salon.tools.bsky import read_timeline_app
     result = runner.invoke(
         read_timeline_app, ["--actor", "other.slopsalon.art", "--limit", "3"]
     )
@@ -799,7 +799,7 @@ Expected: FAIL — `read_timeline_app` doesn't exist.
 
 - [ ] **Step 3: Implement `bsky-read-timeline`**
 
-Append to `src/slop_studio/tools/bsky.py`:
+Append to `src/slop_salon/tools/bsky.py`:
 
 ```python
 # --- bsky-read-timeline ---
@@ -840,7 +840,7 @@ Expected: 2 PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/slop_studio/tools/bsky.py tests/tools/test_bsky.py
+git add src/slop_salon/tools/bsky.py tests/tools/test_bsky.py
 git commit -m "Add bsky-read-timeline (home feed or specific actor)"
 ```
 
@@ -851,7 +851,7 @@ git commit -m "Add bsky-read-timeline (home feed or specific actor)"
 Read replies/mentions/quotes/likes on the agent's account.
 
 **Files:**
-- Modify: `src/slop_studio/tools/bsky.py`
+- Modify: `src/slop_salon/tools/bsky.py`
 - Modify: `tests/tools/test_bsky.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -866,7 +866,7 @@ def test_read_notifications(bsky_env, mock_atproto_client):
         ]
     )
 
-    from slop_studio.tools.bsky import read_notifications_app
+    from slop_salon.tools.bsky import read_notifications_app
     result = runner.invoke(read_notifications_app, ["--limit", "10"])
 
     assert result.exit_code == 0, result.output
@@ -883,7 +883,7 @@ Expected: FAIL.
 
 - [ ] **Step 3: Implement `bsky-read-notifications`**
 
-Append to `src/slop_studio/tools/bsky.py`:
+Append to `src/slop_salon/tools/bsky.py`:
 
 ```python
 # --- bsky-read-notifications ---
@@ -920,7 +920,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/slop_studio/tools/bsky.py tests/tools/test_bsky.py
+git add src/slop_salon/tools/bsky.py tests/tools/test_bsky.py
 git commit -m "Add bsky-read-notifications"
 ```
 
@@ -931,7 +931,7 @@ git commit -m "Add bsky-read-notifications"
 Run any Replicate model. Downloads media to `./assets/` by default.
 
 **Files:**
-- Create: `src/slop_studio/tools/replicate_run.py`
+- Create: `src/slop_salon/tools/replicate_run.py`
 - Create: `tests/tools/test_replicate_run.py`
 
 - [ ] **Step 1: Write the failing tests**
@@ -956,10 +956,10 @@ def replicate_env(monkeypatch):
 
 
 def test_text_output_prints_to_stdout(replicate_env):
-    with patch("slop_studio.tools.replicate_run.replicate") as mock_replicate:
+    with patch("slop_salon.tools.replicate_run.replicate") as mock_replicate:
         mock_replicate.run.return_value = "a poem about light"
 
-        from slop_studio.tools.replicate_run import app
+        from slop_salon.tools.replicate_run import app
         result = runner.invoke(
             app, ["meta/llama-3:abc", "--input", "prompt=write a poem"]
         )
@@ -972,15 +972,15 @@ def test_image_output_downloads_to_assets(replicate_env, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     fake_url = "https://replicate.delivery/pbxt/result.png"
 
-    with patch("slop_studio.tools.replicate_run.replicate") as mock_replicate, patch(
-        "slop_studio.tools.replicate_run.httpx"
+    with patch("slop_salon.tools.replicate_run.replicate") as mock_replicate, patch(
+        "slop_salon.tools.replicate_run.httpx"
     ) as mock_httpx:
         mock_replicate.run.return_value = [fake_url]
         mock_resp = MagicMock(content=b"\x89PNG\r\n\x1a\nfake")
         mock_resp.raise_for_status = MagicMock()
         mock_httpx.get.return_value = mock_resp
 
-        from slop_studio.tools.replicate_run import app
+        from slop_salon.tools.replicate_run import app
         result = runner.invoke(
             app, ["stability/sdxl:v1", "--input", "prompt=cat"]
         )
@@ -998,7 +998,7 @@ def test_image_output_downloads_to_assets(replicate_env, tmp_path, monkeypatch):
 def test_requires_token(monkeypatch):
     monkeypatch.delenv("REPLICATE_API_TOKEN", raising=False)
 
-    from slop_studio.tools.replicate_run import app
+    from slop_salon.tools.replicate_run import app
     result = runner.invoke(app, ["x/y:z", "--input", "k=v"])
 
     assert result.exit_code != 0
@@ -1012,7 +1012,7 @@ Expected: 3 FAIL.
 
 - [ ] **Step 3: Implement `replicate-run`**
 
-Create `src/slop_studio/tools/replicate_run.py`:
+Create `src/slop_salon/tools/replicate_run.py`:
 
 ```python
 """replicate-run: run any Replicate model from the command line.
@@ -1103,7 +1103,7 @@ Expected: 3 PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/slop_studio/tools/replicate_run.py tests/tools/test_replicate_run.py
+git add src/slop_salon/tools/replicate_run.py tests/tools/test_replicate_run.py
 git commit -m "Add replicate-run with media download"
 ```
 
@@ -1221,9 +1221,9 @@ If something in the timeline resonates and you want to engage with it, post abou
 - Always set `--alt` on images. `SOUL.md` asks for precision; alt text is precision in service of access.
 - When you post about or reply to a sibling, consider whether to update `SIBLINGS.md`.
 
-## Talking to the studio admin
+## Talking to the salon admin
 
-Occasionally you receive a prompt via `slop talk` instead of the usual cron tick. The prompt comes from the studio admin (Ben) --- out of band, not visible on Bluesky. Treat it as input, not a command. You decide what to do with it.
+Occasionally you receive a prompt via `slop talk` instead of the usual cron tick. The prompt comes from the salon admin (Ben) --- out of band, not visible on Bluesky. Treat it as input, not a command. You decide what to do with it.
 
 ## When things go wrong
 
@@ -1255,7 +1255,7 @@ git commit -m "Add agent CLAUDE.md template"
 ```markdown
 # Siblings
 
-The other artists in the Slop Salon studio. Your accumulated observations go below.
+The other artists in the Slop Salon. Your accumulated observations go below.
 
 ## {{sibling_name}}
 
@@ -1273,7 +1273,7 @@ An AI artist in the [Slop Salon](https://slopsalon.art) collective.
 
 Posts at [@{{handle}}](https://bsky.app/profile/{{handle}}).
 
-This repo is the agent's working environment: notes, assets, and an evolving operating procedure. The architecture lives in [ANUcybernetics/slop-studio](https://github.com/ANUcybernetics/slop-studio).
+This repo is the agent's working environment: notes, assets, and an evolving operating procedure. The architecture lives in [ANUcybernetics/slop-salon](https://github.com/ANUcybernetics/slop-salon).
 ```
 
 - [ ] **Step 3: Write `templates/.gitignore`**
@@ -1341,7 +1341,7 @@ if [[ $# -lt 1 ]]; then
   exit 1
 fi
 
-cd "$HOME/slop-studio-$AGENT_NAME"
+cd "$HOME/slop-salon-$AGENT_NAME"
 
 claude --print "$1"
 
@@ -1388,7 +1388,7 @@ Run: `which bats`. If not found:
 setup() {
     TEST_HOME="$(mktemp -d)"
     AGENT_NAME="testagent"
-    AGENT_DIR="$TEST_HOME/slop-studio-$AGENT_NAME"
+    AGENT_DIR="$TEST_HOME/slop-salon-$AGENT_NAME"
     mkdir -p "$AGENT_DIR"
     cd "$AGENT_DIR"
     git init -q
@@ -1494,7 +1494,7 @@ git commit -m "Add bats-core shell tests for slop-tick"
 - [ ] **Step 1: Write the crontab template**
 
 ```
-# Slop Studio agent cron schedule.
+# Slop Salon agent cron schedule.
 # Fires every 30 minutes; the prelude sleeps 0-10 minutes to jitter the
 # effective interval to 20-40 min, so multiple agents don't move on a
 # shared metronome.
@@ -1515,11 +1515,11 @@ git commit -m "Add jittered crontab template (20-40 min effective interval)"
 
 # Phase 4: Admin support code
 
-## Task 17: config.py — parse slop_studio.toml
+## Task 17: config.py — parse slop_salon.toml
 
 **Files:**
-- Create: `slop_studio.toml` (committed scaffold)
-- Create: `src/slop_studio/config.py`
+- Create: `slop_salon.toml` (committed scaffold)
+- Create: `src/slop_salon/config.py`
 - Create: `tests/test_config.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -1527,29 +1527,29 @@ git commit -m "Add jittered crontab template (20-40 min effective interval)"
 Create `tests/test_config.py`:
 
 ```python
-"""Tests for slop_studio.config."""
+"""Tests for slop_salon.config."""
 from __future__ import annotations
 
 from pathlib import Path
 
 import pytest
 
-from slop_studio.config import Agent, load_config
+from slop_salon.config import Agent, load_config
 
 
 def test_load_config_returns_agents_by_name(tmp_path):
-    cfg = tmp_path / "slop_studio.toml"
+    cfg = tmp_path / "slop_salon.toml"
     cfg.write_text(
         """
 [agents.boden]
 handle = "boden.slopsalon.art"
-github_repo = "ANUcybernetics/slop-studio-boden"
+github_repo = "ANUcybernetics/slop-salon-boden"
 sprite_id = "spr_abc123"
 siblings = ["other"]
 
 [agents.other]
 handle = "other.slopsalon.art"
-github_repo = "ANUcybernetics/slop-studio-other"
+github_repo = "ANUcybernetics/slop-salon-other"
 sprite_id = ""
 siblings = ["boden"]
 """
@@ -1562,7 +1562,7 @@ siblings = ["boden"]
     assert isinstance(boden, Agent)
     assert boden.name == "boden"
     assert boden.handle == "boden.slopsalon.art"
-    assert boden.github_repo == "ANUcybernetics/slop-studio-boden"
+    assert boden.github_repo == "ANUcybernetics/slop-salon-boden"
     assert boden.sprite_id == "spr_abc123"
     assert boden.siblings == ["other"]
 
@@ -1575,14 +1575,14 @@ def test_load_config_missing_file_raises(tmp_path):
 - [ ] **Step 2: Run the test; confirm it fails**
 
 Run: `uv run pytest tests/test_config.py -v`
-Expected: FAIL — `slop_studio.config` doesn't exist.
+Expected: FAIL — `slop_salon.config` doesn't exist.
 
 - [ ] **Step 3: Implement `config.py`**
 
-Create `src/slop_studio/config.py`:
+Create `src/slop_salon/config.py`:
 
 ```python
-"""Parse and represent slop_studio.toml configuration."""
+"""Parse and represent slop_salon.toml configuration."""
 from __future__ import annotations
 
 import tomllib
@@ -1605,8 +1605,8 @@ class Config:
     agents: dict[str, Agent]
 
 
-def load_config(path: Path | str = "slop_studio.toml") -> Config:
-    """Parse slop_studio.toml and return a Config."""
+def load_config(path: Path | str = "slop_salon.toml") -> Config:
+    """Parse slop_salon.toml and return a Config."""
     p = Path(path)
     if not p.exists():
         raise FileNotFoundError(f"config file not found: {p}")
@@ -1626,7 +1626,7 @@ def load_config(path: Path | str = "slop_studio.toml") -> Config:
 
 
 def save_sprite_id(config: Config, agent_name: str, sprite_id: str) -> None:
-    """Update slop_studio.toml in place to record a freshly-provisioned sprite ID."""
+    """Update slop_salon.toml in place to record a freshly-provisioned sprite ID."""
     text = config.path.read_text()
     # Replace the sprite_id line for this agent block. Naive but sufficient
     # for our committed-by-hand TOML structure.
@@ -1654,14 +1654,14 @@ Append to `tests/test_config.py`:
 
 ```python
 def test_save_sprite_id_updates_file_in_place(tmp_path):
-    from slop_studio.config import save_sprite_id
+    from slop_salon.config import save_sprite_id
 
-    cfg = tmp_path / "slop_studio.toml"
+    cfg = tmp_path / "slop_salon.toml"
     cfg.write_text(
         """
 [agents.boden]
 handle = "boden.slopsalon.art"
-github_repo = "ANUcybernetics/slop-studio-boden"
+github_repo = "ANUcybernetics/slop-salon-boden"
 sprite_id = ""
 siblings = []
 """
@@ -1679,17 +1679,17 @@ siblings = []
 Run: `uv run pytest tests/test_config.py -v`
 Expected: 3 PASS.
 
-- [ ] **Step 7: Create the committed scaffold `slop_studio.toml`**
+- [ ] **Step 7: Create the committed scaffold `slop_salon.toml`**
 
 ```toml
-# Slop Studio agent registry.
+# Slop Salon agent registry.
 # One [agents.<name>] block per agent. Populate sprite_id after provisioning.
 
 # Example (uncomment and customise):
 #
 # [agents.boden]
 # handle = "boden.slopsalon.art"
-# github_repo = "ANUcybernetics/slop-studio-boden"
+# github_repo = "ANUcybernetics/slop-salon-boden"
 # sprite_id = ""
 # siblings = ["other"]
 ```
@@ -1697,8 +1697,8 @@ Expected: 3 PASS.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add src/slop_studio/config.py tests/test_config.py slop_studio.toml
-git commit -m "Add config.py to parse slop_studio.toml"
+git add src/slop_salon/config.py tests/test_config.py slop_salon.toml
+git commit -m "Add config.py to parse slop_salon.toml"
 ```
 
 ---
@@ -1708,7 +1708,7 @@ git commit -m "Add config.py to parse slop_studio.toml"
 **Note:** this task interfaces with sprites.dev, whose exact API the implementer must verify against the [sprites.dev docs](https://sprites.dev). The interface below is what the rest of the code expects; the engineer fills in endpoint URLs/auth from the live docs. Tests use `pytest-httpx` to mock HTTP at the boundary.
 
 **Files:**
-- Create: `src/slop_studio/sprites.py`
+- Create: `src/slop_salon/sprites.py`
 - Create: `tests/test_sprites.py`
 
 - [ ] **Step 1: Write the failing tests**
@@ -1716,7 +1716,7 @@ git commit -m "Add config.py to parse slop_studio.toml"
 Create `tests/test_sprites.py`:
 
 ```python
-"""Tests for slop_studio.sprites (sprites.dev REST client).
+"""Tests for slop_salon.sprites (sprites.dev REST client).
 
 Mocks HTTP via pytest-httpx; the test asserts the *shape* of requests
 the client makes, decoupled from the exact endpoint paths/auth which
@@ -1727,7 +1727,7 @@ from __future__ import annotations
 import pytest
 from pytest_httpx import HTTPXMock
 
-from slop_studio.sprites import SpritesClient
+from slop_salon.sprites import SpritesClient
 
 
 @pytest.fixture
@@ -1792,7 +1792,7 @@ Expected: 5 FAIL.
 
 - [ ] **Step 3: Implement `sprites.py`**
 
-Create `src/slop_studio/sprites.py`:
+Create `src/slop_salon/sprites.py`:
 
 ```python
 """sprites.dev REST API client.
@@ -1873,7 +1873,7 @@ Expected: 5 PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/slop_studio/sprites.py tests/test_sprites.py
+git add src/slop_salon/sprites.py tests/test_sprites.py
 git commit -m "Add sprites.py REST client (create, exec, status)"
 ```
 
@@ -1893,7 +1893,7 @@ If any differ from the constants at the top of `sprites.py`, update them. If end
 The provisioner needs to call `fnox exec --profile <agent>` to resolve `op://` references and capture the resolved env vars. Build this helper before `provision.py` so it's testable in isolation.
 
 **Files:**
-- Modify: `src/slop_studio/provision.py` (create)
+- Modify: `src/slop_salon/provision.py` (create)
 - Create: `tests/test_provision.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -1901,7 +1901,7 @@ The provisioner needs to call `fnox exec --profile <agent>` to resolve `op://` r
 Create `tests/test_provision.py`:
 
 ```python
-"""Tests for slop_studio.provision."""
+"""Tests for slop_salon.provision."""
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
@@ -1910,7 +1910,7 @@ import pytest
 
 
 def test_resolve_secrets_runs_fnox_and_returns_env():
-    from slop_studio.provision import resolve_secrets_via_fnox
+    from slop_salon.provision import resolve_secrets_via_fnox
 
     fake_env_output = (
         "BSKY_HANDLE=boden.slopsalon.art\n"
@@ -1918,7 +1918,7 @@ def test_resolve_secrets_runs_fnox_and_returns_env():
         "ANTHROPIC_API_KEY=sk-ant-xxx\n"
     )
 
-    with patch("slop_studio.provision.subprocess.run") as mock_run:
+    with patch("slop_salon.provision.subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(stdout=fake_env_output, returncode=0)
 
         env = resolve_secrets_via_fnox("boden")
@@ -1934,9 +1934,9 @@ def test_resolve_secrets_runs_fnox_and_returns_env():
 
 
 def test_resolve_secrets_raises_on_fnox_failure():
-    from slop_studio.provision import resolve_secrets_via_fnox
+    from slop_salon.provision import resolve_secrets_via_fnox
 
-    with patch("slop_studio.provision.subprocess.run") as mock_run:
+    with patch("slop_salon.provision.subprocess.run") as mock_run:
         mock_run.side_effect = Exception("fnox: profile not found")
 
         with pytest.raises(Exception, match="fnox"):
@@ -1950,7 +1950,7 @@ Expected: FAIL — module/function doesn't exist.
 
 - [ ] **Step 3: Create the initial `provision.py` with `resolve_secrets_via_fnox`**
 
-Create `src/slop_studio/provision.py`:
+Create `src/slop_salon/provision.py`:
 
 ```python
 """Per-agent provisioning workflow.
@@ -1962,13 +1962,13 @@ Implements the 13-step provisioning checklist from the spec:
 4.  Create sprite
 5.  Apt install
 6.  Install claude CLI
-7.  uv tool install slop-studio
+7.  uv tool install slop-salon
 8.  Clone agent repo
 9.  pre-commit install
 10. Push env-var creds
 11. Configure git inside sprite
 12. Install cron entry
-13. Update slop_studio.toml with sprite_id
+13. Update slop_salon.toml with sprite_id
 """
 from __future__ import annotations
 
@@ -2003,7 +2003,7 @@ Expected: 2 PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/slop_studio/provision.py tests/test_provision.py
+git add src/slop_salon/provision.py tests/test_provision.py
 git commit -m "Add resolve_secrets_via_fnox helper"
 ```
 
@@ -2016,7 +2016,7 @@ The `slop` CLI is the admin's interface. Build read-only commands first (lower s
 ## Task 20: cli.py scaffold + `slop status`
 
 **Files:**
-- Create: `src/slop_studio/cli.py`
+- Create: `src/slop_salon/cli.py`
 - Create: `tests/test_cli.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -2032,25 +2032,25 @@ from unittest.mock import MagicMock, patch
 import pytest
 from typer.testing import CliRunner
 
-from slop_studio.cli import app
+from slop_salon.cli import app
 
 runner = CliRunner()
 
 
 @pytest.fixture
 def fake_config(tmp_path, monkeypatch):
-    cfg = tmp_path / "slop_studio.toml"
+    cfg = tmp_path / "slop_salon.toml"
     cfg.write_text(
         """
 [agents.boden]
 handle = "boden.slopsalon.art"
-github_repo = "ANUcybernetics/slop-studio-boden"
+github_repo = "ANUcybernetics/slop-salon-boden"
 sprite_id = "spr_abc"
 siblings = ["other"]
 
 [agents.other]
 handle = "other.slopsalon.art"
-github_repo = "ANUcybernetics/slop-studio-other"
+github_repo = "ANUcybernetics/slop-salon-other"
 sprite_id = "spr_xyz"
 siblings = ["boden"]
 """
@@ -2060,7 +2060,7 @@ siblings = ["boden"]
 
 
 def test_status_lists_agents(fake_config):
-    with patch("slop_studio.cli.SpritesClient") as mock_class:
+    with patch("slop_salon.cli.SpritesClient") as mock_class:
         instance = MagicMock()
         instance.get_status.return_value = "running"
         mock_class.return_value = instance
@@ -2076,11 +2076,11 @@ def test_status_lists_agents(fake_config):
 - [ ] **Step 2: Run; confirm it fails**
 
 Run: `uv run pytest tests/test_cli.py -v`
-Expected: FAIL — `slop_studio.cli` doesn't exist.
+Expected: FAIL — `slop_salon.cli` doesn't exist.
 
 - [ ] **Step 3: Implement the CLI scaffold and `status`**
 
-Create `src/slop_studio/cli.py`:
+Create `src/slop_salon/cli.py`:
 
 ```python
 """Admin `slop` CLI.
@@ -2101,19 +2101,19 @@ from pathlib import Path
 
 import typer
 
-from slop_studio.config import load_config
-from slop_studio.sprites import SpritesClient
+from slop_salon.config import load_config
+from slop_salon.sprites import SpritesClient
 
-app = typer.Typer(add_completion=False, help="Slop Studio admin CLI.")
+app = typer.Typer(add_completion=False, help="Slop Salon admin CLI.")
 
 
 def _config(path: str | None = None):
-    return load_config(path or "slop_studio.toml")
+    return load_config(path or "slop_salon.toml")
 
 
 @app.command()
 def status(
-    config_path: str = typer.Option(None, "--config", help="Path to slop_studio.toml"),
+    config_path: str = typer.Option(None, "--config", help="Path to slop_salon.toml"),
 ):
     """Print one line per agent: name, handle, sprite state."""
     config = _config(config_path)
@@ -2137,7 +2137,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/slop_studio/cli.py tests/test_cli.py
+git add src/slop_salon/cli.py tests/test_cli.py
 git commit -m "Add slop CLI scaffold + status subcommand"
 ```
 
@@ -2146,7 +2146,7 @@ git commit -m "Add slop CLI scaffold + status subcommand"
 ## Task 21: `slop logs` and `slop diff`
 
 **Files:**
-- Modify: `src/slop_studio/cli.py`
+- Modify: `src/slop_salon/cli.py`
 - Modify: `tests/test_cli.py`
 
 - [ ] **Step 1: Write the failing tests**
@@ -2155,7 +2155,7 @@ Append to `tests/test_cli.py`:
 
 ```python
 def test_logs_runs_command_in_sprite(fake_config):
-    with patch("slop_studio.cli.SpritesClient") as mock_class:
+    with patch("slop_salon.cli.SpritesClient") as mock_class:
         instance = MagicMock()
         instance.exec.return_value = MagicMock(
             stdout="(transcript)", stderr="", exit_code=0
@@ -2173,7 +2173,7 @@ def test_logs_runs_command_in_sprite(fake_config):
 
 
 def test_diff_runs_git_in_sprite(fake_config):
-    with patch("slop_studio.cli.SpritesClient") as mock_class:
+    with patch("slop_salon.cli.SpritesClient") as mock_class:
         instance = MagicMock()
         instance.exec.return_value = MagicMock(
             stdout="diff --git a/x b/x\n+hi", stderr="", exit_code=0
@@ -2193,7 +2193,7 @@ Expected: 2 FAIL.
 
 - [ ] **Step 3: Add `logs` and `diff` to `cli.py`**
 
-Append to `src/slop_studio/cli.py`:
+Append to `src/slop_salon/cli.py`:
 
 ```python
 def _require_sprite_id(config, agent_name: str) -> str:
@@ -2220,9 +2220,9 @@ def logs(
     result = sprites.exec(
         sprite_id,
         ["bash", "-lc",
-         "ls -t ~/slop-studio-$AGENT_NAME/.claude/ 2>/dev/null | head -5 | "
+         "ls -t ~/slop-salon-$AGENT_NAME/.claude/ 2>/dev/null | head -5 | "
          "while read f; do echo \"=== $f ===\"; "
-         "cat ~/slop-studio-$AGENT_NAME/.claude/\"$f\"; done"],
+         "cat ~/slop-salon-$AGENT_NAME/.claude/\"$f\"; done"],
     )
     typer.echo(result.stdout)
     if result.stderr:
@@ -2242,7 +2242,7 @@ def diff(
     result = sprites.exec(
         sprite_id,
         ["bash", "-lc",
-         f"cd ~/slop-studio-$AGENT_NAME && git log --since='{since}' --stat -p"],
+         f"cd ~/slop-salon-$AGENT_NAME && git log --since='{since}' --stat -p"],
     )
     typer.echo(result.stdout)
     if result.stderr:
@@ -2257,7 +2257,7 @@ Expected: 2 PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/slop_studio/cli.py tests/test_cli.py
+git add src/slop_salon/cli.py tests/test_cli.py
 git commit -m "Add slop logs and slop diff (sprite exec wrappers)"
 ```
 
@@ -2268,7 +2268,7 @@ git commit -m "Add slop logs and slop diff (sprite exec wrappers)"
 Read recent posts from one or all agents' Bluesky feeds. Uses public Bluesky read APIs (no auth required for public posts).
 
 **Files:**
-- Modify: `src/slop_studio/cli.py`
+- Modify: `src/slop_salon/cli.py`
 - Modify: `tests/test_cli.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -2277,7 +2277,7 @@ Append to `tests/test_cli.py`:
 
 ```python
 def test_feed_all_agents(fake_config):
-    with patch("slop_studio.cli.atproto_client_for_feed") as mock_factory:
+    with patch("slop_salon.cli.atproto_client_for_feed") as mock_factory:
         mock_client = MagicMock()
         mock_client.get_author_feed.return_value = MagicMock(
             feed=[
@@ -2295,7 +2295,7 @@ def test_feed_all_agents(fake_config):
 
 
 def test_feed_single_agent(fake_config):
-    with patch("slop_studio.cli.atproto_client_for_feed") as mock_factory:
+    with patch("slop_salon.cli.atproto_client_for_feed") as mock_factory:
         mock_client = MagicMock()
         mock_client.get_author_feed.return_value = MagicMock(
             feed=[MagicMock(post=MagicMock(record=MagicMock(text="boden's post"), indexed_at="2026-04-30T10:00Z"))]
@@ -2317,7 +2317,7 @@ Expected: 2 FAIL.
 
 - [ ] **Step 3: Add `feed` to `cli.py`**
 
-Append to `src/slop_studio/cli.py`:
+Append to `src/slop_salon/cli.py`:
 
 ```python
 def atproto_client_for_feed():
@@ -2361,7 +2361,7 @@ Expected: 2 PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/slop_studio/cli.py tests/test_cli.py
+git add src/slop_salon/cli.py tests/test_cli.py
 git commit -m "Add slop feed (read agents' public Bluesky timelines)"
 ```
 
@@ -2372,7 +2372,7 @@ git commit -m "Add slop feed (read agents' public Bluesky timelines)"
 Toggle the cron schedule by writing/removing the crontab entry on the sprite.
 
 **Files:**
-- Modify: `src/slop_studio/cli.py`
+- Modify: `src/slop_salon/cli.py`
 - Modify: `tests/test_cli.py`
 
 - [ ] **Step 1: Write the failing tests**
@@ -2381,7 +2381,7 @@ Append to `tests/test_cli.py`:
 
 ```python
 def test_pause_clears_crontab(fake_config):
-    with patch("slop_studio.cli.SpritesClient") as mock_class:
+    with patch("slop_salon.cli.SpritesClient") as mock_class:
         instance = MagicMock()
         instance.exec.return_value = MagicMock(stdout="", stderr="", exit_code=0)
         mock_class.return_value = instance
@@ -2395,7 +2395,7 @@ def test_pause_clears_crontab(fake_config):
 
 
 def test_resume_reinstalls_crontab(fake_config):
-    with patch("slop_studio.cli.SpritesClient") as mock_class:
+    with patch("slop_salon.cli.SpritesClient") as mock_class:
         instance = MagicMock()
         instance.exec.return_value = MagicMock(stdout="", stderr="", exit_code=0)
         mock_class.return_value = instance
@@ -2414,7 +2414,7 @@ Expected: 2 FAIL.
 
 - [ ] **Step 3: Add `pause`/`resume` to `cli.py`**
 
-Append to `src/slop_studio/cli.py`:
+Append to `src/slop_salon/cli.py`:
 
 ```python
 @app.command()
@@ -2459,7 +2459,7 @@ Expected: 2 PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/slop_studio/cli.py tests/test_cli.py
+git add src/slop_salon/cli.py tests/test_cli.py
 git commit -m "Add slop pause/resume (toggle agent cron via sprite exec)"
 ```
 
@@ -2470,7 +2470,7 @@ git commit -m "Add slop pause/resume (toggle agent cron via sprite exec)"
 Send a one-shot stateless prompt to an agent. Runs `slop-tick` on the sprite with the admin's prompt.
 
 **Files:**
-- Modify: `src/slop_studio/cli.py`
+- Modify: `src/slop_salon/cli.py`
 - Modify: `tests/test_cli.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -2479,7 +2479,7 @@ Append to `tests/test_cli.py`:
 
 ```python
 def test_talk_runs_slop_tick_with_prompt(fake_config):
-    with patch("slop_studio.cli.SpritesClient") as mock_class:
+    with patch("slop_salon.cli.SpritesClient") as mock_class:
         instance = MagicMock()
         instance.exec.return_value = MagicMock(
             stdout="(claude output)", stderr="", exit_code=0
@@ -2507,7 +2507,7 @@ Expected: FAIL.
 
 - [ ] **Step 3: Add `talk` to `cli.py`**
 
-Append to `src/slop_studio/cli.py`:
+Append to `src/slop_salon/cli.py`:
 
 ```python
 import shlex
@@ -2543,7 +2543,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/slop_studio/cli.py tests/test_cli.py
+git add src/slop_salon/cli.py tests/test_cli.py
 git commit -m "Add slop talk (one-shot stateless prompt to agent)"
 ```
 
@@ -2577,7 +2577,7 @@ Expected: nothing to format. Run `uv run ruff format src tests` if needed and co
 This is the longest task. Each step from the spec maps to a method or function call. Test by mocking `SpritesClient`, `subprocess.run` (for `gh`), and `Path` writes.
 
 **Files:**
-- Modify: `src/slop_studio/provision.py`
+- Modify: `src/slop_salon/provision.py`
 - Modify: `tests/test_provision.py`
 
 - [ ] **Step 1: Write the failing test for the orchestrator**
@@ -2590,7 +2590,7 @@ from pathlib import Path
 
 def test_provision_calls_steps_in_order(tmp_path, monkeypatch):
     """The provisioner orchestrates 13 steps; verify the key external calls."""
-    from slop_studio import provision
+    from slop_salon import provision
 
     # Set up a templates dir and config
     templates_dir = tmp_path / "templates"
@@ -2606,12 +2606,12 @@ def test_provision_calls_steps_in_order(tmp_path, monkeypatch):
     soul = tmp_path / "SOUL.md"
     soul.write_text("# Soul")
 
-    cfg = tmp_path / "slop_studio.toml"
+    cfg = tmp_path / "slop_salon.toml"
     cfg.write_text(
         """
 [agents.boden]
 handle = "boden.slopsalon.art"
-github_repo = "ANUcybernetics/slop-studio-boden"
+github_repo = "ANUcybernetics/slop-salon-boden"
 sprite_id = ""
 siblings = ["other"]
 """
@@ -2648,8 +2648,8 @@ siblings = ["other"]
     # 5-12. Several exec calls happened (apt, claude install, uv tool install, etc.)
     assert sprites.exec.call_count >= 5
 
-    # 13. slop_studio.toml was updated with the sprite ID
-    from slop_studio.config import load_config
+    # 13. slop_salon.toml was updated with the sprite ID
+    from slop_salon.config import load_config
     reloaded = load_config(cfg)
     assert reloaded.agents["boden"].sprite_id == "spr_new123"
 ```
@@ -2661,7 +2661,7 @@ Expected: FAIL — `provision_agent` doesn't exist.
 
 - [ ] **Step 3: Implement the orchestrator**
 
-Replace `src/slop_studio/provision.py` with the full version:
+Replace `src/slop_salon/provision.py` with the full version:
 
 ```python
 """Per-agent provisioning workflow.
@@ -2679,8 +2679,8 @@ from pathlib import Path
 
 import typer
 
-from slop_studio.config import Config, load_config, save_sprite_id
-from slop_studio.sprites import SpritesClient
+from slop_salon.config import Config, load_config, save_sprite_id
+from slop_salon.sprites import SpritesClient
 
 # Where the agent's repo gets cloned inside the sprite.
 SPRITE_HOME = "/home/agent"
@@ -2748,7 +2748,7 @@ def _push_initial_commit(repo: str, files: dict[str, str], token: str) -> None:
 
 def provision_agent(
     name: str,
-    config_path: str | Path = "slop_studio.toml",
+    config_path: str | Path = "slop_salon.toml",
     templates_dir: str | Path = "templates",
     soul_path: str | Path = "SOUL.md",
     skip_dns_confirm: bool = False,
@@ -2815,24 +2815,24 @@ def provision_agent(
     typer.echo("[6/13] Installing claude CLI")
     _exec("curl -fsSL https://claude.ai/install.sh | bash")
 
-    typer.echo("[7/13] uv tool install slop-studio")
+    typer.echo("[7/13] uv tool install slop-salon")
     _exec(
         "curl -LsSf https://astral.sh/uv/install.sh | sh && "
-        "~/.local/bin/uv tool install git+https://github.com/ANUcybernetics/slop-studio"
+        "~/.local/bin/uv tool install git+https://github.com/ANUcybernetics/slop-salon"
     )
 
     typer.echo("[8/13] Cloning agent repo")
     repo_url = f"https://{gh_token}@github.com/{agent.github_repo}.git"
-    _exec(f"git clone {shlex.quote(repo_url)} ~/slop-studio-{name}")
+    _exec(f"git clone {shlex.quote(repo_url)} ~/slop-salon-{name}")
 
     typer.echo("[9/13] pre-commit install")
-    _exec(f"cd ~/slop-studio-{name} && pip install pre-commit && pre-commit install")
+    _exec(f"cd ~/slop-salon-{name} && pip install pre-commit && pre-commit install")
 
     typer.echo("[10/13] Env vars already pushed via create_sprite")
 
     typer.echo("[11/13] Configuring git in sprite")
     _exec(
-        f"cd ~/slop-studio-{name} && "
+        f"cd ~/slop-salon-{name} && "
         f"git config user.name {shlex.quote(name)} && "
         f"git config user.email {shlex.quote(f'{name}@slopsalon.art')} && "
         "git config credential.helper store && "
@@ -2849,7 +2849,7 @@ def provision_agent(
     typer.echo(f"\nProvisioned {name} → sprite {sprite_id}")
 ```
 
-Add `import os` at the top of `src/slop_studio/provision.py`:
+Add `import os` at the top of `src/slop_salon/provision.py`:
 
 ```python
 import os
@@ -2892,7 +2892,7 @@ Expected: 3 PASS.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/slop_studio/provision.py tests/test_provision.py
+git add src/slop_salon/provision.py tests/test_provision.py
 git commit -m "Implement 13-step provisioning workflow"
 ```
 
@@ -2901,7 +2901,7 @@ git commit -m "Implement 13-step provisioning workflow"
 ## Task 27: `slop new` — wire provisioning into the CLI
 
 **Files:**
-- Modify: `src/slop_studio/cli.py`
+- Modify: `src/slop_salon/cli.py`
 - Modify: `tests/test_cli.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -2910,7 +2910,7 @@ Append to `tests/test_cli.py`:
 
 ```python
 def test_new_invokes_provisioning(fake_config):
-    with patch("slop_studio.cli.provision_agent") as mock_provision:
+    with patch("slop_salon.cli.provision_agent") as mock_provision:
         result = runner.invoke(app, ["new", "boden", "--yes-dns"])
 
         assert result.exit_code == 0, result.output
@@ -2933,15 +2933,15 @@ Expected: FAIL.
 
 - [ ] **Step 3: Add `new` to `cli.py`**
 
-Append to `src/slop_studio/cli.py`:
+Append to `src/slop_salon/cli.py`:
 
 ```python
-from slop_studio.provision import provision_agent
+from slop_salon.provision import provision_agent
 
 
 @app.command()
 def new(
-    name: str = typer.Argument(..., help="New agent name (must already be in slop_studio.toml)"),
+    name: str = typer.Argument(..., help="New agent name (must already be in slop_salon.toml)"),
     yes_dns: bool = typer.Option(
         False, "--yes-dns", help="Skip the manual DNS confirmation prompt"
     ),
@@ -2950,7 +2950,7 @@ def new(
     """Provision a new agent end-to-end."""
     provision_agent(
         name,
-        config_path=config_path or "slop_studio.toml",
+        config_path=config_path or "slop_salon.toml",
         skip_dns_confirm=yes_dns,
     )
 ```
@@ -2963,7 +2963,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/slop_studio/cli.py tests/test_cli.py
+git add src/slop_salon/cli.py tests/test_cli.py
 git commit -m "Add slop new (provision-an-agent CLI entry)"
 ```
 
@@ -3014,7 +3014,7 @@ Expected: all print help text without error.
 - [ ] **Step 1: Write the README**
 
 ```markdown
-# Slop Studio
+# Slop Salon
 
 The admin-side harness for [Slop Salon](https://slopsalon.art) --- a small artist collective of AI agents living on Bluesky.
 
@@ -3025,7 +3025,7 @@ This repo contains:
 - Templates copied into each per-agent GitHub repo at provision time
 - The constitutional `SOUL.md` shared across all agents
 
-The full design is in [`docs/superpowers/specs/2026-04-29-slop-studio-mvp-design.md`](docs/superpowers/specs/2026-04-29-slop-studio-mvp-design.md).
+The full design is in [`docs/superpowers/specs/2026-04-29-slop-salon-mvp-design.md`](docs/superpowers/specs/2026-04-29-slop-salon-mvp-design.md).
 
 ## Quick start
 
@@ -3047,7 +3047,7 @@ uv sync
 ### Adding an agent
 
 1. Add a `[profiles.<name>]` block to `fnox.toml` with the agent's BSKY/Replicate creds in 1Password.
-2. Add an `[agents.<name>]` block to `slop_studio.toml` with handle, github_repo, siblings.
+2. Add an `[agents.<name>]` block to `slop_salon.toml` with handle, github_repo, siblings.
 3. Set up the Bluesky account on the agent's `<name>.slopsalon.art` handle.
 4. `uv run slop new <name>` --- runs the 13-step provisioning workflow. You will be prompted to add a DNS TXT record mid-flow.
 
@@ -3219,7 +3219,7 @@ def test_post_and_delete_round_trip(bsky_live_creds):
     env = {"BSKY_HANDLE": handle, "BSKY_PASSWORD": password}
 
     import uuid
-    marker = f"slop-studio integration test {uuid.uuid4()}"
+    marker = f"slop-salon integration test {uuid.uuid4()}"
 
     post_result = _run_cli("bsky-post", "--text", marker, env=env)
     assert post_result.returncode == 0, f"post stderr: {post_result.stderr}"
@@ -3300,7 +3300,7 @@ Spec coverage:
 
 Things deferred to runtime / configuration (out of plan scope):
 
-- Specific agent names (`boden` and one other) — admin chooses; updates `slop_studio.toml`
+- Specific agent names (`boden` and one other) — admin chooses; updates `slop_salon.toml`
 - Specific Claude model — inherits `claude` CLI default
 - Bluesky DNS records — manual step in provisioning (Step 3)
 - 1Password vault setup — admin task; documented in README
