@@ -46,3 +46,33 @@ def test_status_lists_agents(fake_config):
         assert "boden" in result.output
         assert "other" in result.output
         assert "running" in result.output
+
+
+def test_logs_runs_command_in_sprite(fake_config):
+    with patch("slop_studio.cli.SpritesClient") as mock_class:
+        instance = MagicMock()
+        instance.exec.return_value = MagicMock(stdout="(transcript)", stderr="", exit_code=0)
+        mock_class.return_value = instance
+
+        result = runner.invoke(app, ["logs", "boden"])
+
+        assert result.exit_code == 0, result.output
+        assert "transcript" in result.output
+        # Should have exec'd against the right sprite
+        instance.exec.assert_called_once()
+        sprite_id, command = instance.exec.call_args[0]
+        assert sprite_id == "spr_abc"
+
+
+def test_diff_runs_git_in_sprite(fake_config):
+    with patch("slop_studio.cli.SpritesClient") as mock_class:
+        instance = MagicMock()
+        instance.exec.return_value = MagicMock(
+            stdout="diff --git a/x b/x\n+hi", stderr="", exit_code=0
+        )
+        mock_class.return_value = instance
+
+        result = runner.invoke(app, ["diff", "boden", "--since", "1.day"])
+
+        assert result.exit_code == 0, result.output
+        assert "+hi" in result.output

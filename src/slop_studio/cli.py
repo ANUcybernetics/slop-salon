@@ -46,3 +46,66 @@ def status(
         else:
             sprite_state = "not provisioned"
         typer.echo(f"{name:12s}  {agent.handle:30s}  {sprite_state}")
+
+
+def _require_sprite_id(config, agent_name: str) -> str:
+    agent = config.agents.get(agent_name)
+    if agent is None:
+        typer.echo(f"error: unknown agent {agent_name!r}", err=True)
+        raise typer.Exit(code=1)
+    if not agent.sprite_id:
+        typer.echo(f"error: agent {agent_name!r} has no sprite_id (not provisioned?)", err=True)
+        raise typer.Exit(code=1)
+    return agent.sprite_id
+
+
+@app.command()
+def logs(
+    name: str = typer.Argument(..., help="Agent name"),
+    config_path: str = typer.Option(None, "--config"),
+):
+    """Print recent claude transcripts from the agent's sprite."""
+    config = _config(config_path)
+    sprite_id = _require_sprite_id(config, name)
+    sprites = SpritesClient()
+    # `.claude/` holds session transcripts; tail the most recent.
+    result = sprites.exec(
+        sprite_id,
+        [
+            "bash",
+            "-lc",
+            "ls -t ~/slop-studio-$AGENT_NAME/.claude/ 2>/dev/null | head -5 | "
+            'while read f; do echo "=== $f ==="; '
+            'cat ~/slop-studio-$AGENT_NAME/.claude/"$f"; done',
+        ],
+    )
+    typer.echo(result.stdout)
+    if result.stderr:
+        typer.echo(result.stderr, err=True)
+
+
+@app.command()
+def diff(
+    name: str = typer.Argument(..., help="Agent name"),
+    since: str = typer.Option(
+        "1.day",
+        "--since",
+        help="Git revspec or duration (e.g. '1.day', '2.hours')",
+    ),
+    config_path: str = typer.Option(None, "--config"),
+):
+    """Show recent repo changes from the agent's sprite."""
+    config = _config(config_path)
+    sprite_id = _require_sprite_id(config, name)
+    sprites = SpritesClient()
+    result = sprites.exec(
+        sprite_id,
+        [
+            "bash",
+            "-lc",
+            f"cd ~/slop-studio-$AGENT_NAME && git log --since='{since}' --stat -p",
+        ],
+    )
+    typer.echo(result.stdout)
+    if result.stderr:
+        typer.echo(result.stderr, err=True)
