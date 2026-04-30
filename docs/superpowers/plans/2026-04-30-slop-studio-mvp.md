@@ -64,6 +64,39 @@ fnox.toml                        # op:// references (committed)
 5. **Admin `slop` CLI** (Tasks 20–25) — read-only observability commands, then write commands
 6. **Provisioning** (Tasks 26–28) — `provision.py` and `slop new`
 7. **Integration polish** (Task 29) — admin README, smoke-test instructions
+8. **Integration tests** (Task 30) — opt-in live tests against real Bluesky
+
+---
+
+## Testing strategy
+
+**Default test runs are deterministic, fast, and consume no real API credits.** Every external boundary (Bluesky, Replicate, sprites.dev, GitHub, the local shell) is mocked. The only files written during default runs are inside `pytest`'s `tmp_path`.
+
+### Layers
+
+| Layer                    | Test type        | How it's tested                                                          |
+|--------------------------|------------------|--------------------------------------------------------------------------|
+| `tools/bsky.py`          | unit             | `typer.testing.CliRunner` + `unittest.mock.patch("…bsky.Client")`        |
+| `tools/replicate_run.py` | unit             | `CliRunner` + mocked `replicate` module + mocked `httpx`                 |
+| `config.py`              | unit             | TOML round-trips on a `tmp_path` file                                    |
+| `sprites.py`             | unit             | `pytest-httpx` for HTTP-level mocking                                    |
+| `provision.py`           | unit             | mocked `subprocess`, `SpritesClient`, fnox resolver                      |
+| `cli.py`                 | unit             | `CliRunner` + mocked `SpritesClient` + mocked `provision_agent`          |
+| `templates/slop-tick`    | shell            | `bats-core` with stubbed `claude` and a no-op `git push`                 |
+| Bluesky tools            | live integration | opt-in (`pytest -m integration`); requires real `BSKY_HANDLE/PASSWORD`   |
+
+### Default vs. integration
+
+- **Default**: `uv run pytest` — runs every mocked test, no external calls. Configured in `pyproject.toml` via `addopts = "-m 'not integration'"`.
+- **Integration (opt-in)**: `uv run pytest -m integration` — runs the live tests in `tests/integration/`. Each integration test skips automatically if its required env vars aren't set, so partial cred coverage is fine. **Use a dedicated test Bluesky account** (don't run integration tests against a production agent's handle).
+- **Smoke (manual, never in CI)**: described in Task 29's README — provision a dev agent, run `slop talk`, eyeball Bluesky and the agent's GitHub repo.
+
+### What's deliberately untested
+
+- **Live `sprites.dev` API**: provisioning a real Firecracker VM costs money and slow. Mocked in unit tests, exercised manually via the smoke test.
+- **Live Replicate**: mocked at the SDK boundary. Replicate is a well-tested third-party SDK; real-API issues surface in the smoke test, not in CI.
+- **Agent behaviour inside the sprite**: the `claude` reasoning loop is opaque from outside; we test the wrapper and the tools, not the LLM's choices.
+- **Crontab interpretation**: bats tests verify the wrapper script; we trust cron itself.
 
 ---
 
@@ -122,6 +155,13 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: requires real API credentials; opt-in (run with `pytest -m integration`)",
+]
+addopts = "-m 'not integration'"
+testpaths = ["tests"]
 ```
 
 - [ ] **Step 2: Sync dependencies**
@@ -3034,12 +3074,24 @@ There is no E2E in CI. To smoke-test:
 
 ## Tests
 
+The default test suite is fast, deterministic, and consumes no real API credits — every external boundary (Bluesky, Replicate, sprites.dev, GitHub, the shell) is mocked.
+
 ```bash
-uv run pytest                       # Python tests
-bats tests/test_slop_tick.bats      # shell tests
+uv run pytest                       # default: mocked unit tests only
+bats tests/test_slop_tick.bats      # shell tests for slop-tick
 uv run ruff check src tests
 uv run ruff format --check src tests
 ```
+
+**Integration tests (opt-in, real credentials)** — live tests against Bluesky live in `tests/integration/`. They are skipped by default. To run them, point `BSKY_HANDLE` and `BSKY_PASSWORD` at a **dedicated test account** (not a production agent's handle — they post and delete real content):
+
+```bash
+export BSKY_HANDLE=<test-account>.bsky.social
+export BSKY_PASSWORD=<app-password>
+uv run pytest -m integration
+```
+
+Each integration test skips automatically if its required env vars aren't set. No charges from Bluesky (free), and no Replicate live tests are included.
 ```
 
 - [ ] **Step 2: Commit**
@@ -3047,6 +3099,185 @@ uv run ruff format --check src tests
 ```bash
 git add README.md
 git commit -m "Add admin README with setup and daily-use instructions"
+```
+
+---
+
+# Phase 8: Integration tests (opt-in)
+
+These tests hit real services and require real credentials. They are skipped by default (`addopts = "-m 'not integration'"` in `pyproject.toml`); run them explicitly with `uv run pytest -m integration`.
+
+**Use a dedicated test Bluesky account.** Do not run integration tests against a production agent's handle — they post and delete real content.
+
+## Task 30: Live Bluesky integration tests
+
+**Files:**
+- Create: `tests/integration/__init__.py`
+- Create: `tests/integration/conftest.py`
+- Create: `tests/integration/test_bsky_live.py`
+
+- [ ] **Step 1: Create the integration test package**
+
+```bash
+mkdir -p tests/integration
+touch tests/integration/__init__.py
+```
+
+- [ ] **Step 2: Write `tests/integration/conftest.py`**
+
+```python
+"""Shared fixtures for live integration tests.
+
+Each fixture skips automatically if its required env vars are missing,
+so partial credential coverage is fine.
+"""
+from __future__ import annotations
+
+import os
+
+import pytest
+
+
+@pytest.fixture
+def bsky_live_creds():
+    """Real Bluesky credentials. Skips if not provided."""
+    handle = os.environ.get("BSKY_HANDLE")
+    password = os.environ.get("BSKY_PASSWORD")
+    if not (handle and password):
+        pytest.skip(
+            "BSKY_HANDLE and BSKY_PASSWORD env vars required for live Bluesky tests"
+        )
+    return handle, password
+```
+
+- [ ] **Step 3: Write `tests/integration/test_bsky_live.py`**
+
+```python
+"""Live Bluesky integration tests.
+
+Marked `integration` so they're skipped by default. Run with:
+    uv run pytest -m integration
+
+Use a dedicated test account; these tests post and delete real content.
+"""
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+
+import pytest
+
+
+pytestmark = pytest.mark.integration
+
+
+def _run_cli(command: str, *args: str, env: dict[str, str]) -> subprocess.CompletedProcess:
+    """Invoke an installed CLI entry point with the given env."""
+    full_env = {**os.environ, **env}
+    return subprocess.run(
+        [command, *args],
+        capture_output=True,
+        text=True,
+        env=full_env,
+    )
+
+
+def test_read_timeline_returns_valid_json(bsky_live_creds):
+    """Reading the home timeline should return a JSON list."""
+    handle, password = bsky_live_creds
+    env = {"BSKY_HANDLE": handle, "BSKY_PASSWORD": password}
+
+    result = _run_cli("bsky-read-timeline", "--limit", "3", env=env)
+
+    assert result.returncode == 0, f"stderr: {result.stderr}"
+    data = json.loads(result.stdout)
+    assert isinstance(data, list)
+
+
+def test_read_notifications_returns_valid_json(bsky_live_creds):
+    """Reading notifications should return a JSON list (may be empty)."""
+    handle, password = bsky_live_creds
+    env = {"BSKY_HANDLE": handle, "BSKY_PASSWORD": password}
+
+    result = _run_cli("bsky-read-notifications", "--limit", "5", env=env)
+
+    assert result.returncode == 0, f"stderr: {result.stderr}"
+    data = json.loads(result.stdout)
+    assert isinstance(data, list)
+
+
+def test_post_and_delete_round_trip(bsky_live_creds):
+    """Post a marker, find it on our timeline, then delete it.
+
+    We can't easily get the URI from `bsky-post`'s current output (it just
+    prints "posted"), so this test verifies the post happens by reading the
+    author feed and finding the marker text. Then we use atproto directly
+    to clean up.
+    """
+    handle, password = bsky_live_creds
+    env = {"BSKY_HANDLE": handle, "BSKY_PASSWORD": password}
+
+    import uuid
+    marker = f"slop-studio integration test {uuid.uuid4()}"
+
+    post_result = _run_cli("bsky-post", "--text", marker, env=env)
+    assert post_result.returncode == 0, f"post stderr: {post_result.stderr}"
+
+    feed_result = _run_cli(
+        "bsky-read-timeline",
+        "--actor", handle,
+        "--limit", "5",
+        env=env,
+    )
+    assert feed_result.returncode == 0
+    feed = json.loads(feed_result.stdout)
+
+    matching = [
+        item for item in feed
+        if marker in json.dumps(item)
+    ]
+    assert matching, f"posted marker not found in own feed; marker={marker}"
+
+    # Clean up: delete the test post via atproto directly
+    from atproto import Client
+    client = Client()
+    client.login(handle, password)
+    posts = matching[0].get("post", {})
+    uri = posts.get("uri")
+    if uri:
+        client.delete_post(uri)
+```
+
+- [ ] **Step 4: Verify default test runs skip these**
+
+Run: `uv run pytest tests/integration/ -v`
+Expected: `0 selected, N deselected` — the integration marker filter excludes them.
+
+- [ ] **Step 5: Verify integration tests skip cleanly when no creds**
+
+Make sure `BSKY_HANDLE` and `BSKY_PASSWORD` are not set, then:
+
+Run: `uv run pytest tests/integration/ -m integration -v`
+Expected: each test reports SKIPPED with the "BSKY_HANDLE and BSKY_PASSWORD required" message.
+
+- [ ] **Step 6: Run with real credentials (manual verification)**
+
+If you have a test Bluesky account set up:
+
+```bash
+export BSKY_HANDLE=<test-account>.bsky.social
+export BSKY_PASSWORD=<app-password>
+uv run pytest tests/integration/ -m integration -v
+```
+
+Expected: 3 PASS. Verify manually that the marker post created by `test_post_and_delete_round_trip` does NOT appear on the account's feed afterwards (the test should have deleted it).
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add tests/integration/
+git commit -m "Add opt-in live Bluesky integration tests"
 ```
 
 ---
@@ -3059,11 +3290,13 @@ Spec coverage:
 - ✅ Templates including agent CLAUDE.md (Tasks 12–16)
 - ✅ slop CLI (Tasks 20–24, 27)
 - ✅ Provisioning (Tasks 26–27)
-- ✅ Tests for each (TDD throughout)
+- ✅ Mocked unit tests for each component (TDD throughout)
 - ✅ slop-tick bats test (Task 15)
 - ✅ Jittered crontab (Task 16)
 - ✅ File editability and engagement etiquette (in CLAUDE.md template, Task 12)
 - ✅ Admin README (Task 29)
+- ✅ Opt-in integration tests against real Bluesky (Task 30)
+- ✅ Testing strategy section (no real credits in default runs)
 
 Things deferred to runtime / configuration (out of plan scope):
 
