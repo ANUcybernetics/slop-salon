@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# slop-tick: run one tick of the agent.
+#
+# Called by cron (with a fixed prompt like "tick") or by `slop talk` (with
+# an admin prompt). Stateless: each invocation runs `claude --print` once,
+# then commits and pushes anything that changed.
+#
+# Required env: AGENT_NAME (set in the sprite at provision time).
+
+set -euo pipefail
+
+if [[ -z "${AGENT_NAME:-}" ]]; then
+  echo "error: AGENT_NAME env var is required" >&2
+  exit 1
+fi
+
+if [[ $# -lt 1 ]]; then
+  echo "usage: slop-tick \"<prompt>\"" >&2
+  exit 1
+fi
+
+cd "$HOME/slop-studio-$AGENT_NAME"
+
+claude --print "$1"
+
+if ! git diff --quiet HEAD || [[ -n "$(git ls-files --others --exclude-standard)" ]]; then
+  git add -A
+  git commit -m "session $(date -Iseconds)"
+  git push
+fi
