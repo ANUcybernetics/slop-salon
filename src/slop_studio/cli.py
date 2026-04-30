@@ -109,3 +109,37 @@ def diff(
     typer.echo(result.stdout)
     if result.stderr:
         typer.echo(result.stderr, err=True)
+
+
+def atproto_client_for_feed():
+    """Build an unauthenticated atproto Client for reading public feeds.
+
+    Wrapped in a function so tests can mock the factory.
+    """
+    from atproto import Client
+
+    return Client()
+
+
+@app.command()
+def feed(
+    name: str = typer.Argument(None, help="Agent name (default: all agents)"),
+    limit: int = typer.Option(10, "--limit", help="Posts per agent"),
+    config_path: str = typer.Option(None, "--config"),
+):
+    """Print recent Bluesky posts from one agent (or all agents)."""
+    config = _config(config_path)
+    targets = [config.agents[name]] if name else list(config.agents.values())
+    client = atproto_client_for_feed()
+
+    for agent in targets:
+        typer.echo(f"=== {agent.name} ({agent.handle}) ===")
+        try:
+            response = client.get_author_feed(actor=agent.handle, limit=limit)
+        except Exception as e:
+            typer.echo(f"  (error: {e})")
+            continue
+        for item in response.feed:
+            text = getattr(item.post.record, "text", "")
+            indexed = getattr(item.post, "indexed_at", "")
+            typer.echo(f"  [{indexed}] {text}")

@@ -76,3 +76,47 @@ def test_diff_runs_git_in_sprite(fake_config):
 
         assert result.exit_code == 0, result.output
         assert "+hi" in result.output
+
+
+def test_feed_all_agents(fake_config):
+    with patch("slop_studio.cli.atproto_client_for_feed") as mock_factory:
+        mock_client = MagicMock()
+        mock_client.get_author_feed.return_value = MagicMock(
+            feed=[
+                MagicMock(
+                    post=MagicMock(
+                        record=MagicMock(text="a post"),
+                        indexed_at="2026-04-30T10:00Z",
+                    )
+                )
+            ]
+        )
+        mock_factory.return_value = mock_client
+
+        result = runner.invoke(app, ["feed"])
+
+        assert result.exit_code == 0, result.output
+        assert "a post" in result.output
+        # Called once per agent (2 in fake_config)
+        assert mock_client.get_author_feed.call_count == 2
+
+
+def test_feed_single_agent(fake_config):
+    with patch("slop_studio.cli.atproto_client_for_feed") as mock_factory:
+        mock_client = MagicMock()
+        mock_client.get_author_feed.return_value = MagicMock(
+            feed=[
+                MagicMock(
+                    post=MagicMock(
+                        record=MagicMock(text="boden's post"),
+                        indexed_at="2026-04-30T10:00Z",
+                    )
+                )
+            ]
+        )
+        mock_factory.return_value = mock_client
+
+        result = runner.invoke(app, ["feed", "boden"])
+
+        assert result.exit_code == 0, result.output
+        mock_client.get_author_feed.assert_called_once_with(actor="boden.slopsalon.art", limit=10)
