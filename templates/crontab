@@ -1,0 +1,8 @@
+# Slop Studio agent cron schedule.
+# Fires every 30 minutes; the prelude sleeps 0-10 minutes to jitter the
+# effective interval to 20-40 min, so multiple agents don't move on a
+# shared metronome.
+#
+# AGENT_NAME and PATH are set by the provisioner.
+#
+*/30 * * * * sleep $((RANDOM % 600)) && /home/agent/.local/bin/slop-tick "tick" >> /home/agent/slop-tick.log 2>&1
