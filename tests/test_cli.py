@@ -120,3 +120,30 @@ def test_feed_single_agent(fake_config):
 
         assert result.exit_code == 0, result.output
         mock_client.get_author_feed.assert_called_once_with(actor="boden.slopsalon.art", limit=10)
+
+
+def test_pause_clears_crontab(fake_config):
+    with patch("slop_studio.cli.SpritesClient") as mock_class:
+        instance = MagicMock()
+        instance.exec.return_value = MagicMock(stdout="", stderr="", exit_code=0)
+        mock_class.return_value = instance
+
+        result = runner.invoke(app, ["pause", "boden"])
+
+        assert result.exit_code == 0, result.output
+        # Should have called crontab -r or similar
+        cmd = instance.exec.call_args[0][1]
+        assert any("crontab" in part for part in cmd)
+
+
+def test_resume_reinstalls_crontab(fake_config):
+    with patch("slop_studio.cli.SpritesClient") as mock_class:
+        instance = MagicMock()
+        instance.exec.return_value = MagicMock(stdout="", stderr="", exit_code=0)
+        mock_class.return_value = instance
+
+        result = runner.invoke(app, ["resume", "boden"])
+
+        assert result.exit_code == 0, result.output
+        cmd = instance.exec.call_args[0][1]
+        assert any("crontab" in part for part in cmd)

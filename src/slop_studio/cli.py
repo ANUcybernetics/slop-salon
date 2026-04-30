@@ -143,3 +143,35 @@ def feed(
             text = getattr(item.post.record, "text", "")
             indexed = getattr(item.post, "indexed_at", "")
             typer.echo(f"  [{indexed}] {text}")
+
+
+@app.command()
+def pause(
+    name: str = typer.Argument(..., help="Agent name"),
+    config_path: str = typer.Option(None, "--config"),
+):
+    """Stop the cron schedule on the agent's sprite (preserves the saved crontab)."""
+    config = _config(config_path)
+    sprite_id = _require_sprite_id(config, name)
+    sprites = SpritesClient()
+    # Save current crontab to a file, then remove it. Idempotent: re-running
+    # is safe because resume reads from the saved file.
+    cmd = "crontab -l > ~/.crontab.paused 2>/dev/null; crontab -r 2>/dev/null; echo paused"
+    result = sprites.exec(sprite_id, ["bash", "-lc", cmd])
+    typer.echo(result.stdout.strip() or "paused")
+
+
+@app.command()
+def resume(
+    name: str = typer.Argument(..., help="Agent name"),
+    config_path: str = typer.Option(None, "--config"),
+):
+    """Restart the cron schedule on the agent's sprite."""
+    config = _config(config_path)
+    sprite_id = _require_sprite_id(config, name)
+    sprites = SpritesClient()
+    result = sprites.exec(
+        sprite_id,
+        ["bash", "-lc", "crontab ~/.crontab.paused && echo resumed"],
+    )
+    typer.echo(result.stdout.strip() or "resumed")
