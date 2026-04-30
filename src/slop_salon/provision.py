@@ -103,8 +103,10 @@ def provision_agent(
         raise RuntimeError(f"GH_TOKEN missing from fnox profile {name!r}; check fnox.toml")
 
     typer.echo(f"[1/13] Creating GH repo {agent.github_repo}")
+    # --add-readme creates an initial commit so the repo has a default branch;
+    # without it, the subsequent clone-and-push fails on an empty repo.
     subprocess.run(
-        ["gh", "repo", "create", agent.github_repo, "--public"],
+        ["gh", "repo", "create", agent.github_repo, "--public", "--add-readme"],
         check=True,
         env={**os.environ, "GH_TOKEN": gh_token},
     )
@@ -156,9 +158,13 @@ def provision_agent(
         "~/.local/bin/uv tool install git+https://github.com/ANUcybernetics/slop-salon"
     )
 
-    typer.echo("[8/13] Cloning agent repo")
+    typer.echo("[8/13] Cloning agent repo + symlinking slop-tick into ~/.local/bin")
     repo_url = f"https://{gh_token}@github.com/{agent.github_repo}.git"
-    _exec(f"git clone {shlex.quote(repo_url)} ~/slop-salon-{name}")
+    _exec(
+        f"git clone {shlex.quote(repo_url)} ~/slop-salon-{name} && "
+        f"mkdir -p ~/.local/bin && "
+        f"ln -sf ~/slop-salon-{name}/slop-tick ~/.local/bin/slop-tick"
+    )
 
     typer.echo("[9/13] pre-commit install")
     _exec(f"cd ~/slop-salon-{name} && pip install pre-commit && pre-commit install")
@@ -175,7 +181,15 @@ def provision_agent(
     )
 
     typer.echo("[12/13] Installing crontab")
-    crontab_text = (templates_dir / "crontab").read_text()
+    # Cron does not inherit env vars, so AGENT_NAME and PATH are baked into
+    # the crontab text via {{name}} interpolation.
+    crontab_text = _interpolate(
+        (templates_dir / "crontab").read_text(),
+        agent.name,
+        agent.handle,
+        sibling_name,
+        sibling_handle,
+    )
     _exec(f"echo {shlex.quote(crontab_text)} | crontab -")
 
     typer.echo(f"[13/13] Saving sprite_id to {config.path}")

@@ -19,7 +19,7 @@ if [[ $# -lt 1 ]]; then
   exit 1
 fi
 
-cd "$HOME/slop-studio-$AGENT_NAME"
+cd "$HOME/slop-salon-$AGENT_NAME"
 
 claude --print "$1"
 

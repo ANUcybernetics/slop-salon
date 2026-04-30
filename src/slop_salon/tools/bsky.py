@@ -128,7 +128,7 @@ def reply(
             uploaded.append({"alt": alt_text, "image": blob})
         embed = {"$type": "app.bsky.embed.images", "images": uploaded}
 
-    kwargs = {"text": text, "reply": reply_ref}
+    kwargs = {"text": text, "reply_to": reply_ref}
     if embed:
         kwargs["embed"] = embed
     client.send_post(**kwargs)

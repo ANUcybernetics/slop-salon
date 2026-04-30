@@ -127,8 +127,8 @@ def test_reply_to_thread(bsky_env, mock_atproto_client):
     assert result.exit_code == 0, result.output
     mock_atproto_client.send_post.assert_called_once()
     _, kwargs = mock_atproto_client.send_post.call_args
-    assert "reply" in kwargs
-    assert kwargs["reply"]["parent"]["uri"] == parent_uri
+    assert "reply_to" in kwargs
+    assert kwargs["reply_to"]["parent"]["uri"] == parent_uri
 
 
 def test_quote_post(bsky_env, mock_atproto_client):

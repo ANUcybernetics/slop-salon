@@ -61,3 +61,24 @@ siblings = []
 
     reloaded = load_config(cfg)
     assert reloaded.agents["boden"].sprite_id == "spr_xyz"
+
+
+def test_save_sprite_id_appends_when_field_missing(tmp_path):
+    """If the agent block lacks a sprite_id line, save_sprite_id should add it."""
+    from slop_salon.config import save_sprite_id
+
+    cfg = tmp_path / "slop_salon.toml"
+    cfg.write_text(
+        """
+[agents.boden]
+handle = "boden.slopsalon.art"
+github_repo = "ANUcybernetics/slop-salon-boden"
+siblings = []
+"""
+    )
+
+    config = load_config(cfg)
+    save_sprite_id(config, "boden", "spr_new")
+
+    reloaded = load_config(cfg)
+    assert reloaded.agents["boden"].sprite_id == "spr_new"

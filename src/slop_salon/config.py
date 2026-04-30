@@ -44,15 +44,25 @@ def load_config(path: Path | str = "slop_salon.toml") -> Config:
 
 
 def save_sprite_id(config: Config, agent_name: str, sprite_id: str) -> None:
-    """Update slop_salon.toml in place to record a freshly-provisioned sprite ID."""
+    """Update slop_salon.toml in place to record a freshly-provisioned sprite ID.
+
+    If the agent block already has a `sprite_id = "..."` line, that value is
+    replaced. If not, a new line is appended immediately after the
+    `[agents.<name>]` header.
+    """
     text = config.path.read_text()
-    pattern = re.compile(
+    replace_pattern = re.compile(
         rf"(\[agents\.{re.escape(agent_name)}\][^\[]*sprite_id\s*=\s*)\"[^\"]*\"",
         re.DOTALL,
     )
-    new_text, n = pattern.subn(rf'\1"{sprite_id}"', text)
+    new_text, n = replace_pattern.subn(rf'\1"{sprite_id}"', text)
+    if n == 1:
+        config.path.write_text(new_text)
+        return
+
+    # No existing sprite_id field; append after the agent header.
+    insert_pattern = re.compile(rf"(\[agents\.{re.escape(agent_name)}\]\n)")
+    new_text, n = insert_pattern.subn(rf'\1sprite_id = "{sprite_id}"\n', text)
     if n != 1:
-        raise ValueError(
-            f"could not find sprite_id field for [agents.{agent_name}] in {config.path}"
-        )
+        raise ValueError(f"could not find [agents.{agent_name}] section in {config.path}")
     config.path.write_text(new_text)
