@@ -7,10 +7,29 @@ authors = [
     { name = "Ben Swift", email = "ben@benswift.me" }
 ]
 requires-python = ">=3.14"
-dependencies = []
+dependencies = [
+    "typer>=0.12",
+    "httpx>=0.27",
+    "atproto>=0.0.55",
+    "replicate>=0.34",
+]
 
 [project.scripts]
-slop-studio = "slop_studio:main"
+# Admin CLI
+slop = "slop_studio.cli:app"
+# Agent-side tools (installed in each sprite)
+bsky-post = "slop_studio.tools.bsky:post_app"
+bsky-reply = "slop_studio.tools.bsky:reply_app"
+bsky-quote-post = "slop_studio.tools.bsky:quote_post_app"
+bsky-read-timeline = "slop_studio.tools.bsky:read_timeline_app"
+bsky-read-notifications = "slop_studio.tools.bsky:read_notifications_app"
+replicate-run = "slop_studio.tools.replicate_run:app"
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "pytest-httpx>=0.30",
+]
 
 [build-system]
 requires = ["uv_build>=0.11.8,<0.12.0"]
@@ -22,3 +41,10 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: requires real API credentials; opt-in (run with `pytest -m integration`)",
+]
+addopts = "-m 'not integration'"
+testpaths = ["tests"]
