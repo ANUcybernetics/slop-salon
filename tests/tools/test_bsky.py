@@ -146,3 +146,34 @@ def test_quote_post(bsky_env, mock_atproto_client):
     assert kwargs["text"] == "look at this"
     assert kwargs["embed"]["$type"] == "app.bsky.embed.record"
     assert kwargs["embed"]["record"]["uri"] == quoted_uri
+
+
+def test_read_timeline_default(bsky_env, mock_atproto_client):
+    mock_atproto_client.get_timeline.return_value = MagicMock(
+        feed=[MagicMock(model_dump=lambda: {"post": {"text": "hi"}})]
+    )
+
+    from slop_studio.tools.bsky import read_timeline_app
+
+    result = runner.invoke(read_timeline_app, ["--limit", "5"])
+
+    assert result.exit_code == 0, result.output
+    mock_atproto_client.get_timeline.assert_called_once()
+    # Output should be valid JSON
+    import json
+
+    data = json.loads(result.output)
+    assert isinstance(data, list)
+
+
+def test_read_timeline_specific_actor(bsky_env, mock_atproto_client):
+    mock_atproto_client.get_author_feed.return_value = MagicMock(
+        feed=[MagicMock(model_dump=lambda: {"post": {"text": "by them"}})]
+    )
+
+    from slop_studio.tools.bsky import read_timeline_app
+
+    result = runner.invoke(read_timeline_app, ["--actor", "other.slopsalon.art", "--limit", "3"])
+
+    assert result.exit_code == 0, result.output
+    mock_atproto_client.get_author_feed.assert_called_once()

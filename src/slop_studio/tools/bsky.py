@@ -181,3 +181,31 @@ def quote_post(
 
     client.send_post(text=text, embed=embed)
     typer.echo("quoted")
+
+
+# --- bsky-read-timeline ---
+
+read_timeline_app = typer.Typer(
+    add_completion=False, help="Read your home feed (or another actor's feed) as JSON."
+)
+
+
+def _dump_feed(feed_view) -> list[dict]:
+    """Serialise a list of FeedViewPost to plain dicts."""
+    return [item.model_dump() for item in feed_view]
+
+
+@read_timeline_app.command()
+def read_timeline(
+    actor: str = typer.Option(None, "--actor", help="Handle of an actor (default: your home feed)"),
+    limit: int = typer.Option(20, "--limit", help="Number of posts to return"),
+):
+    """Print recent feed posts as JSON to stdout."""
+    import json
+
+    client = _get_client()
+    if actor:
+        response = client.get_author_feed(actor=actor, limit=limit)
+    else:
+        response = client.get_timeline(limit=limit)
+    typer.echo(json.dumps(_dump_feed(response.feed), indent=2))
