@@ -42,6 +42,7 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "UP", "B", "SIM"]
+ignore = ["B008"]  # typer requires function calls (typer.Option) in argument defaults
 
 [tool.pytest.ini_options]
 markers = [

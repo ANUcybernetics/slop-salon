@@ -64,3 +64,51 @@ def test_post_requires_password_env(monkeypatch, mock_atproto_client):
 
     assert result.exit_code != 0
     assert "BSKY_PASSWORD" in (result.stderr or result.output)
+
+
+def test_post_with_one_image(bsky_env, mock_atproto_client, tmp_path):
+    img = tmp_path / "img.jpg"
+    img.write_bytes(b"\xff\xd8\xff\xe0fake-jpeg")
+
+    mock_atproto_client.upload_blob.return_value = MagicMock(blob="blob-ref-1")
+
+    from slop_studio.tools.bsky import post_app
+
+    result = runner.invoke(
+        post_app,
+        ["--text", "look", "--image", str(img), "--alt", "a thing"],
+    )
+
+    assert result.exit_code == 0, result.output
+    mock_atproto_client.upload_blob.assert_called_once()
+    mock_atproto_client.send_post.assert_called_once()
+
+
+def test_post_rejects_more_than_four_images(bsky_env, mock_atproto_client, tmp_path):
+    images = []
+    for i in range(5):
+        p = tmp_path / f"img{i}.jpg"
+        p.write_bytes(b"x")
+        images.append(p)
+
+    from slop_studio.tools.bsky import post_app
+
+    args = ["--text", "many"]
+    for p in images:
+        args += ["--image", str(p), "--alt", "x"]
+    result = runner.invoke(post_app, args)
+
+    assert result.exit_code != 0
+    assert "4" in (result.output + (result.stderr or ""))
+
+
+def test_post_image_without_alt_fails(bsky_env, mock_atproto_client, tmp_path):
+    img = tmp_path / "img.jpg"
+    img.write_bytes(b"x")
+
+    from slop_studio.tools.bsky import post_app
+
+    result = runner.invoke(post_app, ["--text", "look", "--image", str(img)])
+
+    assert result.exit_code != 0
+    assert "alt" in (result.output + (result.stderr or "")).lower()
