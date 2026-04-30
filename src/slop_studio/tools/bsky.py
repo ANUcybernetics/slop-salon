@@ -191,8 +191,12 @@ read_timeline_app = typer.Typer(
 
 
 def _dump_feed(feed_view) -> list[dict]:
-    """Serialise a list of FeedViewPost to plain dicts."""
-    return [item.model_dump() for item in feed_view]
+    """Serialise a list of FeedViewPost to JSON-safe plain dicts.
+
+    `mode="json"` coerces non-JSON-native values (datetime, etc.) to strings;
+    without it, json.dumps would fail on real atproto responses.
+    """
+    return [item.model_dump(mode="json", exclude_none=True) for item in feed_view]
 
 
 @read_timeline_app.command()

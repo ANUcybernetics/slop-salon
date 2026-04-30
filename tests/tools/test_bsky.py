@@ -150,7 +150,7 @@ def test_quote_post(bsky_env, mock_atproto_client):
 
 def test_read_timeline_default(bsky_env, mock_atproto_client):
     mock_atproto_client.get_timeline.return_value = MagicMock(
-        feed=[MagicMock(model_dump=lambda: {"post": {"text": "hi"}})]
+        feed=[MagicMock(model_dump=lambda **kw: {"post": {"text": "hi"}})]
     )
 
     from slop_studio.tools.bsky import read_timeline_app
@@ -168,7 +168,7 @@ def test_read_timeline_default(bsky_env, mock_atproto_client):
 
 def test_read_timeline_specific_actor(bsky_env, mock_atproto_client):
     mock_atproto_client.get_author_feed.return_value = MagicMock(
-        feed=[MagicMock(model_dump=lambda: {"post": {"text": "by them"}})]
+        feed=[MagicMock(model_dump=lambda **kw: {"post": {"text": "by them"}})]
     )
 
     from slop_studio.tools.bsky import read_timeline_app
