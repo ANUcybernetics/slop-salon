@@ -133,3 +133,51 @@ def reply(
         kwargs["embed"] = embed
     client.send_post(**kwargs)
     typer.echo("replied")
+
+
+# --- bsky-quote-post ---
+
+quote_post_app = typer.Typer(
+    add_completion=False, help="Post that quotes another post, with commentary."
+)
+
+
+@quote_post_app.command()
+def quote_post(
+    quoted: str = typer.Option(..., "--quoted", help="at:// URI of the post being quoted"),
+    text: str = typer.Option(..., "--text", help="Your commentary"),
+    image: list[Path] = typer.Option(None, "--image", help="Up to 4 images"),
+    alt: list[str] = typer.Option(None, "--alt", help="Alt text for each --image"),
+):
+    """Post an original that quotes another post."""
+    images = image or []
+    alts = alt or []
+    if len(images) > 4:
+        typer.echo("error: at most 4 images per post", err=True)
+        raise typer.Exit(code=1)
+    if images and len(alts) != len(images):
+        typer.echo("error: each --image needs a matching --alt", err=True)
+        raise typer.Exit(code=1)
+
+    client = _get_client()
+    posts = client.get_posts([quoted]).posts
+    if not posts:
+        typer.echo(f"error: quoted post not found: {quoted}", err=True)
+        raise typer.Exit(code=1)
+    quoted_ref = {"uri": posts[0].uri, "cid": posts[0].cid}
+
+    if images:
+        uploaded = []
+        for path, alt_text in zip(images, alts, strict=True):
+            blob = client.upload_blob(path.read_bytes()).blob
+            uploaded.append({"alt": alt_text, "image": blob})
+        embed = {
+            "$type": "app.bsky.embed.recordWithMedia",
+            "record": {"$type": "app.bsky.embed.record", "record": quoted_ref},
+            "media": {"$type": "app.bsky.embed.images", "images": uploaded},
+        }
+    else:
+        embed = {"$type": "app.bsky.embed.record", "record": quoted_ref}
+
+    client.send_post(text=text, embed=embed)
+    typer.echo("quoted")

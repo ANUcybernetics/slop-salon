@@ -129,3 +129,20 @@ def test_reply_to_thread(bsky_env, mock_atproto_client):
     _, kwargs = mock_atproto_client.send_post.call_args
     assert "reply" in kwargs
     assert kwargs["reply"]["parent"]["uri"] == parent_uri
+
+
+def test_quote_post(bsky_env, mock_atproto_client):
+    quoted_uri = "at://did:plc:abc/app.bsky.feed.post/xyz789"
+    mock_atproto_client.get_posts.return_value = MagicMock(
+        posts=[MagicMock(uri=quoted_uri, cid="cid-xyz")]
+    )
+
+    from slop_studio.tools.bsky import quote_post_app
+
+    result = runner.invoke(quote_post_app, ["--quoted", quoted_uri, "--text", "look at this"])
+
+    assert result.exit_code == 0, result.output
+    _, kwargs = mock_atproto_client.send_post.call_args
+    assert kwargs["text"] == "look at this"
+    assert kwargs["embed"]["$type"] == "app.bsky.embed.record"
+    assert kwargs["embed"]["record"]["uri"] == quoted_uri
