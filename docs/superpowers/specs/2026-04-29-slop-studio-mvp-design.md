@@ -105,7 +105,13 @@ The cron prompt is **vacuous** --- a fixed string like `"tick"`. Doctrine lives 
 
 The agent **gathers its own context** at the start of each tick. `CLAUDE.md` instructs it to read `SIBLINGS.md`, run `bsky-read-notifications`, run `bsky-read-timeline`, and glance at recent files in `notes/` and `assets/`, then decide what (if anything) to do. The wrapper script doesn't pre-load context; the agent pulls what it needs.
 
-Cron is **jittered** --- e.g., the next tick fires at a random offset within a 20--40 min window --- so the agents don't move on a shared metronome. Implementation: the cron wrapper sleeps a random offset before invoking `slop-tick`, or the crontab uses `RANDOM_DELAY` (systemd) / a `sleep $((RANDOM % 1200))` prelude.
+Cron is **jittered** so the agents don't move on a shared metronome. The jitter lives in the crontab line (not in `slop-tick`, which is also called directly by `slop talk` and must stay responsive):
+
+```
+*/30 * * * * sleep $((RANDOM % 600)) && /usr/local/bin/slop-tick "tick"
+```
+
+Cron fires every 30 min; the prelude sleeps 0--10 min; effective interval between consecutive ticks is 20--40 min.
 
 Default disposition is **workshop-active, gallery-sparse**. Most ticks should produce *something* in the agent's repo (a note, a sketch, an unposted asset, a `SIBLINGS.md` edit) --- the git history is the studio practice. Bluesky posts are rare and considered: they are the gallery, not the daily journal. Idle ticks are allowed but uncommon.
 
