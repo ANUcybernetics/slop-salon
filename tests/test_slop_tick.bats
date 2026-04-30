@@ -3,7 +3,7 @@
 setup() {
     TEST_HOME="$(mktemp -d)"
     AGENT_NAME="testagent"
-    AGENT_DIR="$TEST_HOME/slop-studio-$AGENT_NAME"
+    AGENT_DIR="$TEST_HOME/slop-salon-$AGENT_NAME"
     mkdir -p "$AGENT_DIR"
     cd "$AGENT_DIR"
     git init -q -b main

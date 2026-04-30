@@ -1,4 +1,4 @@
-"""Tests for slop_studio.provision."""
+"""Tests for slop_salon.provision."""
 
 from __future__ import annotations
 
@@ -8,13 +8,13 @@ import pytest
 
 
 def test_resolve_secrets_runs_fnox_and_returns_env():
-    from slop_studio.provision import resolve_secrets_via_fnox
+    from slop_salon.provision import resolve_secrets_via_fnox
 
     fake_env_output = (
         "BSKY_HANDLE=boden.slopsalon.art\nBSKY_PASSWORD=topsecret\nANTHROPIC_API_KEY=sk-ant-xxx\n"
     )
 
-    with patch("slop_studio.provision.subprocess.run") as mock_run:
+    with patch("slop_salon.provision.subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(stdout=fake_env_output, returncode=0)
 
         env = resolve_secrets_via_fnox("boden")
@@ -30,9 +30,9 @@ def test_resolve_secrets_runs_fnox_and_returns_env():
 
 
 def test_resolve_secrets_raises_on_fnox_failure():
-    from slop_studio.provision import resolve_secrets_via_fnox
+    from slop_salon.provision import resolve_secrets_via_fnox
 
-    with patch("slop_studio.provision.subprocess.run") as mock_run:
+    with patch("slop_salon.provision.subprocess.run") as mock_run:
         mock_run.side_effect = Exception("fnox: profile not found")
 
         with pytest.raises(Exception, match="fnox"):
@@ -41,7 +41,7 @@ def test_resolve_secrets_raises_on_fnox_failure():
 
 def test_provision_calls_steps_in_order(tmp_path, monkeypatch):
     """The provisioner orchestrates 13 steps; verify the key external calls."""
-    from slop_studio import provision
+    from slop_salon import provision
 
     # Set up a templates dir and config
     templates_dir = tmp_path / "templates"
@@ -57,12 +57,12 @@ def test_provision_calls_steps_in_order(tmp_path, monkeypatch):
     soul = tmp_path / "SOUL.md"
     soul.write_text("# Soul")
 
-    cfg = tmp_path / "slop_studio.toml"
+    cfg = tmp_path / "slop_salon.toml"
     cfg.write_text(
         """
 [agents.boden]
 handle = "boden.slopsalon.art"
-github_repo = "ANUcybernetics/slop-studio-boden"
+github_repo = "ANUcybernetics/slop-salon-boden"
 sprite_id = ""
 siblings = ["other"]
 """
@@ -101,8 +101,8 @@ siblings = ["other"]
     # 5-12. Several exec calls happened (apt, claude install, uv tool install, etc.)
     assert sprites.exec.call_count >= 5
 
-    # 13. slop_studio.toml was updated with the sprite ID
-    from slop_studio.config import load_config
+    # 13. slop_salon.toml was updated with the sprite ID
+    from slop_salon.config import load_config
 
     reloaded = load_config(cfg)
     assert reloaded.agents["boden"].sprite_id == "spr_new123"

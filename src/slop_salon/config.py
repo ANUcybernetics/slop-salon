@@ -1,4 +1,4 @@
-"""Parse and represent slop_studio.toml configuration."""
+"""Parse and represent slop_salon.toml configuration."""
 
 from __future__ import annotations
 
@@ -23,8 +23,8 @@ class Config:
     agents: dict[str, Agent]
 
 
-def load_config(path: Path | str = "slop_studio.toml") -> Config:
-    """Parse slop_studio.toml and return a Config."""
+def load_config(path: Path | str = "slop_salon.toml") -> Config:
+    """Parse slop_salon.toml and return a Config."""
     p = Path(path)
     if not p.exists():
         raise FileNotFoundError(f"config file not found: {p}")
@@ -44,7 +44,7 @@ def load_config(path: Path | str = "slop_studio.toml") -> Config:
 
 
 def save_sprite_id(config: Config, agent_name: str, sprite_id: str) -> None:
-    """Update slop_studio.toml in place to record a freshly-provisioned sprite ID."""
+    """Update slop_salon.toml in place to record a freshly-provisioned sprite ID."""
     text = config.path.read_text()
     pattern = re.compile(
         rf"(\[agents\.{re.escape(agent_name)}\][^\[]*sprite_id\s*=\s*)\"[^\"]*\"",

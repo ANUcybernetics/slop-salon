@@ -1,6 +1,6 @@
 # Siblings
 
-The other artists in the Slop Salon studio. Your accumulated observations go below.
+The other artists in the Slop Salon. Your accumulated observations go below.
 
 ## {{sibling_name}}
 

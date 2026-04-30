@@ -65,7 +65,7 @@ def test_post_and_delete_round_trip(bsky_live_creds):
 
     import uuid
 
-    marker = f"slop-studio integration test {uuid.uuid4()}"
+    marker = f"slop-salon integration test {uuid.uuid4()}"
 
     post_result = _run_cli("bsky-post", "--text", marker, env=env)
     assert post_result.returncode == 0, f"post stderr: {post_result.stderr}"

@@ -17,25 +17,25 @@ import shlex
 
 import typer
 
-from slop_studio.config import load_config
-from slop_studio.provision import provision_agent
-from slop_studio.sprites import SpritesClient
+from slop_salon.config import load_config
+from slop_salon.provision import provision_agent
+from slop_salon.sprites import SpritesClient
 
-app = typer.Typer(add_completion=False, help="Slop Studio admin CLI.")
+app = typer.Typer(add_completion=False, help="Slop Salon admin CLI.")
 
 
 @app.callback()
 def main() -> None:
-    """Slop Studio admin CLI."""
+    """Slop Salon admin CLI."""
 
 
 def _config(path: str | None = None):
-    return load_config(path or "slop_studio.toml")
+    return load_config(path or "slop_salon.toml")
 
 
 @app.command()
 def status(
-    config_path: str = typer.Option(None, "--config", help="Path to slop_studio.toml"),
+    config_path: str = typer.Option(None, "--config", help="Path to slop_salon.toml"),
 ):
     """Print one line per agent: name, handle, sprite state."""
     config = _config(config_path)
@@ -77,9 +77,9 @@ def logs(
         [
             "bash",
             "-lc",
-            "ls -t ~/slop-studio-$AGENT_NAME/.claude/ 2>/dev/null | head -5 | "
+            "ls -t ~/slop-salon-$AGENT_NAME/.claude/ 2>/dev/null | head -5 | "
             'while read f; do echo "=== $f ==="; '
-            'cat ~/slop-studio-$AGENT_NAME/.claude/"$f"; done',
+            'cat ~/slop-salon-$AGENT_NAME/.claude/"$f"; done',
         ],
     )
     typer.echo(result.stdout)
@@ -106,7 +106,7 @@ def diff(
         [
             "bash",
             "-lc",
-            f"cd ~/slop-studio-$AGENT_NAME && git log --since='{since}' --stat -p",
+            f"cd ~/slop-salon-$AGENT_NAME && git log --since='{since}' --stat -p",
         ],
     )
     typer.echo(result.stdout)
@@ -204,7 +204,7 @@ def talk(
 
 @app.command()
 def new(
-    name: str = typer.Argument(..., help="New agent name (must already be in slop_studio.toml)"),
+    name: str = typer.Argument(..., help="New agent name (must already be in slop_salon.toml)"),
     yes_dns: bool = typer.Option(
         False, "--yes-dns", help="Skip the manual DNS confirmation prompt"
     ),
@@ -213,6 +213,6 @@ def new(
     """Provision a new agent end-to-end."""
     provision_agent(
         name,
-        config_path=config_path or "slop_studio.toml",
+        config_path=config_path or "slop_salon.toml",
         skip_dns_confirm=yes_dns,
     )

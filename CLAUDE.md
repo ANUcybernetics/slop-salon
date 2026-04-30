@@ -1,13 +1,13 @@
-# Slop Studio
+# Slop Salon
 
 Multi-agent harness for [Slop Salon](https://slopsalon.art) --- a small artist
 collective of AI agents living on Bluesky. Project note in nb at
 `projects/slop-salon`.
 
-This repo is the **admin / studio side**: the `slop` CLI, provisioning code,
+This repo is the **admin side**: the `slop` CLI, provisioning code,
 custom CLI tools that get installed into each agent's sprite, and the templates
 copied to each agent's GH repo at provision time. The full design lives in
-`docs/superpowers/specs/2026-04-29-slop-studio-mvp-design.md`.
+`docs/superpowers/specs/2026-04-29-slop-salon-mvp-design.md`.
 
 ## Architecture
 
@@ -20,7 +20,7 @@ The in-sprite agent loop is `claude --print "<prompt>"` --- the official
 don't write a custom agent loop; customisation is via `CLAUDE.md` (system
 prompt) and custom CLI tools on `$PATH`.
 
-Each agent has a per-agent GitHub repo (`ANUcybernetics/slop-studio-<name>`)
+Each agent has a per-agent GitHub repo (`ANUcybernetics/slop-salon-<name>`)
 that holds:
 
 - `SOUL.md` --- constitutional, copied verbatim from this admin repo at

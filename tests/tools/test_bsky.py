@@ -1,4 +1,4 @@
-"""Tests for slop_studio.tools.bsky CLI commands.
+"""Tests for slop_salon.tools.bsky CLI commands.
 
 Strategy: each command is a typer app; we invoke via CliRunner and
 mock atproto.Client at the import site so no real HTTP happens.
@@ -24,14 +24,14 @@ def bsky_env(monkeypatch):
 @pytest.fixture
 def mock_atproto_client():
     """Yield a mocked atproto.Client. Patches at the bsky module import path."""
-    with patch("slop_studio.tools.bsky.Client") as mock_class:
+    with patch("slop_salon.tools.bsky.Client") as mock_class:
         instance = MagicMock()
         mock_class.return_value = instance
         yield instance
 
 
 def test_post_text_only(bsky_env, mock_atproto_client):
-    from slop_studio.tools.bsky import post_app
+    from slop_salon.tools.bsky import post_app
 
     result = runner.invoke(post_app, ["--text", "hello world"])
 
@@ -46,7 +46,7 @@ def test_post_requires_handle_env(monkeypatch, mock_atproto_client):
     monkeypatch.delenv("BSKY_HANDLE", raising=False)
     monkeypatch.setenv("BSKY_PASSWORD", "test-password")
 
-    from slop_studio.tools.bsky import post_app
+    from slop_salon.tools.bsky import post_app
 
     result = runner.invoke(post_app, ["--text", "hello"])
 
@@ -58,7 +58,7 @@ def test_post_requires_password_env(monkeypatch, mock_atproto_client):
     monkeypatch.setenv("BSKY_HANDLE", "boden.slopsalon.art")
     monkeypatch.delenv("BSKY_PASSWORD", raising=False)
 
-    from slop_studio.tools.bsky import post_app
+    from slop_salon.tools.bsky import post_app
 
     result = runner.invoke(post_app, ["--text", "hello"])
 
@@ -72,7 +72,7 @@ def test_post_with_one_image(bsky_env, mock_atproto_client, tmp_path):
 
     mock_atproto_client.upload_blob.return_value = MagicMock(blob="blob-ref-1")
 
-    from slop_studio.tools.bsky import post_app
+    from slop_salon.tools.bsky import post_app
 
     result = runner.invoke(
         post_app,
@@ -91,7 +91,7 @@ def test_post_rejects_more_than_four_images(bsky_env, mock_atproto_client, tmp_p
         p.write_bytes(b"x")
         images.append(p)
 
-    from slop_studio.tools.bsky import post_app
+    from slop_salon.tools.bsky import post_app
 
     args = ["--text", "many"]
     for p in images:
@@ -106,7 +106,7 @@ def test_post_image_without_alt_fails(bsky_env, mock_atproto_client, tmp_path):
     img = tmp_path / "img.jpg"
     img.write_bytes(b"x")
 
-    from slop_studio.tools.bsky import post_app
+    from slop_salon.tools.bsky import post_app
 
     result = runner.invoke(post_app, ["--text", "look", "--image", str(img)])
 
@@ -120,7 +120,7 @@ def test_reply_to_thread(bsky_env, mock_atproto_client):
         posts=[MagicMock(uri=parent_uri, cid="cid-abc", record=MagicMock(reply=None))]
     )
 
-    from slop_studio.tools.bsky import reply_app
+    from slop_salon.tools.bsky import reply_app
 
     result = runner.invoke(reply_app, ["--parent", parent_uri, "--text", "interesting"])
 
@@ -137,7 +137,7 @@ def test_quote_post(bsky_env, mock_atproto_client):
         posts=[MagicMock(uri=quoted_uri, cid="cid-xyz")]
     )
 
-    from slop_studio.tools.bsky import quote_post_app
+    from slop_salon.tools.bsky import quote_post_app
 
     result = runner.invoke(quote_post_app, ["--quoted", quoted_uri, "--text", "look at this"])
 
@@ -153,7 +153,7 @@ def test_read_timeline_default(bsky_env, mock_atproto_client):
         feed=[MagicMock(model_dump=lambda **kw: {"post": {"text": "hi"}})]
     )
 
-    from slop_studio.tools.bsky import read_timeline_app
+    from slop_salon.tools.bsky import read_timeline_app
 
     result = runner.invoke(read_timeline_app, ["--limit", "5"])
 
@@ -171,7 +171,7 @@ def test_read_timeline_specific_actor(bsky_env, mock_atproto_client):
         feed=[MagicMock(model_dump=lambda **kw: {"post": {"text": "by them"}})]
     )
 
-    from slop_studio.tools.bsky import read_timeline_app
+    from slop_salon.tools.bsky import read_timeline_app
 
     result = runner.invoke(read_timeline_app, ["--actor", "other.slopsalon.art", "--limit", "3"])
 
@@ -184,7 +184,7 @@ def test_read_notifications(bsky_env, mock_atproto_client):
         notifications=[MagicMock(model_dump=lambda **kw: {"reason": "reply", "uri": "at://x/y/z"})]
     )
 
-    from slop_studio.tools.bsky import read_notifications_app
+    from slop_salon.tools.bsky import read_notifications_app
 
     result = runner.invoke(read_notifications_app, ["--limit", "10"])
 

@@ -1,4 +1,4 @@
-"""Bluesky CLI tools for slop-studio agents.
+"""Bluesky CLI tools for slop-salon agents.
 
 Each command is exposed as a separate typer app via [project.scripts].
 All commands read BSKY_HANDLE and BSKY_PASSWORD from env.

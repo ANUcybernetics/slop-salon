@@ -1,25 +1,25 @@
-"""Tests for slop_studio.config."""
+"""Tests for slop_salon.config."""
 
 from __future__ import annotations
 
 import pytest
 
-from slop_studio.config import Agent, load_config
+from slop_salon.config import Agent, load_config
 
 
 def test_load_config_returns_agents_by_name(tmp_path):
-    cfg = tmp_path / "slop_studio.toml"
+    cfg = tmp_path / "slop_salon.toml"
     cfg.write_text(
         """
 [agents.boden]
 handle = "boden.slopsalon.art"
-github_repo = "ANUcybernetics/slop-studio-boden"
+github_repo = "ANUcybernetics/slop-salon-boden"
 sprite_id = "spr_abc123"
 siblings = ["other"]
 
 [agents.other]
 handle = "other.slopsalon.art"
-github_repo = "ANUcybernetics/slop-studio-other"
+github_repo = "ANUcybernetics/slop-salon-other"
 sprite_id = ""
 siblings = ["boden"]
 """
@@ -32,7 +32,7 @@ siblings = ["boden"]
     assert isinstance(boden, Agent)
     assert boden.name == "boden"
     assert boden.handle == "boden.slopsalon.art"
-    assert boden.github_repo == "ANUcybernetics/slop-studio-boden"
+    assert boden.github_repo == "ANUcybernetics/slop-salon-boden"
     assert boden.sprite_id == "spr_abc123"
     assert boden.siblings == ["other"]
 
@@ -43,14 +43,14 @@ def test_load_config_missing_file_raises(tmp_path):
 
 
 def test_save_sprite_id_updates_file_in_place(tmp_path):
-    from slop_studio.config import save_sprite_id
+    from slop_salon.config import save_sprite_id
 
-    cfg = tmp_path / "slop_studio.toml"
+    cfg = tmp_path / "slop_salon.toml"
     cfg.write_text(
         """
 [agents.boden]
 handle = "boden.slopsalon.art"
-github_repo = "ANUcybernetics/slop-studio-boden"
+github_repo = "ANUcybernetics/slop-salon-boden"
 sprite_id = ""
 siblings = []
 """

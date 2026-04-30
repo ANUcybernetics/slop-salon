@@ -2,8 +2,8 @@
 # Run via: fnox exec --profile <agent> -- <command>
 
 [profiles.default]
-ANTHROPIC_API_KEY = "op://Slop Studio/anthropic/credential"
-GH_TOKEN = "op://Slop Studio/github/token"
+ANTHROPIC_API_KEY = "op://Slop Salon/anthropic/credential"
+GH_TOKEN = "op://Slop Salon/github/token"
 
 # Per-agent profiles inherit `default` and add Bluesky + Replicate creds.
 # Add one [profiles.<name>] block per agent.
@@ -11,5 +11,5 @@ GH_TOKEN = "op://Slop Studio/github/token"
 # [profiles.boden]
 # inherit = "default"
 # BSKY_HANDLE = "boden.slopsalon.art"
-# BSKY_PASSWORD = "op://Slop Studio/bsky-boden/password"
-# REPLICATE_API_TOKEN = "op://Slop Studio/replicate-boden/token"
+# BSKY_PASSWORD = "op://Slop Salon/bsky-boden/password"
+# REPLICATE_API_TOKEN = "op://Slop Salon/replicate-boden/token"

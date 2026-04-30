@@ -1,4 +1,4 @@
-"""Tests for slop_studio.sprites (sprites.dev REST client).
+"""Tests for slop_salon.sprites (sprites.dev REST client).
 
 Mocks HTTP via pytest-httpx; the test asserts the *shape* of requests
 the client makes, decoupled from the exact endpoint paths/auth which
@@ -10,7 +10,7 @@ from __future__ import annotations
 import pytest
 from pytest_httpx import HTTPXMock
 
-from slop_studio.sprites import SpritesClient
+from slop_salon.sprites import SpritesClient
 
 
 @pytest.fixture

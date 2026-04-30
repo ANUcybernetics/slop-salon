@@ -16,10 +16,10 @@ def replicate_env(monkeypatch):
 
 
 def test_text_output_prints_to_stdout(replicate_env):
-    with patch("slop_studio.tools.replicate_run.replicate") as mock_replicate:
+    with patch("slop_salon.tools.replicate_run.replicate") as mock_replicate:
         mock_replicate.run.return_value = "a poem about light"
 
-        from slop_studio.tools.replicate_run import app
+        from slop_salon.tools.replicate_run import app
 
         result = runner.invoke(app, ["meta/llama-3:abc", "--input", "prompt=write a poem"])
 
@@ -32,15 +32,15 @@ def test_image_output_downloads_to_assets(replicate_env, tmp_path, monkeypatch):
     fake_url = "https://replicate.delivery/pbxt/result.png"
 
     with (
-        patch("slop_studio.tools.replicate_run.replicate") as mock_replicate,
-        patch("slop_studio.tools.replicate_run.httpx") as mock_httpx,
+        patch("slop_salon.tools.replicate_run.replicate") as mock_replicate,
+        patch("slop_salon.tools.replicate_run.httpx") as mock_httpx,
     ):
         mock_replicate.run.return_value = [fake_url]
         mock_resp = MagicMock(content=b"\x89PNG\r\n\x1a\nfake")
         mock_resp.raise_for_status = MagicMock()
         mock_httpx.get.return_value = mock_resp
 
-        from slop_studio.tools.replicate_run import app
+        from slop_salon.tools.replicate_run import app
 
         result = runner.invoke(app, ["stability/sdxl:v1", "--input", "prompt=cat"])
 
@@ -57,7 +57,7 @@ def test_image_output_downloads_to_assets(replicate_env, tmp_path, monkeypatch):
 def test_requires_token(monkeypatch):
     monkeypatch.delenv("REPLICATE_API_TOKEN", raising=False)
 
-    from slop_studio.tools.replicate_run import app
+    from slop_salon.tools.replicate_run import app
 
     result = runner.invoke(app, ["x/y:z", "--input", "k=v"])
 

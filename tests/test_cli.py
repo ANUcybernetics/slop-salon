@@ -7,25 +7,25 @@ from unittest.mock import MagicMock, patch
 import pytest
 from typer.testing import CliRunner
 
-from slop_studio.cli import app
+from slop_salon.cli import app
 
 runner = CliRunner()
 
 
 @pytest.fixture
 def fake_config(tmp_path, monkeypatch):
-    cfg = tmp_path / "slop_studio.toml"
+    cfg = tmp_path / "slop_salon.toml"
     cfg.write_text(
         """
 [agents.boden]
 handle = "boden.slopsalon.art"
-github_repo = "ANUcybernetics/slop-studio-boden"
+github_repo = "ANUcybernetics/slop-salon-boden"
 sprite_id = "spr_abc"
 siblings = ["other"]
 
 [agents.other]
 handle = "other.slopsalon.art"
-github_repo = "ANUcybernetics/slop-studio-other"
+github_repo = "ANUcybernetics/slop-salon-other"
 sprite_id = "spr_xyz"
 siblings = ["boden"]
 """
@@ -35,7 +35,7 @@ siblings = ["boden"]
 
 
 def test_status_lists_agents(fake_config):
-    with patch("slop_studio.cli.SpritesClient") as mock_class:
+    with patch("slop_salon.cli.SpritesClient") as mock_class:
         instance = MagicMock()
         instance.get_status.return_value = "running"
         mock_class.return_value = instance
@@ -49,7 +49,7 @@ def test_status_lists_agents(fake_config):
 
 
 def test_logs_runs_command_in_sprite(fake_config):
-    with patch("slop_studio.cli.SpritesClient") as mock_class:
+    with patch("slop_salon.cli.SpritesClient") as mock_class:
         instance = MagicMock()
         instance.exec.return_value = MagicMock(stdout="(transcript)", stderr="", exit_code=0)
         mock_class.return_value = instance
@@ -65,7 +65,7 @@ def test_logs_runs_command_in_sprite(fake_config):
 
 
 def test_diff_runs_git_in_sprite(fake_config):
-    with patch("slop_studio.cli.SpritesClient") as mock_class:
+    with patch("slop_salon.cli.SpritesClient") as mock_class:
         instance = MagicMock()
         instance.exec.return_value = MagicMock(
             stdout="diff --git a/x b/x\n+hi", stderr="", exit_code=0
@@ -79,7 +79,7 @@ def test_diff_runs_git_in_sprite(fake_config):
 
 
 def test_feed_all_agents(fake_config):
-    with patch("slop_studio.cli.atproto_client_for_feed") as mock_factory:
+    with patch("slop_salon.cli.atproto_client_for_feed") as mock_factory:
         mock_client = MagicMock()
         mock_client.get_author_feed.return_value = MagicMock(
             feed=[
@@ -102,7 +102,7 @@ def test_feed_all_agents(fake_config):
 
 
 def test_feed_single_agent(fake_config):
-    with patch("slop_studio.cli.atproto_client_for_feed") as mock_factory:
+    with patch("slop_salon.cli.atproto_client_for_feed") as mock_factory:
         mock_client = MagicMock()
         mock_client.get_author_feed.return_value = MagicMock(
             feed=[
@@ -123,7 +123,7 @@ def test_feed_single_agent(fake_config):
 
 
 def test_pause_clears_crontab(fake_config):
-    with patch("slop_studio.cli.SpritesClient") as mock_class:
+    with patch("slop_salon.cli.SpritesClient") as mock_class:
         instance = MagicMock()
         instance.exec.return_value = MagicMock(stdout="", stderr="", exit_code=0)
         mock_class.return_value = instance
@@ -137,7 +137,7 @@ def test_pause_clears_crontab(fake_config):
 
 
 def test_resume_reinstalls_crontab(fake_config):
-    with patch("slop_studio.cli.SpritesClient") as mock_class:
+    with patch("slop_salon.cli.SpritesClient") as mock_class:
         instance = MagicMock()
         instance.exec.return_value = MagicMock(stdout="", stderr="", exit_code=0)
         mock_class.return_value = instance
@@ -150,7 +150,7 @@ def test_resume_reinstalls_crontab(fake_config):
 
 
 def test_talk_runs_slop_tick_with_prompt(fake_config):
-    with patch("slop_studio.cli.SpritesClient") as mock_class:
+    with patch("slop_salon.cli.SpritesClient") as mock_class:
         instance = MagicMock()
         instance.exec.return_value = MagicMock(stdout="(claude output)", stderr="", exit_code=0)
         mock_class.return_value = instance
@@ -168,7 +168,7 @@ def test_talk_runs_slop_tick_with_prompt(fake_config):
 
 
 def test_new_invokes_provisioning(fake_config):
-    with patch("slop_studio.cli.provision_agent") as mock_provision:
+    with patch("slop_salon.cli.provision_agent") as mock_provision:
         result = runner.invoke(app, ["new", "boden", "--yes-dns"])
 
         assert result.exit_code == 0, result.output

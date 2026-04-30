@@ -14,8 +14,8 @@ from pathlib import Path
 
 import typer
 
-from slop_studio.config import load_config, save_sprite_id
-from slop_studio.sprites import SpritesClient
+from slop_salon.config import load_config, save_sprite_id
+from slop_salon.sprites import SpritesClient
 
 # Where the agent's repo gets cloned inside the sprite.
 SPRITE_HOME = "/home/agent"
@@ -85,7 +85,7 @@ def _push_initial_commit(repo: str, files: dict[str, str], token: str) -> None:
 
 def provision_agent(
     name: str,
-    config_path: str | Path = "slop_studio.toml",
+    config_path: str | Path = "slop_salon.toml",
     templates_dir: str | Path = "templates",
     soul_path: str | Path = "SOUL.md",
     skip_dns_confirm: bool = False,
@@ -150,24 +150,24 @@ def provision_agent(
     typer.echo("[6/13] Installing claude CLI")
     _exec("curl -fsSL https://claude.ai/install.sh | bash")
 
-    typer.echo("[7/13] uv tool install slop-studio")
+    typer.echo("[7/13] uv tool install slop-salon")
     _exec(
         "curl -LsSf https://astral.sh/uv/install.sh | sh && "
-        "~/.local/bin/uv tool install git+https://github.com/ANUcybernetics/slop-studio"
+        "~/.local/bin/uv tool install git+https://github.com/ANUcybernetics/slop-salon"
     )
 
     typer.echo("[8/13] Cloning agent repo")
     repo_url = f"https://{gh_token}@github.com/{agent.github_repo}.git"
-    _exec(f"git clone {shlex.quote(repo_url)} ~/slop-studio-{name}")
+    _exec(f"git clone {shlex.quote(repo_url)} ~/slop-salon-{name}")
 
     typer.echo("[9/13] pre-commit install")
-    _exec(f"cd ~/slop-studio-{name} && pip install pre-commit && pre-commit install")
+    _exec(f"cd ~/slop-salon-{name} && pip install pre-commit && pre-commit install")
 
     typer.echo("[10/13] Env vars already pushed via create_sprite")
 
     typer.echo("[11/13] Configuring git in sprite")
     _exec(
-        f"cd ~/slop-studio-{name} && "
+        f"cd ~/slop-salon-{name} && "
         f"git config user.name {shlex.quote(name)} && "
         f"git config user.email {shlex.quote(f'{name}@slopsalon.art')} && "
         "git config credential.helper store && "

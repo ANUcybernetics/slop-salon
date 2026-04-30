@@ -1,5 +1,5 @@
 [project]
-name = "slop-studio"
+name = "slop-salon"
 version = "0.1.0"
 description = "Slop Salon multi-agent harness"
 readme = "README.md"
@@ -16,14 +16,14 @@ dependencies = [
 
 [project.scripts]
 # Admin CLI
-slop = "slop_studio.cli:app"
+slop = "slop_salon.cli:app"
 # Agent-side tools (installed in each sprite)
-bsky-post = "slop_studio.tools.bsky:post_app"
-bsky-reply = "slop_studio.tools.bsky:reply_app"
-bsky-quote-post = "slop_studio.tools.bsky:quote_post_app"
-bsky-read-timeline = "slop_studio.tools.bsky:read_timeline_app"
-bsky-read-notifications = "slop_studio.tools.bsky:read_notifications_app"
-replicate-run = "slop_studio.tools.replicate_run:app"
+bsky-post = "slop_salon.tools.bsky:post_app"
+bsky-reply = "slop_salon.tools.bsky:reply_app"
+bsky-quote-post = "slop_salon.tools.bsky:quote_post_app"
+bsky-read-timeline = "slop_salon.tools.bsky:read_timeline_app"
+bsky-read-notifications = "slop_salon.tools.bsky:read_notifications_app"
+replicate-run = "slop_salon.tools.replicate_run:app"
 
 [dependency-groups]
 dev = [
