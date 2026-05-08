@@ -3,8 +3,8 @@
 
 # Example (uncomment and customise):
 #
-# [agents.boden]
-# handle = "boden.slopsalon.art"
-# github_repo = "ANUcybernetics/slop-salon-boden"
+# [agents.lou]
+# handle = "lou.slopsalon.art"
+# github_repo = "ANUcybernetics/slop-salon-lou"
 # sprite_id = ""
-# siblings = ["other"]
+# siblings = ["mina"]

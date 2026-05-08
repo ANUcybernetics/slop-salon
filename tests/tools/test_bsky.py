@@ -17,7 +17,7 @@ runner = CliRunner()
 @pytest.fixture
 def bsky_env(monkeypatch):
     """Set the env vars every bsky-* command needs."""
-    monkeypatch.setenv("BSKY_HANDLE", "boden.slopsalon.art")
+    monkeypatch.setenv("BSKY_HANDLE", "lou.slopsalon.art")
     monkeypatch.setenv("BSKY_PASSWORD", "test-password")
 
 
@@ -46,7 +46,7 @@ def test_post_text_only(bsky_env, mock_atproto_client):
     result = runner.invoke(post_app, ["--text", "hello world"])
 
     assert result.exit_code == 0
-    mock_atproto_client.login.assert_called_once_with("boden.slopsalon.art", "test-password")
+    mock_atproto_client.login.assert_called_once_with("lou.slopsalon.art", "test-password")
     mock_atproto_client.send_post.assert_called_once()
     args, kwargs = mock_atproto_client.send_post.call_args
     assert kwargs.get("text") == "hello world" or (args and args[0] == "hello world")
@@ -65,7 +65,7 @@ def test_post_requires_handle_env(monkeypatch, mock_atproto_client):
 
 
 def test_post_requires_password_env(monkeypatch, mock_atproto_client):
-    monkeypatch.setenv("BSKY_HANDLE", "boden.slopsalon.art")
+    monkeypatch.setenv("BSKY_HANDLE", "lou.slopsalon.art")
     monkeypatch.delenv("BSKY_PASSWORD", raising=False)
 
     from slop_salon.tools.bsky import post_app

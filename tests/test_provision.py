@@ -11,22 +11,22 @@ def test_resolve_secrets_runs_fnox_and_returns_env():
     from slop_salon.provision import resolve_secrets_via_fnox
 
     fake_env_output = (
-        "BSKY_HANDLE=boden.slopsalon.art\nBSKY_PASSWORD=topsecret\nANTHROPIC_API_KEY=sk-ant-xxx\n"
+        "BSKY_HANDLE=lou.slopsalon.art\nBSKY_PASSWORD=topsecret\nANTHROPIC_API_KEY=sk-ant-xxx\n"
     )
 
     with patch("slop_salon.provision.subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(stdout=fake_env_output, returncode=0)
 
-        env = resolve_secrets_via_fnox("boden")
+        env = resolve_secrets_via_fnox("lou")
 
-    assert env["BSKY_HANDLE"] == "boden.slopsalon.art"
+    assert env["BSKY_HANDLE"] == "lou.slopsalon.art"
     assert env["BSKY_PASSWORD"] == "topsecret"
     assert env["ANTHROPIC_API_KEY"] == "sk-ant-xxx"
 
     # Verify it called fnox correctly
     args = mock_run.call_args[0][0]
     assert args[0:3] == ["fnox", "exec", "--profile"]
-    assert args[3] == "boden"
+    assert args[3] == "lou"
 
 
 def test_resolve_secrets_raises_on_fnox_failure():
@@ -61,16 +61,16 @@ def test_uv_install_cmd_installs_uv_and_slop_salon():
 def test_clone_and_symlink_cmd_includes_repo_and_symlink():
     from slop_salon.provision import _build_clone_and_symlink_cmd
 
-    cmd = _build_clone_and_symlink_cmd("boden", "https://x@github.com/y/z.git")
+    cmd = _build_clone_and_symlink_cmd("lou", "https://x@github.com/y/z.git")
     assert "git clone" in cmd
-    assert "~/slop-salon-boden" in cmd
-    assert "ln -sf ~/slop-salon-boden/slop-tick ~/.local/bin/slop-tick" in cmd
+    assert "~/slop-salon-lou" in cmd
+    assert "ln -sf ~/slop-salon-lou/slop-tick ~/.local/bin/slop-tick" in cmd
 
 
 def test_pre_commit_install_cmd_uses_uv_not_pip():
     from slop_salon.provision import _build_pre_commit_install_cmd
 
-    cmd = _build_pre_commit_install_cmd("boden")
+    cmd = _build_pre_commit_install_cmd("lou")
     assert "uv tool install pre-commit" in cmd
     assert "pip install" not in cmd
     assert "pre-commit install" in cmd
@@ -79,7 +79,7 @@ def test_pre_commit_install_cmd_uses_uv_not_pip():
 def test_git_config_cmd_chmods_credentials():
     from slop_salon.provision import _build_git_config_cmd
 
-    cmd = _build_git_config_cmd("boden", "ghp_secret")
+    cmd = _build_git_config_cmd("lou", "ghp_secret")
     assert "git config user.name" in cmd
     assert "ghp_secret@github.com" in cmd
     assert "chmod 600 ~/.git-credentials" in cmd
@@ -88,9 +88,9 @@ def test_git_config_cmd_chmods_credentials():
 def test_install_crontab_cmd_pipes_text_to_crontab():
     from slop_salon.provision import _build_install_crontab_cmd
 
-    cmd = _build_install_crontab_cmd("AGENT_NAME=boden\n*/30 * * * * tick")
+    cmd = _build_install_crontab_cmd("AGENT_NAME=lou\n*/30 * * * * tick")
     assert "| crontab -" in cmd
-    assert "AGENT_NAME=boden" in cmd
+    assert "AGENT_NAME=lou" in cmd
 
 
 def test_build_template_files_interpolates_placeholders(tmp_path):
@@ -104,11 +104,11 @@ def test_build_template_files_interpolates_placeholders(tmp_path):
     soul.write_text("# Constitution")
 
     files = _build_template_files(
-        templates_dir, soul, "boden", "boden.slopsalon.art", "other", "other.slopsalon.art"
+        templates_dir, soul, "lou", "lou.slopsalon.art", "other", "other.slopsalon.art"
     )
 
     assert files["SOUL.md"] == "# Constitution"
-    assert files["CLAUDE.md"] == "Hi boden (boden.slopsalon.art)"
+    assert files["CLAUDE.md"] == "Hi lou (lou.slopsalon.art)"
     assert files["SIBLINGS.md"] == "Sibling: other"
 
 
@@ -133,9 +133,9 @@ def test_provision_calls_steps_in_order(tmp_path, monkeypatch):
     cfg = tmp_path / "slop_salon.toml"
     cfg.write_text(
         """
-[agents.boden]
-handle = "boden.slopsalon.art"
-github_repo = "ANUcybernetics/slop-salon-boden"
+[agents.lou]
+handle = "lou.slopsalon.art"
+github_repo = "ANUcybernetics/slop-salon-lou"
 sprite_id = ""
 siblings = ["other"]
 """
@@ -144,7 +144,7 @@ siblings = ["other"]
     monkeypatch.chdir(tmp_path)
 
     fake_secrets = {
-        "BSKY_HANDLE": "boden.slopsalon.art",
+        "BSKY_HANDLE": "lou.slopsalon.art",
         "BSKY_PASSWORD": "x",
         "REPLICATE_API_TOKEN": "y",
         "ANTHROPIC_API_KEY": "z",
@@ -162,7 +162,7 @@ siblings = ["other"]
         mock_sprites_class.return_value = sprites
         mock_sub.run.return_value = MagicMock(stdout="", returncode=0)
 
-        provision.provision_agent("boden", skip_dns_confirm=True)
+        provision.provision_agent("lou", skip_dns_confirm=True)
 
     # 1. gh repo create was called
     gh_calls = [c for c in mock_sub.run.call_args_list if "gh" in c[0][0][0]]
@@ -178,4 +178,4 @@ siblings = ["other"]
     from slop_salon.config import load_config
 
     reloaded = load_config(cfg)
-    assert reloaded.agents["boden"].sprite_id == "spr_new123"
+    assert reloaded.agents["lou"].sprite_id == "spr_new123"

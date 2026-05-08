@@ -26,7 +26,7 @@ def test_create_sprite_returns_id(client, httpx_mock: HTTPXMock):
     )
 
     sprite_id = client.create_sprite(
-        name="boden", env_vars={"AGENT_NAME": "boden", "BSKY_HANDLE": "x"}
+        name="lou", env_vars={"AGENT_NAME": "lou", "BSKY_HANDLE": "x"}
     )
     assert sprite_id == "spr_abc123"
 

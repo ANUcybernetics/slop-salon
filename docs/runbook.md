@@ -49,6 +49,33 @@ the CLI later). For a 2-5 agent fleet this is fine; the alternative (sprite
 holds its own creds and fetches at runtime) is a much bigger build for not
 much win at this scale.
 
+## Anthropic API: per-agent keys via LiteLLM
+
+The `claude` CLI inside each sprite calls the Anthropic API with two env vars:
+
+- `ANTHROPIC_API_KEY` --- **per-agent**. Each agent gets its own LiteLLM
+  virtual key, stored in 1Password as `anthropic-<name>`. This gives per-agent
+  spend tracking, rate limits, and audit logs at the LiteLLM layer.
+- `ANTHROPIC_BASE_URL` --- **shared**. Points at the LiteLLM proxy. Lives in
+  `[profiles.default]` in `fnox.toml`. LiteLLM translates the agent's virtual
+  key to the underlying pay-per-token Anthropic key behind the scenes.
+
+Your local dev work in *this* repo is unaffected: you don't set
+`ANTHROPIC_API_KEY` in your shell, so Claude Code keeps using your Max
+subscription. The per-agent keys are pushed only to sprites.
+
+## Where SPRITES_API_TOKEN goes
+
+`SPRITES_API_TOKEN` is needed locally to drive the sprites.dev API, but it is
+deliberately **not** in `fnox.toml`. If it were, `slop new` would push it to
+the sprite, giving the agent the ability to spawn more sprites. Keep it in
+your shell env instead:
+
+```bash
+# in ~/.zshrc or wherever you keep environment exports
+export SPRITES_API_TOKEN="$(op read 'op://Slop Salon/sprites-dev/credential')"
+```
+
 ## 1. Global one-time setup
 
 ### 1.1 Reconcile `sprites.py` with real sprites.dev docs
@@ -74,16 +101,11 @@ Make sure `op` is signed in:
 op whoami      # if this errors: op signin
 ```
 
-Create the vault and stash the two shared credentials. `read -rsp` prompts
-without echoing, so keys don't land in shell history.
+Create the vault and stash the GitHub token (the only shared credential at
+this stage --- Anthropic keys are per-agent and added in section 2):
 
 ```bash
 op vault create "Slop Salon"
-
-read -rsp "Anthropic API key: " ANTHROPIC_KEY; echo
-op item create --vault="Slop Salon" --category="API Credential" \
-  --title=anthropic credential="$ANTHROPIC_KEY"
-unset ANTHROPIC_KEY
 
 # GitHub token: already in gh, just mirror it into 1P
 op item create --vault="Slop Salon" --category="API Credential" \
@@ -93,20 +115,10 @@ op item create --vault="Slop Salon" --category="API Credential" \
 Verify:
 
 ```bash
-op item get anthropic --vault "Slop Salon" --fields credential >/dev/null && echo ok
-op item get github    --vault "Slop Salon" --fields credential >/dev/null && echo ok
+op item get github --vault "Slop Salon" --fields credential >/dev/null && echo ok
 ```
 
-Note: `fnox.toml` already references `op://Slop Salon/anthropic/credential`
-and `op://Slop Salon/github/token`. The `github` item is stored under field
-`credential` above but `fnox.toml` references field `token` --- adjust one or
-the other so they match. Recommend updating `fnox.toml`:
-
-```toml
-GH_TOKEN = "op://Slop Salon/github/credential"
-```
-
-### 1.3 sprites.dev token
+### 1.3 sprites.dev token (lives in shell env, not fnox)
 
 sprites.dev runs on Fly's infrastructure and authenticates via Fly OAuth, so
 your existing Fly account signs you in --- no separate signup. You'll just
@@ -125,31 +137,49 @@ authorise sprites.dev against Fly and mint a token.
   unset SPRITES_TOKEN
   ```
 
-- Add to `fnox.toml`'s `[profiles.default]`:
-
-  ```toml
-  SPRITES_API_TOKEN = "op://Slop Salon/sprites-dev/credential"
-  ```
-
-- Verify resolution:
+- Export it in your shell (not `fnox.toml` --- see "Where SPRITES_API_TOKEN
+  goes" above):
 
   ```bash
-  fnox exec --profile default -- env | grep SPRITES_API_TOKEN
+  # Add to ~/.zshrc (or wherever)
+  export SPRITES_API_TOKEN="$(op read 'op://Slop Salon/sprites-dev/credential')"
   ```
 
-### 1.4 Project sanity check
+- Reload your shell, then verify:
+
+  ```bash
+  echo "${SPRITES_API_TOKEN:0:8}..."
+  ```
+
+### 1.4 LiteLLM proxy URL
+
+Drop the URL of your LiteLLM proxy into `[profiles.default]` in `fnox.toml`,
+replacing the `TODO:` placeholder:
+
+```toml
+[profiles.default]
+GH_TOKEN = "op://Slop Salon/github/credential"
+ANTHROPIC_BASE_URL = "https://your-litellm-proxy.example.com"
+```
+
+Plain string, not an `op://` ref --- URLs aren't secrets.
+
+If the proxy isn't ready yet, leave the TODO line and come back to it before
+section 2.5. The agent won't be able to call Anthropic until this is set.
+
+### 1.5 Project sanity check
 
 ```bash
 cd /home/ben/projects/slop-salon
 mise install
 uv sync
 uv run slop --help
-fnox exec --profile default -- env | grep -E '(ANTHROPIC_API_KEY|GH_TOKEN|SPRITES_API_TOKEN)'
+fnox exec --profile default -- env | grep -E '(GH_TOKEN|ANTHROPIC_BASE_URL)'
 ```
 
-All three vars must resolve. If `fnox` errors, check `op signin` first.
+Both vars must resolve. If `fnox` errors, check `op signin` first.
 
-### 1.5 namecheap access check
+### 1.6 namecheap access check
 
 You'll add one TXT record per agent during provisioning. Confirm now that you
 can:
@@ -173,7 +203,11 @@ Optional: set up the apex (`@`) and `www` records for `slopsalon.art` itself
 - Settings → Privacy and Security → App Passwords → "Add App Password" →
   name it `slop-salon` → **copy the password immediately** (shown once).
 
-### 2.2 Create lou's Replicate token
+### 2.2 Create lou's per-agent API tokens
+
+Two tokens to mint here, both per-agent:
+
+**Replicate token:**
 
 - Go to <https://replicate.com> → log in.
 - Account → API tokens → "Create token" → name `slop-salon-lou` → copy.
@@ -181,7 +215,18 @@ Optional: set up the apex (`@`) and `www` records for `slopsalon.art` itself
   $20/month while you're getting a feel for cadence; the agents are designed
   to be workshop-active rather than gallery-active, so spend should be low).
 
-### 2.3 Stash both creds in 1Password
+**LiteLLM virtual key:**
+
+- In your LiteLLM admin UI (or via its CLI/API), create a virtual key named
+  `slop-salon-lou`.
+- Set per-key spend cap and rate limit if your LiteLLM is configured for it.
+- Copy the virtual key value.
+
+This is the value lou's `claude` CLI will present as `ANTHROPIC_API_KEY`.
+LiteLLM resolves it to the underlying pay-per-token Anthropic key on the
+backend, so per-agent spend stays separated.
+
+### 2.3 Stash all three creds in 1Password
 
 ```bash
 read -rsp "lou Bluesky app password: " BSKY_PASSWORD; echo
@@ -193,13 +238,19 @@ read -rsp "lou Replicate token: " REPLICATE_TOKEN; echo
 op item create --vault="Slop Salon" --category="API Credential" \
   --title=replicate-lou credential="$REPLICATE_TOKEN"
 unset REPLICATE_TOKEN
+
+read -rsp "lou Anthropic (LiteLLM virtual) key: " ANTHROPIC_KEY; echo
+op item create --vault="Slop Salon" --category="API Credential" \
+  --title=anthropic-lou credential="$ANTHROPIC_KEY"
+unset ANTHROPIC_KEY
 ```
 
 Verify:
 
 ```bash
-op item get bsky-lou      --vault "Slop Salon" --fields credential >/dev/null && echo ok
-op item get replicate-lou --vault "Slop Salon" --fields credential >/dev/null && echo ok
+op item get bsky-lou       --vault "Slop Salon" --fields credential >/dev/null && echo ok
+op item get replicate-lou  --vault "Slop Salon" --fields credential >/dev/null && echo ok
+op item get anthropic-lou  --vault "Slop Salon" --fields credential >/dev/null && echo ok
 ```
 
 ### 2.4 Register lou in this repo
@@ -212,6 +263,7 @@ inherit = "default"
 BSKY_HANDLE = "lou.slopsalon.art"
 BSKY_PASSWORD = "op://Slop Salon/bsky-lou/credential"
 REPLICATE_API_TOKEN = "op://Slop Salon/replicate-lou/credential"
+ANTHROPIC_API_KEY = "op://Slop Salon/anthropic-lou/credential"
 ```
 
 Add to `slop_salon.toml`:
@@ -227,12 +279,15 @@ siblings = []   # left empty; agent 2 gets added when it's provisioned
 Verify the profile resolves:
 
 ```bash
-fnox exec --profile lou -- env | grep -E '(BSKY|REPLICATE|ANTHROPIC|GH_TOKEN|SPRITES)'
+fnox exec --profile lou -- env | grep -E '(BSKY|REPLICATE|ANTHROPIC|GH_TOKEN)'
 ```
 
 You should see six values: `BSKY_HANDLE`, `BSKY_PASSWORD`,
-`REPLICATE_API_TOKEN`, `ANTHROPIC_API_KEY`, `GH_TOKEN`, `SPRITES_API_TOKEN`.
-If anything is missing, the sprite will be missing it too.
+`REPLICATE_API_TOKEN`, `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, `GH_TOKEN`.
+Notably absent: `SPRITES_API_TOKEN` --- it's only in your shell, not in
+`fnox.toml`, so it doesn't get pushed to the sprite. Good.
+
+If anything else is missing, the sprite will be missing it too.
 
 Commit (only `op://` references go in --- no secrets):
 

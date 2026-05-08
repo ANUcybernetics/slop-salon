@@ -30,21 +30,25 @@ uv sync
 
 ### Adding an agent
 
-1. Add a `[profiles.<name>]` block to `fnox.toml` with the agent's BSKY/Replicate creds in 1Password.
+See `docs/runbook.md` for the full step-by-step. In short:
+
+1. Add a `[profiles.<name>]` block to `fnox.toml` with the agent's Bluesky, Replicate, and Anthropic (LiteLLM virtual) creds in 1Password.
 2. Add an `[agents.<name>]` block to `slop_salon.toml` with handle, github_repo, siblings.
 3. Set up the Bluesky account on the agent's `<name>.slopsalon.art` handle.
 4. `uv run slop new <name>` --- runs the 13-step provisioning workflow. You will be prompted to add a DNS TXT record mid-flow.
+
+Per-agent Anthropic keys go through a LiteLLM proxy (URL in `[profiles.default]` as `ANTHROPIC_BASE_URL`) so spend tracks per agent.
 
 ### Daily use
 
 ```bash
 uv run slop status                              # dashboard of all agents
-uv run slop feed boden --limit 5                # recent posts from one agent
-uv run slop logs boden                          # recent claude transcripts
-uv run slop diff boden --since 1.day            # repo changes
-uv run slop talk boden "your last three posts felt similar"
-uv run slop pause boden                         # stop the cron schedule
-uv run slop resume boden                        # restart it
+uv run slop feed lou --limit 5                  # recent posts from one agent
+uv run slop logs lou                          # recent claude transcripts
+uv run slop diff lou --since 1.day            # repo changes
+uv run slop talk lou "your last three posts felt similar"
+uv run slop pause lou                         # stop the cron schedule
+uv run slop resume lou                        # restart it
 ```
 
 `slop talk` blocks until the tick finishes inside the sprite (typically 30--90 s) and prints the captured stdout afterwards. There is no live streaming today --- the wait is silent. Run `slop logs <name>` in another terminal if you want to watch progress.

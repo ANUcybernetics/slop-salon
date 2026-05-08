@@ -11,9 +11,9 @@ def test_load_config_returns_agents_by_name(tmp_path):
     cfg = tmp_path / "slop_salon.toml"
     cfg.write_text(
         """
-[agents.boden]
-handle = "boden.slopsalon.art"
-github_repo = "ANUcybernetics/slop-salon-boden"
+[agents.lou]
+handle = "lou.slopsalon.art"
+github_repo = "ANUcybernetics/slop-salon-lou"
 sprite_id = "spr_abc123"
 siblings = ["other"]
 
@@ -21,20 +21,20 @@ siblings = ["other"]
 handle = "other.slopsalon.art"
 github_repo = "ANUcybernetics/slop-salon-other"
 sprite_id = ""
-siblings = ["boden"]
+siblings = ["lou"]
 """
     )
 
     config = load_config(cfg)
 
-    assert "boden" in config.agents
-    boden = config.agents["boden"]
-    assert isinstance(boden, Agent)
-    assert boden.name == "boden"
-    assert boden.handle == "boden.slopsalon.art"
-    assert boden.github_repo == "ANUcybernetics/slop-salon-boden"
-    assert boden.sprite_id == "spr_abc123"
-    assert boden.siblings == ["other"]
+    assert "lou" in config.agents
+    lou = config.agents["lou"]
+    assert isinstance(lou, Agent)
+    assert lou.name == "lou"
+    assert lou.handle == "lou.slopsalon.art"
+    assert lou.github_repo == "ANUcybernetics/slop-salon-lou"
+    assert lou.sprite_id == "spr_abc123"
+    assert lou.siblings == ["other"]
 
 
 def test_load_config_missing_file_raises(tmp_path):
@@ -48,19 +48,19 @@ def test_save_sprite_id_updates_file_in_place(tmp_path):
     cfg = tmp_path / "slop_salon.toml"
     cfg.write_text(
         """
-[agents.boden]
-handle = "boden.slopsalon.art"
-github_repo = "ANUcybernetics/slop-salon-boden"
+[agents.lou]
+handle = "lou.slopsalon.art"
+github_repo = "ANUcybernetics/slop-salon-lou"
 sprite_id = ""
 siblings = []
 """
     )
 
     config = load_config(cfg)
-    save_sprite_id(config, "boden", "spr_xyz")
+    save_sprite_id(config, "lou", "spr_xyz")
 
     reloaded = load_config(cfg)
-    assert reloaded.agents["boden"].sprite_id == "spr_xyz"
+    assert reloaded.agents["lou"].sprite_id == "spr_xyz"
 
 
 def test_save_sprite_id_appends_when_field_missing(tmp_path):
@@ -70,15 +70,15 @@ def test_save_sprite_id_appends_when_field_missing(tmp_path):
     cfg = tmp_path / "slop_salon.toml"
     cfg.write_text(
         """
-[agents.boden]
-handle = "boden.slopsalon.art"
-github_repo = "ANUcybernetics/slop-salon-boden"
+[agents.lou]
+handle = "lou.slopsalon.art"
+github_repo = "ANUcybernetics/slop-salon-lou"
 siblings = []
 """
     )
 
     config = load_config(cfg)
-    save_sprite_id(config, "boden", "spr_new")
+    save_sprite_id(config, "lou", "spr_new")
 
     reloaded = load_config(cfg)
-    assert reloaded.agents["boden"].sprite_id == "spr_new"
+    assert reloaded.agents["lou"].sprite_id == "spr_new"

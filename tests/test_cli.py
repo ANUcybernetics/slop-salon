@@ -17,9 +17,9 @@ def fake_config(tmp_path, monkeypatch):
     cfg = tmp_path / "slop_salon.toml"
     cfg.write_text(
         """
-[agents.boden]
-handle = "boden.slopsalon.art"
-github_repo = "ANUcybernetics/slop-salon-boden"
+[agents.lou]
+handle = "lou.slopsalon.art"
+github_repo = "ANUcybernetics/slop-salon-lou"
 sprite_id = "spr_abc"
 siblings = ["other"]
 
@@ -27,7 +27,7 @@ siblings = ["other"]
 handle = "other.slopsalon.art"
 github_repo = "ANUcybernetics/slop-salon-other"
 sprite_id = "spr_xyz"
-siblings = ["boden"]
+siblings = ["lou"]
 """
     )
     monkeypatch.chdir(tmp_path)
@@ -43,7 +43,7 @@ def test_status_lists_agents(fake_config):
         result = runner.invoke(app, ["status"])
 
         assert result.exit_code == 0, result.output
-        assert "boden" in result.output
+        assert "lou" in result.output
         assert "other" in result.output
         assert "running" in result.output
 
@@ -54,7 +54,7 @@ def test_logs_runs_command_in_sprite(fake_config):
         instance.exec.return_value = MagicMock(stdout="(transcript)", stderr="", exit_code=0)
         mock_class.return_value = instance
 
-        result = runner.invoke(app, ["logs", "boden"])
+        result = runner.invoke(app, ["logs", "lou"])
 
         assert result.exit_code == 0, result.output
         assert "transcript" in result.output
@@ -72,7 +72,7 @@ def test_diff_runs_git_in_sprite(fake_config):
         )
         mock_class.return_value = instance
 
-        result = runner.invoke(app, ["diff", "boden", "--since", "1.day"])
+        result = runner.invoke(app, ["diff", "lou", "--since", "1.day"])
 
         assert result.exit_code == 0, result.output
         assert "+hi" in result.output
@@ -108,7 +108,7 @@ def test_feed_single_agent(fake_config):
             feed=[
                 MagicMock(
                     post=MagicMock(
-                        record=MagicMock(text="boden's post"),
+                        record=MagicMock(text="lou's post"),
                         indexed_at="2026-04-30T10:00Z",
                     )
                 )
@@ -116,10 +116,10 @@ def test_feed_single_agent(fake_config):
         )
         mock_factory.return_value = mock_client
 
-        result = runner.invoke(app, ["feed", "boden"])
+        result = runner.invoke(app, ["feed", "lou"])
 
         assert result.exit_code == 0, result.output
-        mock_client.get_author_feed.assert_called_once_with(actor="boden.slopsalon.art", limit=10)
+        mock_client.get_author_feed.assert_called_once_with(actor="lou.slopsalon.art", limit=10)
 
 
 def test_pause_clears_crontab(fake_config):
@@ -128,7 +128,7 @@ def test_pause_clears_crontab(fake_config):
         instance.exec.return_value = MagicMock(stdout="", stderr="", exit_code=0)
         mock_class.return_value = instance
 
-        result = runner.invoke(app, ["pause", "boden"])
+        result = runner.invoke(app, ["pause", "lou"])
 
         assert result.exit_code == 0, result.output
         # Should have called crontab -r or similar
@@ -142,7 +142,7 @@ def test_resume_reinstalls_crontab(fake_config):
         instance.exec.return_value = MagicMock(stdout="", stderr="", exit_code=0)
         mock_class.return_value = instance
 
-        result = runner.invoke(app, ["resume", "boden"])
+        result = runner.invoke(app, ["resume", "lou"])
 
         assert result.exit_code == 0, result.output
         cmd = instance.exec.call_args[0][1]
@@ -155,7 +155,7 @@ def test_talk_runs_slop_tick_with_prompt(fake_config):
         instance.exec.return_value = MagicMock(stdout="(claude output)", stderr="", exit_code=0)
         mock_class.return_value = instance
 
-        result = runner.invoke(app, ["talk", "boden", "your last three posts felt similar"])
+        result = runner.invoke(app, ["talk", "lou", "your last three posts felt similar"])
 
         assert result.exit_code == 0, result.output
         assert "(claude output)" in result.output
@@ -169,7 +169,7 @@ def test_talk_runs_slop_tick_with_prompt(fake_config):
 
 def test_new_invokes_provisioning(fake_config):
     with patch("slop_salon.cli.provision_agent") as mock_provision:
-        result = runner.invoke(app, ["new", "boden", "--yes-dns"])
+        result = runner.invoke(app, ["new", "lou", "--yes-dns"])
 
         assert result.exit_code == 0, result.output
         mock_provision.assert_called_once()
@@ -177,9 +177,9 @@ def test_new_invokes_provisioning(fake_config):
         args = mock_provision.call_args.args
         # Either positional or keyword
         if args:
-            assert args[0] == "boden"
+            assert args[0] == "lou"
         else:
-            assert kwargs.get("name") == "boden" or kwargs.get("agent_name") == "boden"
+            assert kwargs.get("name") == "lou" or kwargs.get("agent_name") == "lou"
         assert kwargs.get("skip_dns_confirm") is True or "skip_dns_confirm=True" in str(
             mock_provision.call_args
         )
