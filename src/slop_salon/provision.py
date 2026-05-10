@@ -1,8 +1,7 @@
 """Per-agent provisioning workflow.
 
-Implements the 13-step checklist from the spec. Idempotent where possible
-(GitHub repo creation will fail loudly if it already exists; the cleanest
-re-provision flow is to delete and recreate).
+Idempotent where possible (GitHub repo creation will fail loudly if the repo
+already exists; the cleanest re-provision flow is to delete and recreate).
 
 The bash commands run inside the sprite are built by pure `_build_*_cmd`
 functions so each is unit-testable in isolation. `provision_agent` is a thin
@@ -21,8 +20,10 @@ import typer
 from slop_salon.config import load_config, save_sprite_id
 from slop_salon.sprites import SpritesClient
 
-SPRITE_HOME = "/home/agent"
-APT_PACKAGES = "git imagemagick ffmpeg sox jq curl python3.14 nodejs"
+SPRITE_HOME = "/home/sprite"
+# Default sprite image already ships git, curl, jq, node, python, go, ruby,
+# rust, gh, plus claude/gemini/codex CLIs. Only media tooling is missing.
+APT_PACKAGES = "imagemagick ffmpeg sox"
 SLOP_SALON_REPO = "git+https://github.com/ANUcybernetics/slop-salon"
 
 
@@ -61,10 +62,6 @@ def _build_apt_install_cmd() -> str:
     return f"sudo apt-get update && sudo apt-get install -y {APT_PACKAGES}"
 
 
-def _build_claude_install_cmd() -> str:
-    return "curl -fsSL https://claude.ai/install.sh | bash"
-
-
 def _build_uv_and_slop_install_cmd() -> str:
     return (
         "curl -LsSf https://astral.sh/uv/install.sh | sh && "
@@ -73,10 +70,13 @@ def _build_uv_and_slop_install_cmd() -> str:
 
 
 def _build_clone_and_symlink_cmd(name: str, repo_url: str) -> str:
+    repo_dir = f"~/slop-salon-{name}"
     return (
-        f"git clone {shlex.quote(repo_url)} ~/slop-salon-{name} && "
+        f"git clone {shlex.quote(repo_url)} {repo_dir} && "
         "mkdir -p ~/.local/bin && "
-        f"ln -sf ~/slop-salon-{name}/slop-tick ~/.local/bin/slop-tick"
+        f"ln -sf {repo_dir}/slop-tick ~/.local/bin/slop-tick && "
+        f"ln -sf {repo_dir}/slop-tick-loop ~/.local/bin/slop-tick-loop && "
+        f"chmod +x {repo_dir}/slop-tick {repo_dir}/slop-tick-loop"
     )
 
 
@@ -98,11 +98,17 @@ def _build_git_config_cmd(name: str, gh_token: str) -> str:
     )
 
 
-def _build_install_crontab_cmd(crontab_text: str) -> str:
-    return f"echo {shlex.quote(crontab_text)} | crontab -"
+def _build_create_tick_service_cmd() -> str:
+    """Register the tick loop as a sprite-env service so it survives reboots.
+
+    The sprite image has no cron/systemd; long-running work must be a sprite
+    service. The loop script is `slop-tick-loop` (symlinked into ~/.local/bin
+    in the clone step).
+    """
+    return "sprite-env services create tick --cmd /home/sprite/.local/bin/slop-tick-loop"
 
 
-# --- Step helpers (each does one logical step from the 13-step spec) ---
+# --- Step helpers (each does one logical step from the spec) ---
 
 
 def _push_initial_commit(repo: str, files: dict[str, str], token: str) -> None:
@@ -165,13 +171,12 @@ def provision_agent(
     soul_path: str | Path = "SOUL.md",
     skip_dns_confirm: bool = False,
 ) -> None:
-    """End-to-end provisioning for one agent. Implements steps 1-13 from spec."""
+    """End-to-end provisioning for one agent."""
     config = load_config(config_path)
     if name not in config.agents:
         raise typer.BadParameter(f"agent {name!r} not in {config.path}")
     agent = config.agents[name]
 
-    # Resolve secrets early so we have GH_TOKEN before the gh calls.
     env = resolve_secrets_via_fnox(name)
     gh_token = env.get("GH_TOKEN")
     if not gh_token:
@@ -181,7 +186,7 @@ def provision_agent(
     sibling_handle = config.agents[sibling_name].handle if sibling_name in config.agents else ""
     templates_dir = Path(templates_dir)
 
-    typer.echo(f"[1/13] Creating GH repo {agent.github_repo}")
+    typer.echo(f"[1/11] Creating GH repo {agent.github_repo}")
     # --add-readme creates an initial commit so the repo has a default branch;
     # without it, the subsequent clone-and-push fails on an empty repo.
     subprocess.run(
@@ -190,19 +195,19 @@ def provision_agent(
         env={**os.environ, "GH_TOKEN": gh_token},
     )
 
-    typer.echo("[2/13] Pushing templates as initial commit")
+    typer.echo("[2/11] Pushing templates as initial commit")
     files = _build_template_files(
         templates_dir, Path(soul_path), agent.name, agent.handle, sibling_name, sibling_handle
     )
     _push_initial_commit(agent.github_repo, files, gh_token)
 
     if not skip_dns_confirm:
-        typer.echo(f"[3/13] MANUAL: add Bluesky DNS TXT record at _atproto.{agent.handle}")
+        typer.echo(f"[3/11] MANUAL: add Bluesky DNS TXT record at _atproto.{agent.handle}")
         typer.confirm("Have you added the DNS record?", abort=True)
     else:
-        typer.echo("[3/13] Skipping DNS confirm (--yes-dns set)")
+        typer.echo("[3/11] Skipping DNS confirm (--yes-dns set)")
 
-    typer.echo("[4/13] Creating sprite")
+    typer.echo("[4/11] Creating sprite")
     sprites = SpritesClient()
     sprite_id = sprites.create_sprite(name=name, env_vars={"AGENT_NAME": name, **env})
 
@@ -214,38 +219,26 @@ def provision_agent(
                 f"stderr: {result.stderr}"
             )
 
-    typer.echo("[5/13] Apt install")
+    typer.echo("[5/11] Apt install (imagemagick, ffmpeg, sox)")
     _exec(_build_apt_install_cmd())
 
-    typer.echo("[6/13] Installing claude CLI")
-    _exec(_build_claude_install_cmd())
-
-    typer.echo("[7/13] uv tool install slop-salon")
+    typer.echo("[6/11] uv tool install slop-salon")
     _exec(_build_uv_and_slop_install_cmd())
 
-    typer.echo("[8/13] Cloning agent repo + symlinking slop-tick into ~/.local/bin")
+    typer.echo("[7/11] Cloning agent repo + symlinking slop-tick(-loop) into ~/.local/bin")
     repo_url = f"https://{gh_token}@github.com/{agent.github_repo}.git"
     _exec(_build_clone_and_symlink_cmd(name, repo_url))
 
-    typer.echo("[9/13] pre-commit install")
+    typer.echo("[8/11] pre-commit install")
     _exec(_build_pre_commit_install_cmd(name))
 
-    typer.echo("[10/13] Env vars already pushed via create_sprite")
-
-    typer.echo("[11/13] Configuring git in sprite")
+    typer.echo("[9/11] Configuring git in sprite")
     _exec(_build_git_config_cmd(name, gh_token))
 
-    typer.echo("[12/13] Installing crontab")
-    crontab_text = _interpolate(
-        (templates_dir / "crontab").read_text(),
-        agent.name,
-        agent.handle,
-        sibling_name,
-        sibling_handle,
-    )
-    _exec(_build_install_crontab_cmd(crontab_text))
+    typer.echo("[10/11] Creating sprite-env tick service")
+    _exec(_build_create_tick_service_cmd())
 
-    typer.echo(f"[13/13] Saving sprite_id to {config.path}")
+    typer.echo(f"[11/11] Saving sprite_id to {config.path}")
     save_sprite_id(config, name, sprite_id)
 
     typer.echo(f"\nProvisioned {name} → sprite {sprite_id}")

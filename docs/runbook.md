@@ -78,20 +78,27 @@ export SPRITES_API_TOKEN="$(op read 'op://Slop Salon/sprites-dev/credential')"
 
 ## 1. Global one-time setup
 
-### 1.1 Reconcile `sprites.py` with real sprites.dev docs
+### 1.1 Install the `sprite` CLI locally
 
-`src/slop_salon/sprites.py:15-19` declares the API base URL and three endpoint
-paths as placeholders. Before anything else: open the sprites.dev API docs and
-verify or correct:
+`SpritesClient.exec` in `src/slop_salon/sprites.py` shells out to the
+sprites.dev `sprite` CLI, because the REST exec endpoint is a streaming-bytes
+channel without an exit-code envelope. So the admin box needs the CLI on PATH:
 
-- `SPRITES_BASE_URL`
-- `ENDPOINT_CREATE`
-- `ENDPOINT_EXEC`
-- `ENDPOINT_STATUS`
+```bash
+curl -fsSL https://sprites.dev/install.sh | bash
+# or: SPRITE_INSTALL_BIN_DIR=~/.local/bin curl -fsSL https://sprites.dev/install.sh | sh
+sprite --version
+```
 
-Also confirm the request/response shape in `create_sprite`, `exec`, and
-`get_status` matches the real API. If it doesn't, fix it now --- you'll
-discover any drift the hard way during step 2.5.
+After the token step below, point the CLI at it:
+
+```bash
+sprite auth setup --token "$SPRITES_API_TOKEN"
+sprite list   # should print (possibly empty) sprite list, not an auth error
+```
+
+Create and status calls in `sprites.py` still go over HTTP directly; only
+exec needs the CLI.
 
 ### 1.2 1Password vault
 
@@ -124,10 +131,19 @@ sprites.dev runs on Fly's infrastructure and authenticates via Fly OAuth, so
 your existing Fly account signs you in --- no separate signup. You'll just
 authorise sprites.dev against Fly and mint a token.
 
-- Visit <https://sprites.dev> → Sign in (OAuth via Fly).
-- In the dashboard, create an API token. The docs call it `SPRITES_TOKEN` but
-  this codebase reads it as `SPRITES_API_TOKEN` (`sprites.py:33`); the value
-  is the same thing, just stored under our env-var name.
+**Use the `anu-school-of-cybernetics` Fly org, not your personal account.** Slop Salon is
+an ANU School of Cybernetics project; all Fly spend (sprites.dev usage
+included, since it bills through whichever Fly org owns the OAuth grant) has
+to land on the institutional account. If you're signed in to Fly under your
+personal handle, switch orgs before authorising sprites.dev.
+
+- Visit <https://sprites.dev> → Sign in (OAuth via Fly). When Fly prompts for
+  which org to authorise, pick `anu-school-of-cybernetics`. If you only see your
+  personal account, sign out of Fly first and back in under the org.
+- In the dashboard, confirm the active org is `anu-school-of-cybernetics`, then create
+  an API token. The docs call it `SPRITES_TOKEN` but this codebase reads it
+  as `SPRITES_API_TOKEN` (`sprites.py:33`); the value is the same thing,
+  just stored under our env-var name.
 - Stash it in 1Password:
 
   ```bash
@@ -302,7 +318,7 @@ git commit -m "Register agent: lou"
 uv run slop new lou
 ```
 
-The CLI runs the 13-step provisioning workflow. Step 3 pauses and asks you to
+The CLI runs the 11-step provisioning workflow. Step 3 pauses and asks you to
 add a DNS TXT record. Here's what to do when it pauses:
 
 #### 2.5.a Get the TXT value from Bluesky
@@ -345,9 +361,9 @@ TXT record and migrates the handle. The account's handle is now
 #### 2.5.e Resume the CLI
 
 In the terminal, the `slop new` prompt is still waiting at `Have you added
-the DNS record? [y/N]:`. Type `y` and press Enter. The CLI runs steps 4-13
-(sprite creation, apt install, claude install, `uv tool install`, repo
-clone, pre-commit, env-var push, git config, cron install, save sprite ID).
+the DNS record? [y/N]:`. Type `y` and press Enter. The CLI runs steps 4-11
+(sprite creation, apt install of media tooling, `uv tool install`, repo
+clone, pre-commit, git config, tick-service create, save sprite ID).
 Total time ~2-5 min.
 
 The final line should be `Provisioned lou -> sprite <id>`.

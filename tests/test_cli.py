@@ -122,7 +122,7 @@ def test_feed_single_agent(fake_config):
         mock_client.get_author_feed.assert_called_once_with(actor="lou.slopsalon.art", limit=10)
 
 
-def test_pause_clears_crontab(fake_config):
+def test_pause_stops_tick_service(fake_config):
     with patch("slop_salon.cli.SpritesClient") as mock_class:
         instance = MagicMock()
         instance.exec.return_value = MagicMock(stdout="", stderr="", exit_code=0)
@@ -131,12 +131,12 @@ def test_pause_clears_crontab(fake_config):
         result = runner.invoke(app, ["pause", "lou"])
 
         assert result.exit_code == 0, result.output
-        # Should have called crontab -r or similar
         cmd = instance.exec.call_args[0][1]
-        assert any("crontab" in part for part in cmd)
+        joined = " ".join(cmd)
+        assert "sprite-env services stop tick" in joined
 
 
-def test_resume_reinstalls_crontab(fake_config):
+def test_resume_starts_tick_service(fake_config):
     with patch("slop_salon.cli.SpritesClient") as mock_class:
         instance = MagicMock()
         instance.exec.return_value = MagicMock(stdout="", stderr="", exit_code=0)
@@ -146,7 +146,8 @@ def test_resume_reinstalls_crontab(fake_config):
 
         assert result.exit_code == 0, result.output
         cmd = instance.exec.call_args[0][1]
-        assert any("crontab" in part for part in cmd)
+        joined = " ".join(cmd)
+        assert "sprite-env services start tick" in joined
 
 
 def test_talk_runs_slop_tick_with_prompt(fake_config):

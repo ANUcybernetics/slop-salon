@@ -5,8 +5,8 @@ Subcommands:
     feed     recent Bluesky posts (across or per agent)
     logs     recent transcripts from a sprite
     diff     repo changes since a given duration
-    pause    stop the cron schedule on a sprite
-    resume   restart the cron schedule on a sprite
+    pause    stop the tick service on a sprite
+    resume   restart the tick service on a sprite
     talk     one-shot stateless prompt to an agent
     new      provision a new agent (see provision.py)
 """
@@ -158,14 +158,14 @@ def pause(
     name: str = typer.Argument(..., help="Agent name"),
     config_path: str = typer.Option(None, "--config"),
 ):
-    """Stop the cron schedule on the agent's sprite (preserves the saved crontab)."""
+    """Stop the tick service on the agent's sprite."""
     config = _config(config_path)
     sprite_id = _require_sprite_id(config, name)
     sprites = SpritesClient()
-    # Save current crontab to a file, then remove it. Idempotent: re-running
-    # is safe because resume reads from the saved file.
-    cmd = "crontab -l > ~/.crontab.paused 2>/dev/null; crontab -r 2>/dev/null; echo paused"
-    result = sprites.exec(sprite_id, ["bash", "-lc", cmd])
+    result = sprites.exec(
+        sprite_id,
+        ["bash", "-lc", "sprite-env services stop tick && echo paused"],
+    )
     typer.echo(result.stdout.strip() or "paused")
 
 
@@ -174,13 +174,13 @@ def resume(
     name: str = typer.Argument(..., help="Agent name"),
     config_path: str = typer.Option(None, "--config"),
 ):
-    """Restart the cron schedule on the agent's sprite."""
+    """Restart the tick service on the agent's sprite."""
     config = _config(config_path)
     sprite_id = _require_sprite_id(config, name)
     sprites = SpritesClient()
     result = sprites.exec(
         sprite_id,
-        ["bash", "-lc", "crontab ~/.crontab.paused && echo resumed"],
+        ["bash", "-lc", "sprite-env services start tick && echo resumed"],
     )
     typer.echo(result.stdout.strip() or "resumed")
 

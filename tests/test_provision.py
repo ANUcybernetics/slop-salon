@@ -45,8 +45,12 @@ def test_apt_install_cmd_uses_required_packages():
     cmd = _build_apt_install_cmd()
     assert "apt-get update" in cmd
     assert "apt-get install -y" in cmd
-    for pkg in ("git", "imagemagick", "ffmpeg", "python3.14"):
+    # Only media tooling missing from the default sprite image.
+    for pkg in ("imagemagick", "ffmpeg", "sox"):
         assert pkg in cmd
+    # These ship with the sprite — provisioning must not reinstall them.
+    for pkg in ("git", "curl", "jq", "nodejs", "python3.14"):
+        assert pkg not in cmd
 
 
 def test_uv_install_cmd_installs_uv_and_slop_salon():
@@ -58,13 +62,14 @@ def test_uv_install_cmd_installs_uv_and_slop_salon():
     assert "ANUcybernetics/slop-salon" in cmd
 
 
-def test_clone_and_symlink_cmd_includes_repo_and_symlink():
+def test_clone_and_symlink_cmd_includes_repo_and_symlinks():
     from slop_salon.provision import _build_clone_and_symlink_cmd
 
     cmd = _build_clone_and_symlink_cmd("lou", "https://x@github.com/y/z.git")
     assert "git clone" in cmd
     assert "~/slop-salon-lou" in cmd
     assert "ln -sf ~/slop-salon-lou/slop-tick ~/.local/bin/slop-tick" in cmd
+    assert "ln -sf ~/slop-salon-lou/slop-tick-loop ~/.local/bin/slop-tick-loop" in cmd
 
 
 def test_pre_commit_install_cmd_uses_uv_not_pip():
@@ -85,12 +90,13 @@ def test_git_config_cmd_chmods_credentials():
     assert "chmod 600 ~/.git-credentials" in cmd
 
 
-def test_install_crontab_cmd_pipes_text_to_crontab():
-    from slop_salon.provision import _build_install_crontab_cmd
+def test_create_tick_service_cmd_uses_sprite_env():
+    from slop_salon.provision import _build_create_tick_service_cmd
 
-    cmd = _build_install_crontab_cmd("AGENT_NAME=lou\n*/30 * * * * tick")
-    assert "| crontab -" in cmd
-    assert "AGENT_NAME=lou" in cmd
+    cmd = _build_create_tick_service_cmd()
+    assert "sprite-env services create" in cmd
+    assert "tick" in cmd
+    assert "slop-tick-loop" in cmd
 
 
 def test_build_template_files_interpolates_placeholders(tmp_path):
@@ -113,10 +119,9 @@ def test_build_template_files_interpolates_placeholders(tmp_path):
 
 
 def test_provision_calls_steps_in_order(tmp_path, monkeypatch):
-    """The provisioner orchestrates 13 steps; verify the key external calls."""
+    """The provisioner orchestrates the workflow; verify the key external calls."""
     from slop_salon import provision
 
-    # Set up a templates dir and config
     templates_dir = tmp_path / "templates"
     templates_dir.mkdir()
     (templates_dir / "CLAUDE.md").write_text("# {{name}} ({{handle}})")
@@ -125,7 +130,7 @@ def test_provision_calls_steps_in_order(tmp_path, monkeypatch):
     (templates_dir / ".gitignore").write_text(".claude/\n")
     (templates_dir / ".pre-commit-config.yaml").write_text("repos: []\n")
     (templates_dir / "slop-tick").write_text("#!/bin/bash\n")
-    (templates_dir / "crontab").write_text("*/30 * * * * slop-tick tick\n")
+    (templates_dir / "slop-tick-loop").write_text("#!/bin/bash\nexport AGENT_NAME={{name}}\n")
 
     soul = tmp_path / "SOUL.md"
     soul.write_text("# Soul")
@@ -157,25 +162,30 @@ siblings = ["other"]
         patch.object(provision, "subprocess") as mock_sub,
     ):
         sprites = MagicMock()
-        sprites.create_sprite.return_value = "spr_new123"
+        sprites.create_sprite.return_value = "lou"
         sprites.exec.return_value = MagicMock(stdout="", stderr="", exit_code=0)
         mock_sprites_class.return_value = sprites
         mock_sub.run.return_value = MagicMock(stdout="", returncode=0)
 
         provision.provision_agent("lou", skip_dns_confirm=True)
 
-    # 1. gh repo create was called
     gh_calls = [c for c in mock_sub.run.call_args_list if "gh" in c[0][0][0]]
     assert any("repo" in c[0][0] and "create" in c[0][0] for c in gh_calls)
 
-    # 4. Sprite was created
     sprites.create_sprite.assert_called_once()
 
-    # 5-12. Several exec calls happened (apt, claude install, uv tool install, etc.)
-    assert sprites.exec.call_count >= 5
+    # apt, uv-install, clone+symlink, pre-commit, git-config, tick-service = 6 execs
+    assert sprites.exec.call_count >= 6
 
-    # 13. slop_salon.toml was updated with the sprite ID
+    # The tick service is created via sprite-env services, not crontab.
+    exec_commands = [c[0][1][-1] for c in sprites.exec.call_args_list]
+    assert any("sprite-env services create tick" in cmd for cmd in exec_commands)
+    assert not any("crontab" in cmd for cmd in exec_commands)
+
+    # claude is pre-installed in the sprite image, so provisioning must not reinstall it.
+    assert not any("claude.ai/install.sh" in cmd for cmd in exec_commands)
+
     from slop_salon.config import load_config
 
     reloaded = load_config(cfg)
-    assert reloaded.agents["lou"].sprite_id == "spr_new123"
+    assert reloaded.agents["lou"].sprite_id == "lou"

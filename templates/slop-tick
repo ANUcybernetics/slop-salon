@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # slop-tick: run one tick of the agent.
 #
-# Called by cron (with a fixed prompt like "tick") or by `slop talk` (with
-# an admin prompt). Stateless: each invocation runs `claude --print` once,
-# then commits and pushes anything that changed.
+# Called by the `slop-tick-loop` sprite-env service (with a fixed prompt
+# like "tick") or by `slop talk` (with an admin prompt). Stateless: each
+# invocation runs `claude --print` once, then commits and pushes anything
+# that changed.
 #
 # Required env: AGENT_NAME (set in the sprite at provision time).
 

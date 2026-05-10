@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# slop-tick-loop: long-running loop that drives `slop-tick` at jittered intervals.
+#
+# Started as a sprite-env service (the sprite image has no cron/systemd). The
+# service auto-restarts on sprite boot and keeps the sprite from idling out.
+#
+# Cadence: 20–40 min, jittered, so multiple agents don't move on a shared metronome.
+
+set -euo pipefail
+
+export AGENT_NAME={{name}}
+
+while true; do
+  sleep $((1200 + RANDOM % 1200))
+  slop-tick "tick" >> "$HOME/slop-tick.log" 2>&1 || true
+done

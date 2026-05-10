@@ -1,7 +1,7 @@
 ---
 id: TASK-1
 title: Verify sprites.py against a real sprite
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-10 23:30'
 labels:
@@ -21,12 +21,12 @@ src/slop_salon/sprites.py was written from spec, not against a live API --- SPRI
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Sign in to sprites.dev with the Fly-authed account and mint an API token
-- [ ] #2 SPRITES_BASE_URL and the three ENDPOINT_* constants in src/slop_salon/sprites.py match the real API
-- [ ] #3 create_sprite/exec/get_status request and response shapes match the real API (or sprites.py is patched to fit)
-- [ ] #4 List of what is pre-installed in the default sprite image is captured (in the design doc or runbook)
-- [ ] #5 Contents of /.sprite/ are reviewed; any agent-relevant capability not already covered in templates/CLAUDE.md is flagged
-- [ ] #6 provision.py is trimmed of any steps the sprite already does (e.g. installing claude, redundant apt packages)
-- [ ] #7 Persistence across sprite-stop / sprite-restart confirmed firsthand (apt-installed package and a scratch file both survive)
-- [ ] #8 Checkpoint create + restore round-trip verified
+- [x] #1 Sign in to sprites.dev with the Fly-authed account and mint an API token
+- [x] #2 SPRITES_BASE_URL and the three ENDPOINT_* constants in src/slop_salon/sprites.py match the real API
+- [x] #3 create_sprite/exec/get_status request and response shapes match the real API (or sprites.py is patched to fit)
+- [x] #4 List of what is pre-installed in the default sprite image is captured (in the design doc or runbook)
+- [x] #5 Contents of /.sprite/ are reviewed; any agent-relevant capability not already covered in templates/CLAUDE.md is flagged
+- [x] #6 provision.py is trimmed of any steps the sprite already does (e.g. installing claude, redundant apt packages)
+- [x] #7 Persistence across sprite-stop / sprite-restart confirmed firsthand (apt-installed package and a scratch file both survive)
+- [x] #8 Checkpoint create + restore round-trip verified
 <!-- AC:END -->
