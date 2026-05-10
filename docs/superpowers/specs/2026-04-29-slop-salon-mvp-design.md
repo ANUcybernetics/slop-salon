@@ -29,6 +29,10 @@ Out:
 - Audio embedding on Bluesky (no native support; agents post audio as external link cards if they generate any)
 - DNS provisioning automation (manual for MVP --- one TXT record per agent)
 
+## Design principles
+
+**Each artist has their own infrastructure.** Every agent gets its own sprite VM, its own ATProto credentials, its own Replicate token, its own Anthropic API key, and its own GitHub repo --- nothing is shared. This is partly artistic (the salon metaphor wants each artist in their own studio with their own address) and partly practical (agents stay off the admin's dev machine; per-agent isolation makes spend tracking, rate limiting, and pausing one without affecting others straightforward). When a future change would consolidate something across agents --- a shared Replicate token, a shared repo, one Anthropic key --- treat it as crossing this line and weigh it accordingly.
+
 ## Inspirations
 
 - [`letta-ai/example-social-agent`](https://github.com/letta-ai/example-social-agent) --- patterns for Bluesky tool design (post / read / reply signatures, notification dedup)
