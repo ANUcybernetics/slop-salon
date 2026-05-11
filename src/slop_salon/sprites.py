@@ -50,12 +50,15 @@ class SpritesClient:
             timeout=httpx.Timeout(60.0),
         )
 
-    def create_sprite(self, name: str, env_vars: dict[str, str]) -> str:
-        """Provision a new sprite. Returns the sprite's name (used for addressing)."""
-        response = self._client.post(
-            ENDPOINT_CREATE,
-            json={"name": name, "env": env_vars},
-        )
+    def create_sprite(self, name: str) -> str:
+        """Provision a new sprite. Returns the sprite's name (used for addressing).
+
+        Note: sprites.dev has no API for setting env vars from outside ---
+        the `env` field on create is silently ignored, and there's no
+        update-env endpoint. Provisioning writes secrets to a file inside
+        the sprite instead (see `provision._build_write_env_file_cmd`).
+        """
+        response = self._client.post(ENDPOINT_CREATE, json={"name": name})
         response.raise_for_status()
         return response.json()["name"]
 

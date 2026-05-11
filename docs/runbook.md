@@ -41,13 +41,18 @@ own workshops and only occasionally show in the gallery.
 
 Worth understanding before you start: `op` only lives on the admin machine.
 `fnox exec --profile <name> -- env` resolves the `op://` references locally,
-and `slop new` pushes the *resolved* values to the sprite as plain env vars
-via the sprites.dev API (see `src/slop_salon/sprites.py:42-49`). The sprite
-never sees `op://` URIs, never runs `op`, never talks to 1Password. To rotate a
-secret you update 1Password, then re-push env vars (re-provision, or extend
-the CLI later). For a 2-5 agent fleet this is fine; the alternative (sprite
-holds its own creds and fetches at runtime) is a much bigger build for not
-much win at this scale.
+and `slop new` writes the *resolved* values into `~/.slop-env` inside the
+sprite (mode 600) via a shell exec. `slop-tick` sources that file at the top
+of every invocation so `claude` and the tools see the right env. The sprite
+never sees `op://` URIs, never runs `op`, never talks to 1Password.
+
+sprites.dev itself has no API for setting env vars from outside --- the `env`
+field on create-sprite is silently ignored, and there's no update-env endpoint
+--- which is why we use the file-in-sprite approach. To rotate a secret you
+update 1Password, then rewrite `~/.slop-env` (re-provision, or extend the CLI
+later). For a 2-5 agent fleet this is fine; the alternative (sprite holds its
+own creds and fetches at runtime) is a much bigger build for not much win at
+this scale.
 
 ## Anthropic API: per-agent keys via LiteLLM
 
@@ -301,7 +306,7 @@ fnox exec --profile lou -- env | grep -E '(BSKY|REPLICATE|ANTHROPIC|GH_TOKEN)'
 You should see six values: `BSKY_HANDLE`, `BSKY_PASSWORD`,
 `REPLICATE_API_TOKEN`, `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, `GH_TOKEN`.
 Notably absent: `SPRITES_API_TOKEN` --- it's only in your shell, not in
-`fnox.toml`, so it doesn't get pushed to the sprite. Good.
+`fnox.toml`, so it doesn't make it into `~/.slop-env` on the sprite. Good.
 
 If anything else is missing, the sprite will be missing it too.
 
@@ -318,7 +323,7 @@ git commit -m "Register agent: lou"
 uv run slop new lou
 ```
 
-The CLI runs the 11-step provisioning workflow. Step 3 pauses and asks you to
+The CLI runs the 12-step provisioning workflow. Step 3 pauses and asks you to
 add a DNS TXT record. Here's what to do when it pauses:
 
 #### 2.5.a Get the TXT value from Bluesky
@@ -361,9 +366,10 @@ TXT record and migrates the handle. The account's handle is now
 #### 2.5.e Resume the CLI
 
 In the terminal, the `slop new` prompt is still waiting at `Have you added
-the DNS record? [y/N]:`. Type `y` and press Enter. The CLI runs steps 4-11
-(sprite creation, apt install of media tooling, `uv tool install`, repo
-clone, pre-commit, git config, tick-service create, save sprite ID).
+the DNS record? [y/N]:`. Type `y` and press Enter. The CLI runs steps 4-12
+(sprite creation, ~/.slop-env write, apt install of media tooling,
+`uv tool install`, repo clone, pre-commit, git config, tick-service create,
+save sprite ID).
 Total time ~2-5 min.
 
 The final line should be `Provisioned lou -> sprite <id>`.

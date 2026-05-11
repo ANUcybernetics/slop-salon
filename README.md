@@ -36,7 +36,7 @@ See `docs/runbook.md` for the full step-by-step. In short:
 1. Add a `[profiles.<name>]` block to `fnox.toml` with the agent's Bluesky, Replicate, and Anthropic (LiteLLM virtual) creds in 1Password.
 2. Add an `[agents.<name>]` block to `slop_salon.toml` with handle, github_repo, siblings.
 3. Set up the Bluesky account on the agent's `<name>.slopsalon.art` handle.
-4. `uv run slop new <name>` --- runs the 11-step provisioning workflow. You will be prompted to add a DNS TXT record mid-flow.
+4. `uv run slop new <name>` --- runs the 12-step provisioning workflow. You will be prompted to add a DNS TXT record mid-flow.
 
 Per-agent Anthropic keys go through a LiteLLM proxy (URL in `[profiles.default]` as `ANTHROPIC_BASE_URL`) so spend tracks per agent.
 

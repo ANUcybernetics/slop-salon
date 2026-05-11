@@ -9,8 +9,8 @@
 GH_TOKEN = "op://Slop Salon/github/credential"
 ANTHROPIC_BASE_URL = "TODO: LiteLLM proxy URL, e.g. https://litellm.example.com"
 # SPRITES_API_TOKEN is needed locally to drive the sprites.dev API but it
-# would also be pushed to the sprite if listed here, which gives the agent
-# the ability to spawn sprites. Keep it in your shell env instead.
+# would also land in ~/.slop-env on the sprite if listed here, which gives
+# the agent the ability to spawn sprites. Keep it in your shell env instead.
 
 # Per-agent profiles inherit `default` and add the agent's own creds.
 # Add one [profiles.<name>] block per agent.

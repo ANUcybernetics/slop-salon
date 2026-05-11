@@ -99,6 +99,32 @@ def test_create_tick_service_cmd_uses_sprite_env():
     assert "slop-tick-loop" in cmd
 
 
+def test_write_env_file_cmd_encodes_safely_and_chmods_600():
+    import base64
+
+    from slop_salon.provision import _build_write_env_file_cmd
+
+    cmd = _build_write_env_file_cmd(
+        {
+            "AGENT_NAME": "lou",
+            "BSKY_PASSWORD": "tricky pwd with $dollar and 'quote'",
+            "GH_TOKEN": "ghp_simple",
+        }
+    )
+    # Mode 600 and the canonical filename.
+    assert "chmod 600 ~/.slop-env" in cmd
+    assert "umask 077" in cmd
+    # The body is base64-encoded; decode it and check it round-trips.
+    encoded = cmd.split("echo ", 1)[1].split(" ", 1)[0]
+    decoded = base64.b64decode(encoded).decode()
+    assert "export AGENT_NAME=lou" in decoded
+    assert "export GH_TOKEN=ghp_simple" in decoded
+    # Tricky chars survive via shlex quoting.
+    assert "BSKY_PASSWORD=" in decoded
+    assert "$dollar" in decoded
+    assert "'quote'" in decoded or "quote" in decoded
+
+
 def test_build_template_files_interpolates_placeholders(tmp_path):
     from slop_salon.provision import _build_template_files
 
@@ -130,7 +156,7 @@ def test_provision_calls_steps_in_order(tmp_path, monkeypatch):
     (templates_dir / ".gitignore").write_text(".claude/\n")
     (templates_dir / ".pre-commit-config.yaml").write_text("repos: []\n")
     (templates_dir / "slop-tick").write_text("#!/bin/bash\n")
-    (templates_dir / "slop-tick-loop").write_text("#!/bin/bash\nexport AGENT_NAME={{name}}\n")
+    (templates_dir / "slop-tick-loop").write_text("#!/bin/bash\n")
 
     soul = tmp_path / "SOUL.md"
     soul.write_text("# Soul")
@@ -174,8 +200,9 @@ siblings = ["other"]
 
     sprites.create_sprite.assert_called_once()
 
-    # apt, uv-install, clone+symlink, pre-commit, git-config, tick-service = 6 execs
-    assert sprites.exec.call_count >= 6
+    # env-file write, apt, uv-install, clone+symlink, pre-commit, git-config,
+    # tick-service = 7 execs
+    assert sprites.exec.call_count >= 7
 
     # The tick service is created via sprite-env services, not crontab.
     exec_commands = [c[0][1][-1] for c in sprites.exec.call_args_list]
@@ -184,6 +211,13 @@ siblings = ["other"]
 
     # claude is pre-installed in the sprite image, so provisioning must not reinstall it.
     assert not any("claude.ai/install.sh" in cmd for cmd in exec_commands)
+
+    # The env file is written inside the sprite (the REST `env` field is ignored).
+    assert any("~/.slop-env" in cmd for cmd in exec_commands)
+    # create_sprite no longer takes env_vars (the API ignored them anyway).
+    assert sprites.create_sprite.call_args.kwargs == {"name": "lou"} or (
+        sprites.create_sprite.call_args.args == ("lou",)
+    )
 
     from slop_salon.config import load_config
 

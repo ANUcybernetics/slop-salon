@@ -30,7 +30,7 @@ def test_create_sprite_returns_name(client, httpx_mock: HTTPXMock):
         },
     )
 
-    name = client.create_sprite(name="lou", env_vars={"AGENT_NAME": "lou", "BSKY_HANDLE": "x"})
+    name = client.create_sprite(name="lou")
     assert name == "lou"
 
 

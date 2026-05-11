@@ -6,12 +6,19 @@
 # invocation runs `claude --print` once, then commits and pushes anything
 # that changed.
 #
-# Required env: AGENT_NAME (set in the sprite at provision time).
+# Loads AGENT_NAME plus the agent's secrets from ~/.slop-env (mode 600,
+# written by provisioning). sprites.dev has no API for setting env vars
+# from outside, so the file is the canonical place for them.
 
 set -euo pipefail
 
+# shellcheck disable=SC1090
+if [[ -f "$HOME/.slop-env" ]]; then
+  source "$HOME/.slop-env"
+fi
+
 if [[ -z "${AGENT_NAME:-}" ]]; then
-  echo "error: AGENT_NAME env var is required" >&2
+  echo "error: AGENT_NAME not set (is ~/.slop-env in place?)" >&2
   exit 1
 fi
 

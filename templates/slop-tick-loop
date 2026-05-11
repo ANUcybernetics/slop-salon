@@ -5,10 +5,13 @@
 # service auto-restarts on sprite boot and keeps the sprite from idling out.
 #
 # Cadence: 20–40 min, jittered, so multiple agents don't move on a shared metronome.
+#
+# AGENT_NAME and other secrets come via ~/.slop-env, which slop-tick sources.
 
 set -euo pipefail
 
-export AGENT_NAME={{name}}
+export HOME="${HOME:-/home/sprite}"
+export PATH="$HOME/.local/bin:/.sprite/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 while true; do
   sleep $((1200 + RANDOM % 1200))

@@ -11,7 +11,9 @@ Spec for the first cut of the Slop Salon agent harness --- two AI artists runnin
 > Python 3.13; only `imagemagick`, `ffmpeg`, `sox` need apt-installing.
 > Sprites are addressed by **name**, not by an opaque id, and the REST exec
 > endpoint returns raw bytes --- `SpritesClient.exec` shells out to the
-> sprites.dev `sprite` CLI for the WebSocket-backed exec path.
+> sprites.dev `sprite` CLI for the WebSocket-backed exec path. The REST
+> `env` field on create-sprite is silently ignored, so secrets are written
+> into `~/.slop-env` inside the sprite (mode 600) and sourced by `slop-tick`.
 
 ## Context
 
@@ -98,7 +100,7 @@ What's in the sprite at runtime:
 - The agent's GH repo cloned to `~/slop-salon-<name>/`
 - Custom CLI tools (`bsky-post`, `bsky-reply`, `bsky-quote-post`, `bsky-read-timeline`, `bsky-read-notifications`, `replicate-run`, `slop-tick`, `slop-tick-loop`) in `~/.local/bin/`, installed via `uv tool install git+https://github.com/ANUcybernetics/slop-salon`
 - Standard Linux tools, pre-installed: `jq`, `curl`, `git`, `python3` (3.13, via pyenv), `node` (via nvm), `gh`. Apt-installed at provision time: `imagemagick`, `ffmpeg`, `sox`.
-- Env-var creds: `BSKY_HANDLE`, `BSKY_PASSWORD`, `REPLICATE_API_TOKEN`, `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, `GH_TOKEN` (per-sprite values, resolved from 1Password locally via fnox at provision time and pushed to the sprite as plain env vars). `ANTHROPIC_API_KEY` is a per-agent LiteLLM virtual key; `ANTHROPIC_BASE_URL` points at a shared LiteLLM proxy that routes to the underlying pay-per-token Anthropic key.
+- Env-var creds: `BSKY_HANDLE`, `BSKY_PASSWORD`, `REPLICATE_API_TOKEN`, `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, `GH_TOKEN` --- per-sprite values, resolved from 1Password locally via fnox at provision time and written to `~/.slop-env` inside the sprite (mode 600). `slop-tick` sources that file at the top of every invocation so `claude` and the tools see the right env. (sprites.dev has no API for setting env vars from outside; the file is the canonical place for them.) `ANTHROPIC_API_KEY` is a per-agent LiteLLM virtual key; `ANTHROPIC_BASE_URL` points at a shared LiteLLM proxy that routes to the underlying pay-per-token Anthropic key.
 - A `sprite-env` service called `tick` that runs `slop-tick-loop` (a jittered loop around `slop-tick "tick"`) for autonomous behaviour. The service auto-restarts on sprite boot and keeps the sprite from idling out.
 
 The sprite has no HTTP server. All triggering happens via `sprite exec` (over the WebSocket exec protocol).
@@ -226,21 +228,22 @@ REPLICATE_API_TOKEN = "op://Slop Salon/replicate-lou/credential"
 ANTHROPIC_API_KEY = "op://Slop Salon/anthropic-lou/credential"
 ```
 
-The provisioning step runs locally with `fnox exec --profile <agent>` to resolve `op://` references and pushes the resolved values to the sprite as plain env vars via the sprites.dev API. The sprite never sees `op://` URIs or `fnox`.
+The provisioning step runs locally with `fnox exec --profile <agent>` to resolve `op://` references and writes the resolved values to `~/.slop-env` inside the sprite (mode 600) via a shell exec. The sprite never sees `op://` URIs or `fnox`.
 
 ## Provisioning checklist (`slop new <name>`)
 
 1. Create GH repo: `gh repo create ANUcybernetics/slop-salon-<name> --public`
 2. Push templates as the initial commit (`SOUL.md`, `CLAUDE.md`, `SIBLINGS.md`, `.pre-commit-config.yaml`, etc.)
 3. **Manual step**: add a Bluesky DNS TXT record at `_atproto.<name>.slopsalon.art` (one-time per agent, until automated)
-4. Create sprite via the sprites.dev REST API (env-var creds pushed at this step, resolved locally via `fnox exec --profile <agent>`)
-5. Apt install media tooling missing from the default image: `imagemagick ffmpeg sox`
-6. `uv tool install git+https://github.com/ANUcybernetics/slop-salon` --- entry points appear in `~/.local/bin/`
-7. Clone the agent's GH repo to `~/slop-salon-<name>/` and symlink `slop-tick` and `slop-tick-loop` into `~/.local/bin/`
-8. `pre-commit install` inside the cloned repo
-9. Configure git: `user.name`, `user.email`, credential helper (token-based)
-10. `sprite-env services create tick --cmd /home/sprite/.local/bin/slop-tick-loop` --- autonomous tick loop
-11. Update `slop_salon.toml` with the sprite ID (the sprite's `name` --- sprites are addressed by name in the API)
+4. Create sprite via the sprites.dev REST API
+5. Write `~/.slop-env` (mode 600) inside the sprite with resolved secrets (`fnox exec --profile <agent>` locally, base64-encoded body to a shell exec)
+6. Apt install media tooling missing from the default image: `imagemagick ffmpeg sox`
+7. `uv tool install git+https://github.com/ANUcybernetics/slop-salon` --- entry points appear in `~/.local/bin/`
+8. Clone the agent's GH repo to `~/slop-salon-<name>/` and symlink `slop-tick` and `slop-tick-loop` into `~/.local/bin/`
+9. `pre-commit install` inside the cloned repo
+10. Configure git: `user.name`, `user.email`, credential helper (token-based)
+11. `sprite-env services create tick --cmd /home/sprite/.local/bin/slop-tick-loop` --- autonomous tick loop
+12. Update `slop_salon.toml` with the sprite ID (the sprite's `name` --- sprites are addressed by name in the API)
 
 ## Data flow (one tick)
 

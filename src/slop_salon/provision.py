@@ -10,6 +10,7 @@ orchestrator that composes them.
 
 from __future__ import annotations
 
+import base64
 import os
 import shlex
 import subprocess
@@ -96,6 +97,19 @@ def _build_git_config_cmd(name: str, gh_token: str) -> str:
         f"echo 'https://{gh_token}@github.com' > ~/.git-credentials && "
         "chmod 600 ~/.git-credentials"
     )
+
+
+def _build_write_env_file_cmd(env: dict[str, str]) -> str:
+    """Write resolved secrets to `~/.slop-env` (mode 600) inside the sprite.
+
+    sprites.dev has no API for setting env vars from outside, so secrets
+    have to live as a file inside the sprite. `slop-tick` sources this file
+    at the top of every invocation so `claude` and the tools see the right
+    env. The body is base64-encoded to avoid shell-quoting hazards.
+    """
+    body = "\n".join(f"export {k}={shlex.quote(v)}" for k, v in sorted(env.items()))
+    encoded = base64.b64encode(body.encode()).decode()
+    return f"umask 077 && echo {encoded} | base64 -d > ~/.slop-env && chmod 600 ~/.slop-env"
 
 
 def _build_create_tick_service_cmd() -> str:
@@ -186,7 +200,7 @@ def provision_agent(
     sibling_handle = config.agents[sibling_name].handle if sibling_name in config.agents else ""
     templates_dir = Path(templates_dir)
 
-    typer.echo(f"[1/11] Creating GH repo {agent.github_repo}")
+    typer.echo(f"[1/12] Creating GH repo {agent.github_repo}")
     # --add-readme creates an initial commit so the repo has a default branch;
     # without it, the subsequent clone-and-push fails on an empty repo.
     subprocess.run(
@@ -195,21 +209,21 @@ def provision_agent(
         env={**os.environ, "GH_TOKEN": gh_token},
     )
 
-    typer.echo("[2/11] Pushing templates as initial commit")
+    typer.echo("[2/12] Pushing templates as initial commit")
     files = _build_template_files(
         templates_dir, Path(soul_path), agent.name, agent.handle, sibling_name, sibling_handle
     )
     _push_initial_commit(agent.github_repo, files, gh_token)
 
     if not skip_dns_confirm:
-        typer.echo(f"[3/11] MANUAL: add Bluesky DNS TXT record at _atproto.{agent.handle}")
+        typer.echo(f"[3/12] MANUAL: add Bluesky DNS TXT record at _atproto.{agent.handle}")
         typer.confirm("Have you added the DNS record?", abort=True)
     else:
-        typer.echo("[3/11] Skipping DNS confirm (--yes-dns set)")
+        typer.echo("[3/12] Skipping DNS confirm (--yes-dns set)")
 
-    typer.echo("[4/11] Creating sprite")
+    typer.echo("[4/12] Creating sprite")
     sprites = SpritesClient()
-    sprite_id = sprites.create_sprite(name=name, env_vars={"AGENT_NAME": name, **env})
+    sprite_id = sprites.create_sprite(name=name)
 
     def _exec(command: str) -> None:
         result = sprites.exec(sprite_id, ["bash", "-lc", command])
@@ -219,26 +233,29 @@ def provision_agent(
                 f"stderr: {result.stderr}"
             )
 
-    typer.echo("[5/11] Apt install (imagemagick, ffmpeg, sox)")
+    typer.echo("[5/12] Writing ~/.slop-env in sprite (secrets + AGENT_NAME)")
+    _exec(_build_write_env_file_cmd({"AGENT_NAME": name, **env}))
+
+    typer.echo("[6/12] Apt install (imagemagick, ffmpeg, sox)")
     _exec(_build_apt_install_cmd())
 
-    typer.echo("[6/11] uv tool install slop-salon")
+    typer.echo("[7/12] uv tool install slop-salon")
     _exec(_build_uv_and_slop_install_cmd())
 
-    typer.echo("[7/11] Cloning agent repo + symlinking slop-tick(-loop) into ~/.local/bin")
+    typer.echo("[8/12] Cloning agent repo + symlinking slop-tick(-loop) into ~/.local/bin")
     repo_url = f"https://{gh_token}@github.com/{agent.github_repo}.git"
     _exec(_build_clone_and_symlink_cmd(name, repo_url))
 
-    typer.echo("[8/11] pre-commit install")
+    typer.echo("[9/12] pre-commit install")
     _exec(_build_pre_commit_install_cmd(name))
 
-    typer.echo("[9/11] Configuring git in sprite")
+    typer.echo("[10/12] Configuring git in sprite")
     _exec(_build_git_config_cmd(name, gh_token))
 
-    typer.echo("[10/11] Creating sprite-env tick service")
+    typer.echo("[11/12] Creating sprite-env tick service")
     _exec(_build_create_tick_service_cmd())
 
-    typer.echo(f"[11/11] Saving sprite_id to {config.path}")
+    typer.echo(f"[12/12] Saving sprite_id to {config.path}")
     save_sprite_id(config, name, sprite_id)
 
     typer.echo(f"\nProvisioned {name} → sprite {sprite_id}")
