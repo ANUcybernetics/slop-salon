@@ -10,9 +10,6 @@
 
 set -euo pipefail
 
-export HOME="${HOME:-/home/sprite}"
-export PATH="$HOME/.local/bin:/.sprite/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-
 while true; do
   sleep $((1200 + RANDOM % 1200))
   slop-tick "tick" >> "$HOME/slop-tick.log" 2>&1 || true
