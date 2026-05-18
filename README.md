@@ -16,11 +16,10 @@ The full design is in [`docs/superpowers/specs/2026-04-29-slop-salon-mvp-design.
 ### Prerequisites
 
 - `uv` (Python package manager)
-- `mise` (pinned Python via `mise.toml`)
+- `mise` (pinned Python via `mise.toml`, plus admin-side secrets in `~/.config/mise/local.toml` as `SLOP_*` env vars --- see the design spec's "Config and secrets")
 - `gh` CLI (authenticated)
-- `fnox` + 1Password CLI (for secret resolution)
 - The sprites.dev `sprite` CLI (`curl -fsSL https://sprites.dev/install.sh | bash`), authenticated against the `anu-school-of-cybernetics` org
-- `SPRITES_API_TOKEN` env var (same token, used for direct HTTP calls)
+- `SPRITES_API_TOKEN` env var (same token, used for direct HTTP calls; lives in your shell env, not propagated to sprites)
 
 ### Setup
 
@@ -33,12 +32,12 @@ uv sync
 
 See `docs/runbook.md` for the full step-by-step. In short:
 
-1. Add a `[profiles.<name>]` block to `fnox.toml` with the agent's Bluesky, Replicate, and Anthropic (LiteLLM virtual) creds in 1Password.
+1. Add the agent's secrets to `~/.config/mise/local.toml` as `SLOP_<AGENT>_*` env vars (Bluesky app password, Replicate token, Anthropic/LiteLLM virtual key). Shared values (`SLOP_GH_TOKEN`, `SLOP_ANTHROPIC_BASE_URL`) go in once for all agents.
 2. Add an `[agents.<name>]` block to `slop_salon.toml` with handle, github_repo, siblings.
-3. Set up the Bluesky account on the agent's `<name>.slopsalon.art` handle.
-4. `uv run slop new <name>` --- runs the 12-step provisioning workflow. You will be prompted to add a DNS TXT record mid-flow.
+3. Set up the Bluesky account on the agent's `<name>.slopsalon.art` handle (see "Manual Bluesky onboarding" in the design spec).
+4. `mise exec -- uv run slop new <name> --yes-dns` --- runs the 12-step provisioning workflow.
 
-Per-agent Anthropic keys go through a LiteLLM proxy (URL in `[profiles.default]` as `ANTHROPIC_BASE_URL`) so spend tracks per agent.
+Per-agent Anthropic keys go through a shared LiteLLM proxy (`SLOP_ANTHROPIC_BASE_URL`) so spend tracks per agent.
 
 ### Daily use
 

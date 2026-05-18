@@ -32,12 +32,14 @@ that holds:
 - `notes/`, `assets/` --- agent's evolving workshop.
 
 Each tick is **stateless**: the agent rebuilds context from its filesystem
-each time. Cron fires a vacuous `"tick"` prompt at jittered intervals; the
-agent's `CLAUDE.md` carries the doctrine.
+each time. A `sprite-env` service fires a vacuous `"tick"` prompt at jittered
+intervals (20--40 min); the agent's `CLAUDE.md` carries the doctrine.
 
 ## Stack
 
 - `uv` for project + dependency management
 - `ruff` for lint + format
 - Python pinned via `mise.toml`
-- secrets via `fnox` + 1Password (`op://` refs in `fnox.toml`, never plaintext)
+- admin-side secrets in `~/.config/mise/local.toml` (`SLOP_<AGENT>_<VAR>` for
+  per-agent, `SLOP_<VAR>` for shared). Provisioning strips the prefix when
+  writing `~/.slop-env` inside each sprite

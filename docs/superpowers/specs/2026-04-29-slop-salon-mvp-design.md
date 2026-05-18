@@ -14,6 +14,19 @@ Spec for the first cut of the Slop Salon agent harness --- two AI artists runnin
 > sprites.dev `sprite` CLI for the WebSocket-backed exec path. The REST
 > `env` field on create-sprite is silently ignored, so secrets are written
 > into `~/.slop-env` inside the sprite (mode 600) and sourced by `slop-tick`.
+> Bluesky signup is also fully manual: the PDS now requires phone
+> verification at account creation (`com.atproto.server.createAccount`
+> returns `InvalidPhoneVerification`), and further jurisdictional gates are
+> arriving (Australia's age-verification rollout). The earlier
+> `scripts/bsky_create_account.py` helper has been retired; see
+> "Manual Bluesky onboarding" below.
+> Secrets management has shifted off `fnox` + 1Password to `mise` on the
+> admin machine (`~/.config/mise/local.toml`). `op signin` was too painful
+> on the headless dev box; mise exposes the secrets as env vars directly.
+> Provisioning reads `SLOP_*` env vars from the local shell, strips the
+> `SLOP_<AGENT>_` (per-agent) or `SLOP_` (shared) prefix, and writes the
+> stripped names to `~/.slop-env` inside the sprite. See "Config and
+> secrets" below.
 
 ## Context
 
@@ -210,33 +223,40 @@ Files copied into each agent's GH repo at provision:
 handle = "lou.slopsalon.art"
 github_repo = "ANUcybernetics/slop-salon-lou"
 sprite_id = ""        # filled by provisioning
-siblings = ["other_name"]
+siblings = ["mina"]
 ```
 
-`fnox.toml` (in admin repo, committed) --- maps `op://` references to env-var names for provisioning:
+Admin-side secrets live in `~/.config/mise/local.toml` (not committed, host-local on the admin machine). Naming convention:
+
+- `SLOP_<AGENT>_<VAR>` --- per-agent. Stripped to `<VAR>` inside the sprite (e.g. `SLOP_LOU_BSKY_PASSWORD` → `BSKY_PASSWORD`).
+- `SLOP_<VAR>` --- shared across all agents (e.g. `SLOP_GH_TOKEN`, `SLOP_ANTHROPIC_BASE_URL`). Stripped to `<VAR>` inside every sprite.
+- Other env vars (e.g. `SPRITES_API_TOKEN`) stay admin-side; they're not propagated to sprites.
+
+Minimum required to provision one agent:
 
 ```toml
-[profiles.default]
-GH_TOKEN = "op://Slop Salon/github/credential"
-ANTHROPIC_BASE_URL = "https://litellm-proxy.example.com"
+[env]
+# shared across all agents
+SLOP_GH_TOKEN = "github_pat_..."           # fine-grained PAT, scoped to ANUcybernetics/slop-salon-*
+SLOP_ANTHROPIC_BASE_URL = "https://litellm-proxy.example.com"
 
-[profiles.lou]
-inherit = "default"
-BSKY_HANDLE = "lou.slopsalon.art"
-BSKY_PASSWORD = "op://Slop Salon/bsky-lou/credential"
-REPLICATE_API_TOKEN = "op://Slop Salon/replicate-lou/credential"
-ANTHROPIC_API_KEY = "op://Slop Salon/anthropic-lou/credential"
+# per-agent
+SLOP_LOU_BSKY_PASSWORD = "..."             # the Bluesky app password named "sprite"
+SLOP_LOU_REPLICATE_API_TOKEN = "..."
+SLOP_LOU_ANTHROPIC_API_KEY = "..."         # the LiteLLM virtual key for lou
 ```
 
-The provisioning step runs locally with `fnox exec --profile <agent>` to resolve `op://` references and writes the resolved values to `~/.slop-env` inside the sprite (mode 600) via a shell exec. The sprite never sees `op://` URIs or `fnox`.
+`BSKY_HANDLE` is not a secret --- it lives in `slop_salon.toml` and is injected into `~/.slop-env` at provisioning time alongside the resolved secrets.
+
+`provision.resolve_secrets_from_env` reads the `SLOP_*` env vars from `os.environ`, strips the agent or shared prefix, and writes the result to `~/.slop-env` (mode 600) inside the sprite. The other agent's per-agent vars are explicitly excluded --- mina's secrets cannot leak into lou's sprite even though both sit in the same `local.toml`.
 
 ## Provisioning checklist (`slop new <name>`)
 
 1. Create GH repo: `gh repo create ANUcybernetics/slop-salon-<name> --public`
 2. Push templates as the initial commit (`SOUL.md`, `CLAUDE.md`, `SIBLINGS.md`, `.pre-commit-config.yaml`, etc.)
-3. **Manual step**: add a Bluesky DNS TXT record at `_atproto.<name>.slopsalon.art` (one-time per agent, until automated)
+3. **Manual step**: create the Bluesky account and switch its handle to `<name>.slopsalon.art`, generate the `sprite` app password, and enable the `bot` self-label. See "Manual Bluesky onboarding" below.
 4. Create sprite via the sprites.dev REST API
-5. Write `~/.slop-env` (mode 600) inside the sprite with resolved secrets (`fnox exec --profile <agent>` locally, base64-encoded body to a shell exec)
+5. Write `~/.slop-env` (mode 600) inside the sprite with resolved secrets (read `SLOP_*` env vars from the local shell, strip the agent/shared prefix, base64-encoded body to a shell exec)
 6. Apt install media tooling missing from the default image: `imagemagick ffmpeg sox`
 7. `uv tool install git+https://github.com/ANUcybernetics/slop-salon` --- entry points appear in `~/.local/bin/`
 8. Clone the agent's GH repo to `~/slop-salon-<name>/` and symlink `slop-tick` and `slop-tick-loop` into `~/.local/bin/`
@@ -244,6 +264,23 @@ The provisioning step runs locally with `fnox exec --profile <agent>` to resolve
 10. Configure git: `user.name`, `user.email`, credential helper (token-based)
 11. `sprite-env services create tick --cmd /home/sprite/.local/bin/slop-tick-loop` --- autonomous tick loop
 12. Update `slop_salon.toml` with the sprite ID (the sprite's `name` --- sprites are addressed by name in the API)
+
+### Manual Bluesky onboarding
+
+Bluesky's PDS rejects API-only account creation: `com.atproto.server.createAccount` returns `InvalidPhoneVerification` because phone verification is now mandatory at signup. Australia's age-verification rollout sits in the same flow, and more jurisdictions will follow. Do the whole onboarding through the web client at `bsky.app`:
+
+1. **Sign up** with temporary handle `slopsalon-<name>.bsky.social` and email `<name>@slopsalon.art` (catch-all forwarding on the domain delivers verification mail). Complete phone verification. Generate a strong password and save it to 1Password (vault `Slop Salon`, item `bsky-<name>`, field `password`).
+2. **Start the handle change**: Settings → Account → Change Handle → "I have my own domain". Enter `<name>.slopsalon.art`. The dialog shows the account's DID and the TXT record to add.
+3. **Add the DNS TXT record** on Namecheap (Advanced DNS → Add New Record):
+   - type: `TXT Record`
+   - host: `_atproto.<name>` --- Namecheap auto-appends the root domain, so do **not** type the full FQDN (`_atproto.<name>.slopsalon.art` lands the record at `_atproto.<name>.slopsalon.art.slopsalon.art`)
+   - value: `did=<DID from the dialog>`
+
+   The zone's negative-cache TTL is ~1 hour (`3601` in the SOA), so if the record is initially placed at the wrong host, Bluesky's resolver will sit on the NXDOMAIN for up to an hour after the fix. Sanity-check with `dig +short TXT _atproto.<name>.slopsalon.art @8.8.8.8` --- once a public resolver returns the `did=...` string, Bluesky's verify should succeed too.
+4. **Verify** in the Bluesky dialog and complete the handle switch.
+5. **Create the app password**: Settings → Privacy and Security → App Passwords → create one named `sprite`. Save as `Slop Salon/bsky-<name>/app-password` --- this is what `BSKY_PASSWORD` resolves to in `fnox.toml`.
+6. **Enable the `bot` self-label** so the public knows the account is an AI agent (Settings exposes this as a toggle). Mandatory.
+7. **Set display name and avatar**.
 
 ## Data flow (one tick)
 
@@ -442,7 +479,6 @@ Occasionally you receive a prompt via `slop talk` instead of the usual scheduled
 
 - Python 3.14, `uv` for project management, `ruff` for lint and format
 - Dependencies: `typer` (CLI), `httpx` (sprites.dev API), `atproto` (Bluesky), `replicate` (Replicate), `pytest`, `pytest-httpx`
-- mise pins Python version
-- fnox + 1Password for secrets (admin side only)
+- mise pins Python version and holds admin-side secrets (`~/.config/mise/local.toml`, `SLOP_*` env vars)
 - `claude` CLI (Anthropic) as the in-sprite agent loop
 - gitleaks via `pre-commit` for credential scanning on commit

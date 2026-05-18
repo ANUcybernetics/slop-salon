@@ -2,41 +2,54 @@
 
 from __future__ import annotations
 
+import os
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 
-def test_resolve_secrets_runs_fnox_and_returns_env():
-    from slop_salon.provision import resolve_secrets_via_fnox
+def test_resolve_secrets_strips_per_agent_and_shared_prefixes(monkeypatch):
+    from slop_salon.provision import resolve_secrets_from_env
 
-    fake_env_output = (
-        "BSKY_HANDLE=lou.slopsalon.art\nBSKY_PASSWORD=topsecret\nANTHROPIC_API_KEY=sk-ant-xxx\n"
-    )
+    # Clear any pre-existing SLOP_* so the test is hermetic.
+    for k in list(os.environ):
+        if k.startswith("SLOP_"):
+            monkeypatch.delenv(k, raising=False)
 
-    with patch("slop_salon.provision.subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(stdout=fake_env_output, returncode=0)
+    monkeypatch.setenv("SLOP_LOU_BSKY_PASSWORD", "lou-pw")
+    monkeypatch.setenv("SLOP_LOU_REPLICATE_API_TOKEN", "lou-replicate")
+    monkeypatch.setenv("SLOP_GH_TOKEN", "ghp_shared")
+    monkeypatch.setenv("SLOP_ANTHROPIC_BASE_URL", "https://proxy")
+    # An unrelated SLOP_*_*-style env that happens to start with SLOP_ but isn't
+    # one of ours — covered by the "other-agent" exclusion below.
+    monkeypatch.setenv("SPRITES_API_TOKEN", "not-leaked-to-sprite")
 
-        env = resolve_secrets_via_fnox("lou")
+    env = resolve_secrets_from_env("lou", ["lou", "mina"])
 
-    assert env["BSKY_HANDLE"] == "lou.slopsalon.art"
-    assert env["BSKY_PASSWORD"] == "topsecret"
-    assert env["ANTHROPIC_API_KEY"] == "sk-ant-xxx"
-
-    # Verify it called fnox correctly
-    args = mock_run.call_args[0][0]
-    assert args[0:3] == ["fnox", "exec", "--profile"]
-    assert args[3] == "lou"
+    assert env["BSKY_PASSWORD"] == "lou-pw"
+    assert env["REPLICATE_API_TOKEN"] == "lou-replicate"
+    assert env["GH_TOKEN"] == "ghp_shared"
+    assert env["ANTHROPIC_BASE_URL"] == "https://proxy"
+    # Non-SLOP_ env vars are not propagated — SPRITES_API_TOKEN stays admin-side.
+    assert "SPRITES_API_TOKEN" not in env
 
 
-def test_resolve_secrets_raises_on_fnox_failure():
-    from slop_salon.provision import resolve_secrets_via_fnox
+def test_resolve_secrets_excludes_other_agents(monkeypatch):
+    from slop_salon.provision import resolve_secrets_from_env
 
-    with patch("slop_salon.provision.subprocess.run") as mock_run:
-        mock_run.side_effect = Exception("fnox: profile not found")
+    for k in list(os.environ):
+        if k.startswith("SLOP_"):
+            monkeypatch.delenv(k, raising=False)
 
-        with pytest.raises(Exception, match="fnox"):
-            resolve_secrets_via_fnox("nonexistent")
+    monkeypatch.setenv("SLOP_LOU_BSKY_PASSWORD", "lou-pw")
+    monkeypatch.setenv("SLOP_MINA_BSKY_PASSWORD", "mina-pw")
+
+    env = resolve_secrets_from_env("lou", ["lou", "mina"])
+
+    assert env["BSKY_PASSWORD"] == "lou-pw"
+    # Mina's secrets must not land in lou's sprite.
+    assert "MINA_BSKY_PASSWORD" not in env
+    assert all(not k.startswith("MINA_") for k in env)
 
 
 def test_apt_install_cmd_uses_required_packages():
@@ -175,15 +188,21 @@ siblings = ["other"]
     monkeypatch.chdir(tmp_path)
 
     fake_secrets = {
-        "BSKY_HANDLE": "lou.slopsalon.art",
         "BSKY_PASSWORD": "x",
         "REPLICATE_API_TOKEN": "y",
         "ANTHROPIC_API_KEY": "z",
         "GH_TOKEN": "ghp_xxx",
     }
 
+    def _fake_subprocess_run(args, **kwargs):
+        # `gh repo view` is the idempotency probe; returncode=1 means
+        # "repo does not exist" so the create branch runs.
+        if isinstance(args, list) and len(args) >= 3 and args[:3] == ["gh", "repo", "view"]:
+            return MagicMock(stdout="", returncode=1)
+        return MagicMock(stdout="", returncode=0)
+
     with (
-        patch.object(provision, "resolve_secrets_via_fnox", return_value=fake_secrets),
+        patch.object(provision, "resolve_secrets_from_env", return_value=fake_secrets),
         patch.object(provision, "SpritesClient") as mock_sprites_class,
         patch.object(provision, "subprocess") as mock_sub,
     ):
@@ -191,7 +210,7 @@ siblings = ["other"]
         sprites.create_sprite.return_value = "lou"
         sprites.exec.return_value = MagicMock(stdout="", stderr="", exit_code=0)
         mock_sprites_class.return_value = sprites
-        mock_sub.run.return_value = MagicMock(stdout="", returncode=0)
+        mock_sub.run.side_effect = _fake_subprocess_run
 
         provision.provision_agent("lou", skip_dns_confirm=True)
 

@@ -28,20 +28,28 @@ APT_PACKAGES = "imagemagick ffmpeg sox"
 SLOP_SALON_REPO = "git+https://github.com/ANUcybernetics/slop-salon"
 
 
-def resolve_secrets_via_fnox(profile: str) -> dict[str, str]:
-    """Run `fnox exec --profile <profile> -- env` and parse resolved env vars."""
-    result = subprocess.run(
-        ["fnox", "exec", "--profile", profile, "--", "env"],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
+def resolve_secrets_from_env(name: str, all_agent_names: list[str]) -> dict[str, str]:
+    """Read SLOP_* env vars from os.environ, strip prefixes, return sprite-side names.
+
+    Convention:
+    - `SLOP_<AGENT>_<X>` is per-agent; the strip yields `<X>` (e.g. for `name='lou'`,
+      `SLOP_LOU_BSKY_PASSWORD` becomes `BSKY_PASSWORD`).
+    - `SLOP_<X>` is shared across all agents; the strip yields `<X>` (e.g.
+      `SLOP_GH_TOKEN` becomes `GH_TOKEN`).
+    - Other agents' `SLOP_<OTHER>_<X>` vars are excluded (so e.g. `mina`'s
+      bsky password doesn't end up in `lou`'s sprite).
+
+    Non-`SLOP_`-prefixed env vars (e.g. `SPRITES_API_TOKEN`) are intentionally
+    excluded: they're for the admin machine, not the sprite.
+    """
+    agent_prefix = f"SLOP_{name.upper()}_"
+    other_agent_prefixes = [f"SLOP_{n.upper()}_" for n in all_agent_names if n != name]
     env: dict[str, str] = {}
-    for line in result.stdout.splitlines():
-        if "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        env[key] = value
+    for k, v in os.environ.items():
+        if k.startswith(agent_prefix):
+            env[k.removeprefix(agent_prefix)] = v
+        elif k.startswith("SLOP_") and not any(k.startswith(p) for p in other_agent_prefixes):
+            env[k.removeprefix("SLOP_")] = v
     return env
 
 
@@ -149,8 +157,10 @@ def _push_initial_commit(repo: str, files: dict[str, str], token: str) -> None:
             cwd=tmp_path,
             check=True,
         )
+        # -u origin HEAD handles both empty repos (sets upstream + creates the
+        # remote default branch) and pre-existing default branches uniformly.
         subprocess.run(
-            ["git", "push"],
+            ["git", "push", "-u", "origin", "HEAD"],
             cwd=tmp_path,
             check=True,
             env={**os.environ, "GH_TOKEN": token},
@@ -191,23 +201,38 @@ def provision_agent(
         raise typer.BadParameter(f"agent {name!r} not in {config.path}")
     agent = config.agents[name]
 
-    env = resolve_secrets_via_fnox(name)
+    env = resolve_secrets_from_env(name, list(config.agents.keys()))
     gh_token = env.get("GH_TOKEN")
     if not gh_token:
-        raise RuntimeError(f"GH_TOKEN missing from fnox profile {name!r}; check fnox.toml")
+        raise RuntimeError(
+            f"GH_TOKEN missing from resolved env for {name!r}; "
+            f"check ~/.config/mise/local.toml for SLOP_GH_TOKEN"
+        )
+    # BSKY_HANDLE is public config (lives in slop_salon.toml), not a secret;
+    # inject it here so the sprite-side tools see it alongside the secrets.
+    env["BSKY_HANDLE"] = agent.handle
 
     sibling_name = agent.siblings[0] if agent.siblings else ""
     sibling_handle = config.agents[sibling_name].handle if sibling_name in config.agents else ""
     templates_dir = Path(templates_dir)
 
-    typer.echo(f"[1/12] Creating GH repo {agent.github_repo}")
-    # --add-readme creates an initial commit so the repo has a default branch;
-    # without it, the subsequent clone-and-push fails on an empty repo.
-    subprocess.run(
-        ["gh", "repo", "create", agent.github_repo, "--public", "--add-readme"],
-        check=True,
-        env={**os.environ, "GH_TOKEN": gh_token},
+    repo_exists = (
+        subprocess.run(
+            ["gh", "repo", "view", agent.github_repo, "--json", "name"],
+            capture_output=True,
+            env={**os.environ, "GH_TOKEN": gh_token},
+        ).returncode
+        == 0
     )
+    if repo_exists:
+        typer.echo(f"[1/12] GH repo {agent.github_repo} already exists, skipping create")
+    else:
+        typer.echo(f"[1/12] Creating GH repo {agent.github_repo}")
+        subprocess.run(
+            ["gh", "repo", "create", agent.github_repo, "--public"],
+            check=True,
+            env={**os.environ, "GH_TOKEN": gh_token},
+        )
 
     typer.echo("[2/12] Pushing templates as initial commit")
     files = _build_template_files(
