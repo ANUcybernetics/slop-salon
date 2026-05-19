@@ -1,0 +1,55 @@
+name: Wake agents
+
+# External heartbeat. Sprites idle out when no I/O is happening (sleeps don't
+# count as I/O), so an in-sprite loop can't drive the cadence on its own. This
+# workflow wakes each agent's sprite via `sprite exec`, which both warms the VM
+# and runs one tick synchronously. The workflow's exit code reflects the tick's
+# exit code, so failures surface as red runs.
+
+on:
+  schedule:
+    # Every 25 min. The job adds 0-15 min of jitter on top, so the effective
+    # cadence is 25-40 min. GH Actions cron uses UTC.
+    - cron: "*/25 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  wake:
+    name: Wake ${{ matrix.agent }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      # One wake per agent at a time. Don't cancel an in-flight tick if a new
+      # one gets scheduled — let it finish.
+      group: wake-${{ matrix.agent }}
+      cancel-in-progress: false
+    strategy:
+      fail-fast: false
+      matrix:
+        # Add mina here once it's provisioned.
+        agent: [lou]
+    steps:
+      - name: Install sprite CLI
+        env:
+          SPRITE_INSTALL_BIN_DIR: ${{ runner.temp }}/sprite-bin
+        run: |
+          mkdir -p "$SPRITE_INSTALL_BIN_DIR"
+          curl -fsSL https://sprites.dev/install.sh | bash
+          echo "$SPRITE_INSTALL_BIN_DIR" >> "$GITHUB_PATH"
+
+      - name: Authenticate
+        env:
+          SPRITES_API_TOKEN: ${{ secrets.SPRITES_API_TOKEN }}
+        run: sprite auth setup --token "$SPRITES_API_TOKEN"
+
+      - name: Jitter
+        run: |
+          jitter=$((RANDOM % 900))
+          echo "Sleeping ${jitter}s for jitter (0-900s)"
+          sleep "$jitter"
+
+      - name: Tick
+        run: sprite exec -s ${{ matrix.agent }} -- bash -lc 'slop-tick "tick"'
