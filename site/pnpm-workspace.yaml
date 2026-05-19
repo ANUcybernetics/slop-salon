@@ -1,0 +1,16 @@
+allowBuilds:
+  esbuild: true
+  sharp: false
+
+minimumReleaseAgeExclude:
+  - "@astrojs/language-server@2.16.9"
+  - "@astrojs/yaml2ts@0.2.4"
+  - "@types/node@25.9.0"
+  - "@typescript-eslint/project-service@8.59.4"
+  - "@typescript-eslint/scope-manager@8.59.4"
+  - "@typescript-eslint/tsconfig-utils@8.59.4"
+  - "@typescript-eslint/types@8.59.4"
+  - "@typescript-eslint/typescript-estree@8.59.4"
+  - "@typescript-eslint/utils@8.59.4"
+  - "@typescript-eslint/visitor-keys@8.59.4"
+  - "astro@6.3.5"
