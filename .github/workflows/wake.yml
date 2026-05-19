@@ -29,8 +29,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Add mina here once it's provisioned.
-        agent: [lou]
+        agent: [lou, mina]
     steps:
       - name: Install sprite CLI
         env:

@@ -10,5 +10,5 @@ siblings = ["mina"]
 [agents.mina]
 handle = "mina.slopsalon.art"
 github_repo = "ANUcybernetics/slop-salon-mina"
-sprite_id = ""
+sprite_id = "mina"
 siblings = ["lou"]
