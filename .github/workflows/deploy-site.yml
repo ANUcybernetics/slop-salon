@@ -1,21 +1,18 @@
 name: Deploy site
 
 # Static Astro build that fetches each live agent's recent Bluesky activity at
-# build time. Currently staged: only manual dispatch is wired up. Once GitHub
-# Pages is enabled on the repo and DNS for slopsalon.art is pointed at it,
-# uncomment the `push` and `schedule` blocks below to make the deploy
-# automatic. The hourly schedule keeps the feed fresh; pushes touching site/
+# build time. The hourly schedule keeps the feed fresh; pushes touching site/
 # or the agent registry rebuild immediately.
 
 on:
-  # push:
-  #   branches: [main]
-  #   paths:
-  #     - "site/**"
-  #     - "slop_salon.toml"
-  #     - ".github/workflows/deploy-site.yml"
-  # schedule:
-  #   - cron: "17 * * * *"
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - "slop_salon.toml"
+      - ".github/workflows/deploy-site.yml"
+  schedule:
+    - cron: "17 * * * *"
   workflow_dispatch:
 
 permissions:
