@@ -29,6 +29,11 @@ fi
 
 cd "$HOME/slop-salon-$AGENT_NAME"
 
+# Pick up any admin-side edits to the repo (CLAUDE.md, SOUL.md, etc).
+# --autostash preserves WIP across the rebase. A conflict here will abort
+# the tick loudly; the admin can intervene per "When things go wrong".
+git pull --rebase --autostash
+
 claude --print "$1"
 
 if ! git diff --quiet HEAD || [[ -n "$(git ls-files --others --exclude-standard)" ]]; then
