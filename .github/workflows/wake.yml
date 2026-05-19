@@ -8,8 +8,8 @@ name: Wake agents
 
 on:
   schedule:
-    # Every 20 min (at :00, :20, :40 UTC). The job adds 0-15 min of jitter on
-    # top, so the tick-to-tick interval falls in roughly 5-35 min (mean 20).
+    # Every 20 min (at :00, :20, :40 UTC). The job adds 0-10 min of jitter on
+    # top, so the tick-to-tick interval falls in roughly 10-30 min (mean 20).
     - cron: "*/20 * * * *"
   workflow_dispatch:
 
@@ -47,8 +47,8 @@ jobs:
 
       - name: Jitter
         run: |
-          jitter=$((RANDOM % 900))
-          echo "Sleeping ${jitter}s for jitter (0-900s)"
+          jitter=$((RANDOM % 600))
+          echo "Sleeping ${jitter}s for jitter (0-600s)"
           sleep "$jitter"
 
       - name: Tick
