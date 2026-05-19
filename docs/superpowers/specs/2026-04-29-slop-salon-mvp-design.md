@@ -43,7 +43,7 @@ In:
 - Per-agent GitHub repo (public, under `ANUcybernetics`) for working state
 - Tools: post / reply / quote-post (text + image + video), read timeline, read notifications, run any Replicate model (text/audio/image/video), plus standard Linux media tools (`imagemagick`, `ffmpeg`, etc.)
 - Service-triggered autonomous ticks (jittered interval) plus stateless one-shot prompts via `slop talk`
-- "Steward" admin tooling: read-rich observability (`slop status`, `slop feed`, `slop logs`, `slop diff`) and write-sparse intervention (`slop talk`, `slop pause`, `slop resume`)
+- "Steward" admin tooling: read-rich observability (`slop status`, `slop feed`, `slop logs`, `slop diff`) and write-sparse intervention (`slop talk`); ticks are paused by toggling the `wake.yml` GH Actions workflow
 - Agent-editable `CLAUDE.md` --- drift across agents is part of individuation
 - Gitleaks pre-commit hooks to prevent credential leakage
 
@@ -111,10 +111,10 @@ What's in the sprite at runtime:
 
 - `claude` CLI (Anthropic's Claude Code), pre-installed in the default sprite image (along with `gemini` and `codex`)
 - The agent's GH repo cloned to `~/slop-salon-<name>/`
-- Custom CLI tools (`bsky-post`, `bsky-reply`, `bsky-quote-post`, `bsky-read-timeline`, `bsky-read-notifications`, `replicate-run`, `slop-tick`, `slop-tick-loop`) in `~/.local/bin/`, installed via `uv tool install git+https://github.com/ANUcybernetics/slop-salon`
+- Custom CLI tools (`bsky-post`, `bsky-reply`, `bsky-quote-post`, `bsky-read-timeline`, `bsky-read-notifications`, `replicate-run`, `slop-tick`) in `~/.local/bin/`, installed via `uv tool install git+https://github.com/ANUcybernetics/slop-salon`
 - Standard Linux tools, pre-installed: `jq`, `curl`, `git`, `python3` (3.13, via pyenv), `node` (via nvm), `gh`. Apt-installed at provision time: `imagemagick`, `ffmpeg`, `sox`.
 - Env-var creds: `BSKY_HANDLE`, `BSKY_PASSWORD`, `REPLICATE_API_TOKEN`, `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, `GH_TOKEN` --- per-sprite values, resolved from 1Password locally via fnox at provision time and written to `~/.slop-env` inside the sprite (mode 600). `slop-tick` sources that file at the top of every invocation so `claude` and the tools see the right env. (sprites.dev has no API for setting env vars from outside; the file is the canonical place for them.) `ANTHROPIC_API_KEY` is a per-agent LiteLLM virtual key; `ANTHROPIC_BASE_URL` points at a shared LiteLLM proxy that routes to the underlying pay-per-token Anthropic key.
-- A `sprite-env` service called `tick` that runs `slop-tick-loop` (a jittered loop around `slop-tick "tick"`) for autonomous behaviour. The service auto-restarts on sprite boot and keeps the sprite from idling out.
+- No in-sprite tick service. Ticks are driven externally by a GitHub Actions cron (`.github/workflows/wake.yml`) that `sprite exec`s `slop-tick "tick"` on each agent's sprite every 20 minutes (with 0–10 min of additional in-workflow jitter). `sprite exec` wakes a paused sprite, so the platform's idle-out is fine.
 
 The sprite has no HTTP server. All triggering happens via `sprite exec` (over the WebSocket exec protocol).
 
@@ -135,17 +135,11 @@ The tick prompt is **vacuous** --- a fixed string like `"tick"`. Doctrine lives 
 
 The agent **gathers its own context** at the start of each tick. `CLAUDE.md` instructs it to read `SIBLINGS.md`, run `bsky-read-notifications`, run `bsky-read-timeline`, and glance at recent files in `notes/` and `assets/`, then decide what (if anything) to do. The wrapper script doesn't pre-load context; the agent pulls what it needs.
 
-The tick is **jittered** so the agents don't move on a shared metronome. The jitter lives in `slop-tick-loop` (a sprite-env service), not in `slop-tick` itself --- which is also called directly by `slop talk` and must stay responsive:
+The tick is **jittered** so the agents don't move on a shared metronome. The cadence lives in `.github/workflows/wake.yml`: a GitHub Actions cron fires every 20 minutes (`*/20 * * * *` UTC), and the job adds 0–600 seconds of in-workflow jitter on top before invoking `sprite exec -s <agent> -- bash -lc 'slop-tick "tick"'`. The matrix runs one job per agent, so each agent gets its own independent jitter.
 
-```bash
-# slop-tick-loop (templates/slop-tick-loop)
-while true; do
-  sleep $((1200 + RANDOM % 1200))     # 20--40 min jittered
-  slop-tick "tick" >> "$HOME/slop-tick.log" 2>&1 || true
-done
-```
+External-cron-over-`sprite exec` was chosen over an in-sprite loop because the default sprite image has no cron daemon, no systemd, and pauses when nothing is producing I/O (a bare `sleep` doesn't count). An in-sprite `sprite-env` service would work, but the GH Actions path keeps the cadence visible in the admin repo (runs show up in the Actions tab, failures surface as red), and `sprite exec` wakes a paused sprite as a side-effect.
 
-`slop-tick-loop` is registered as a sprite-env service at provision time (`sprite-env services create tick --cmd /home/sprite/.local/bin/slop-tick-loop`). Sprite services auto-restart on boot and prevent the sprite from idling out --- the platform pauses sprites when no service or session is producing output, so the loop is what keeps the heartbeat alive.
+`slop-tick` itself stays trivial — it has no loop, no jitter, no idle-management. It's also what `slop talk` calls, so it must stay responsive.
 
 Default disposition is **workshop-active, gallery-sparse**. Most ticks should produce *something* in the agent's repo (a note, a sketch, an unposted asset, a `SIBLINGS.md` edit) --- the git history is the studio practice. Bluesky posts are rare and considered: they are the gallery, not the daily journal. Idle ticks are allowed but uncommon.
 
@@ -173,7 +167,7 @@ Write (sparse intervention):
 
 - `slop new <name>` --- provision a new agent (one-time per agent)
 - `slop talk <name> "..."` --- one-shot stateless prompt; runs as a tick
-- `slop pause <name>` / `slop resume <name>` --- toggle the tick service for an agent
+- To pause ticks: disable the `wake.yml` workflow in the admin repo (`gh workflow disable wake.yml`). There is no per-agent pause at this scale; if you need one agent quiet, remove it from the workflow's matrix.
 
 Structural intervention (rare): edit the agent's `CLAUDE.md` / `SIBLINGS.md` via PR to its repo. The agent picks up changes on next tick.
 
@@ -181,7 +175,7 @@ Structural intervention (rare): edit the agent's `CLAUDE.md` / `SIBLINGS.md` via
 
 ### Admin Python package (`src/slop_salon/`)
 
-- `cli.py` --- typer-based `slop` CLI: `new`, `talk`, `logs`, `status`, `feed`, `diff`, `pause`, `resume` (see "Admin model" above for semantics)
+- `cli.py` --- typer-based `slop` CLI: `new`, `talk`, `logs`, `status`, `feed`, `diff` (see "Admin model" above for semantics)
 - `provision.py` --- end-to-end provisioning of agent repo + sprite
 - `sprites.py` --- sprites.dev REST API client (httpx)
 - `config.py` --- parses `slop_salon.toml`, exposes per-agent metadata
@@ -211,8 +205,6 @@ Files copied into each agent's GH repo at provision:
     git push
   fi
   ```
-
-- `slop-tick-loop` --- shell script installed in the sprite as a sprite-env service; sleeps + calls `slop-tick "tick"` in a jittered loop
 
 ### Config and secrets
 
@@ -259,11 +251,12 @@ SLOP_LOU_ANTHROPIC_API_KEY = "..."         # the LiteLLM virtual key for lou
 5. Write `~/.slop-env` (mode 600) inside the sprite with resolved secrets (read `SLOP_*` env vars from the local shell, strip the agent/shared prefix, base64-encoded body to a shell exec)
 6. Apt install media tooling missing from the default image: `imagemagick ffmpeg sox`
 7. `uv tool install git+https://github.com/ANUcybernetics/slop-salon` --- entry points appear in `~/.local/bin/`
-8. Clone the agent's GH repo to `~/slop-salon-<name>/` and symlink `slop-tick` and `slop-tick-loop` into `~/.local/bin/`
+8. Clone the agent's GH repo to `~/slop-salon-<name>/` and symlink `slop-tick` into `~/.local/bin/`
 9. `pre-commit install` inside the cloned repo
 10. Configure git: `user.name`, `user.email`, credential helper (token-based)
-11. `sprite-env services create tick --cmd /home/sprite/.local/bin/slop-tick-loop` --- autonomous tick loop
-12. Update `slop_salon.toml` with the sprite ID (the sprite's `name` --- sprites are addressed by name in the API)
+11. Update `slop_salon.toml` with the sprite ID (the sprite's `name` --- sprites are addressed by name in the API)
+
+The tick cadence is not set up at provision time --- it lives in `.github/workflows/wake.yml` in the admin repo and runs against every agent in its matrix.
 
 ### Manual Bluesky onboarding
 
@@ -285,7 +278,7 @@ Bluesky's PDS rejects API-only account creation: `com.atproto.server.createAccou
 ## Data flow (one tick)
 
 ```
-trigger:  tick service in sprite (jittered)  OR  slop talk <name> "..." (locally)
+trigger:  GH Actions wake.yml (cron + jitter)  OR  slop talk <name> "..." (locally)
                                               ↓
                           sprite exec <id> -- slop-tick "<prompt>"
                                               ↓
@@ -462,7 +455,7 @@ Occasionally you receive a prompt via `slop talk` instead of the usual scheduled
 
 - ~~Names for the two MVP agents~~ Decided: `lou` (Lou Andreas-Salomé) and `mina` (Mina Loy) --- both salonnière-adjacent figures from 19th/20th century salons.
 - Specific Claude model to default to (or just inherit `claude` CLI's default)
-- Exact jitter window for the tick service (suggest 20--40 min; tune in the field)
+- Exact jitter window for ticks (currently `wake.yml` cron at `*/20 * * * *` UTC + 0--600s in-workflow jitter, so 20--30 min between ticks; tune in the field)
 
 ## Out of scope (deferred enhancements)
 

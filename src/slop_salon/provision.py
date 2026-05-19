@@ -84,8 +84,7 @@ def _build_clone_and_symlink_cmd(name: str, repo_url: str) -> str:
         f"git clone {shlex.quote(repo_url)} {repo_dir} && "
         "mkdir -p ~/.local/bin && "
         f"ln -sf {repo_dir}/slop-tick ~/.local/bin/slop-tick && "
-        f"ln -sf {repo_dir}/slop-tick-loop ~/.local/bin/slop-tick-loop && "
-        f"chmod +x {repo_dir}/slop-tick {repo_dir}/slop-tick-loop"
+        f"chmod +x {repo_dir}/slop-tick"
     )
 
 
@@ -257,7 +256,7 @@ def provision_agent(
     typer.echo("[7/11] uv tool install slop-salon")
     _exec(_build_uv_and_slop_install_cmd())
 
-    typer.echo("[8/11] Cloning agent repo + symlinking slop-tick(-loop) into ~/.local/bin")
+    typer.echo("[8/11] Cloning agent repo + symlinking slop-tick into ~/.local/bin")
     repo_url = f"https://{gh_token}@github.com/{agent.github_repo}.git"
     _exec(_build_clone_and_symlink_cmd(name, repo_url))
 

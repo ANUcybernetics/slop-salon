@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # slop-tick: run one tick of the agent.
 #
-# Called by the `slop-tick-loop` sprite-env service (with a fixed prompt
-# like "tick") or by `slop talk` (with an admin prompt). Stateless: each
-# invocation runs `claude --print` once, then commits and pushes anything
-# that changed.
+# Called by the `.github/workflows/wake.yml` GH Actions cron (with the
+# fixed prompt "tick") or by `slop talk` (with an admin prompt), both via
+# `sprite exec`. Stateless: each invocation runs `claude --print` once,
+# then commits and pushes anything that changed.
 #
 # Loads AGENT_NAME plus the agent's secrets from ~/.slop-env (mode 600,
 # written by provisioning). sprites.dev has no API for setting env vars

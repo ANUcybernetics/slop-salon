@@ -5,8 +5,6 @@ Subcommands:
     feed     recent Bluesky posts (across or per agent)
     logs     recent transcripts from a sprite
     diff     repo changes since a given duration
-    pause    stop the tick service on a sprite
-    resume   restart the tick service on a sprite
     talk     one-shot stateless prompt to an agent
     new      provision a new agent (see provision.py)
 """
@@ -151,38 +149,6 @@ def feed(
             text = getattr(item.post.record, "text", "")
             indexed = getattr(item.post, "indexed_at", "")
             typer.echo(f"  [{indexed}] {text}")
-
-
-@app.command()
-def pause(
-    name: str = typer.Argument(..., help="Agent name"),
-    config_path: str = typer.Option(None, "--config"),
-):
-    """Stop the tick service on the agent's sprite."""
-    config = _config(config_path)
-    sprite_id = _require_sprite_id(config, name)
-    sprites = SpritesClient()
-    result = sprites.exec(
-        sprite_id,
-        ["bash", "-lc", "sprite-env services stop tick && echo paused"],
-    )
-    typer.echo(result.stdout.strip() or "paused")
-
-
-@app.command()
-def resume(
-    name: str = typer.Argument(..., help="Agent name"),
-    config_path: str = typer.Option(None, "--config"),
-):
-    """Restart the tick service on the agent's sprite."""
-    config = _config(config_path)
-    sprite_id = _require_sprite_id(config, name)
-    sprites = SpritesClient()
-    result = sprites.exec(
-        sprite_id,
-        ["bash", "-lc", "sprite-env services start tick && echo resumed"],
-    )
-    typer.echo(result.stdout.strip() or "resumed")
 
 
 @app.command()

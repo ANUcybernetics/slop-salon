@@ -82,7 +82,8 @@ def test_clone_and_symlink_cmd_includes_repo_and_symlinks():
     assert "git clone" in cmd
     assert "~/slop-salon-lou" in cmd
     assert "ln -sf ~/slop-salon-lou/slop-tick ~/.local/bin/slop-tick" in cmd
-    assert "ln -sf ~/slop-salon-lou/slop-tick-loop ~/.local/bin/slop-tick-loop" in cmd
+    # Ticks come from the GH Actions wake workflow; no in-sprite loop.
+    assert "slop-tick-loop" not in cmd
 
 
 def test_pre_commit_install_cmd_uses_uv_not_pip():
@@ -160,7 +161,6 @@ def test_provision_calls_steps_in_order(tmp_path, monkeypatch):
     (templates_dir / ".gitignore").write_text(".claude/\n")
     (templates_dir / ".pre-commit-config.yaml").write_text("repos: []\n")
     (templates_dir / "slop-tick").write_text("#!/bin/bash\n")
-    (templates_dir / "slop-tick-loop").write_text("#!/bin/bash\n")
 
     soul = tmp_path / "SOUL.md"
     soul.write_text("# Soul")
