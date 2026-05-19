@@ -334,6 +334,67 @@ def follow(
     typer.echo(f"followed {handle} ({subject_did}) at {resp.json()['uri']}")
 
 
+# --- bsky-unfollow ---
+
+unfollow_app = typer.Typer(add_completion=False, help="Unfollow an account by handle.")
+
+
+def _find_follow_rkey(session: Session, subject_did: str) -> str | None:
+    """Find the rkey of the user's follow record for subject_did, or None if not following.
+
+    Uses com.atproto.repo.listRecords on the user's own repo (PDS-side, so
+    immune to AppView lag). Walks pagination because an agent following
+    hundreds of accounts has more than one page of follow records.
+    """
+    cursor: str | None = None
+    while True:
+        params: dict[str, str | int] = {
+            "repo": session.did,
+            "collection": "app.bsky.graph.follow",
+            "limit": 100,
+        }
+        if cursor:
+            params["cursor"] = cursor
+        resp = httpx.get(
+            f"{session.pds}/xrpc/com.atproto.repo.listRecords",
+            params=params,
+            headers=session.auth_headers,
+            timeout=DEFAULT_TIMEOUT,
+        )
+        if resp.status_code != 200:
+            _xrpc_error(resp, "listRecords")
+        data = resp.json()
+        for rec in data.get("records", []):
+            if rec.get("value", {}).get("subject") == subject_did:
+                # uri is at://<did>/app.bsky.graph.follow/<rkey>
+                return rec["uri"].rsplit("/", 1)[-1]
+        cursor = data.get("cursor")
+        if not cursor:
+            return None
+
+
+@unfollow_app.command()
+def unfollow(
+    handle: str = typer.Option(..., "--handle", help="Handle to unfollow, e.g. bsky.app"),
+):
+    """Unfollow another account. Idempotent: if you don't follow them, exits 0 with a message."""
+    session = _get_session()
+    subject_did = _resolve_handle(session, handle)
+    rkey = _find_follow_rkey(session, subject_did)
+    if rkey is None:
+        typer.echo(f"not following {handle}; nothing to do")
+        return
+    resp = httpx.post(
+        f"{session.pds}/xrpc/com.atproto.repo.deleteRecord",
+        headers=session.auth_headers,
+        json={"repo": session.did, "collection": "app.bsky.graph.follow", "rkey": rkey},
+        timeout=DEFAULT_TIMEOUT,
+    )
+    if resp.status_code != 200:
+        _xrpc_error(resp, "deleteRecord (unfollow)")
+    typer.echo(f"unfollowed {handle} ({subject_did})")
+
+
 # --- bsky-read-timeline ---
 
 read_timeline_app = typer.Typer(

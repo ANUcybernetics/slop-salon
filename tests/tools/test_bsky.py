@@ -400,6 +400,86 @@ def test_follow_resolves_handle_then_creates_record(bsky_env, session_mock, http
     assert "createdAt" in body["record"]
 
 
+# === Unfollow =============================================================
+
+
+def test_unfollow_resolves_handle_lists_records_and_deletes(
+    bsky_env, session_mock, httpx_mock
+):
+    target_did = "did:plc:target"
+    target_rkey = "rkey-target"
+    other_rkey = "rkey-other"
+    httpx_mock.add_response(
+        method="GET",
+        url=f"{FAKE_PDS}/xrpc/com.atproto.identity.resolveHandle?handle=bsky.app",
+        json={"did": target_did},
+    )
+    # listRecords returns two follows; we should pick the one matching subject.
+    httpx_mock.add_response(
+        method="GET",
+        url=(
+            f"{FAKE_PDS}/xrpc/com.atproto.repo.listRecords"
+            f"?repo={FAKE_DID}&collection=app.bsky.graph.follow&limit=100"
+        ),
+        json={
+            "records": [
+                {
+                    "uri": f"at://{FAKE_DID}/app.bsky.graph.follow/{other_rkey}",
+                    "value": {"subject": "did:plc:someone-else"},
+                },
+                {
+                    "uri": f"at://{FAKE_DID}/app.bsky.graph.follow/{target_rkey}",
+                    "value": {"subject": target_did},
+                },
+            ],
+        },
+    )
+    httpx_mock.add_response(
+        method="POST",
+        url=f"{FAKE_PDS}/xrpc/com.atproto.repo.deleteRecord",
+        json={},
+    )
+    from slop_salon.tools.bsky import unfollow_app
+
+    result = runner.invoke(unfollow_app, ["--handle", "bsky.app"])
+    assert result.exit_code == 0, result.output
+
+    body = _json_body(_find_request(httpx_mock, "deleteRecord"))
+    assert body == {
+        "repo": FAKE_DID,
+        "collection": "app.bsky.graph.follow",
+        "rkey": target_rkey,
+    }
+
+
+def test_unfollow_is_idempotent_when_not_following(bsky_env, session_mock, httpx_mock):
+    target_did = "did:plc:stranger"
+    httpx_mock.add_response(
+        method="GET",
+        url=f"{FAKE_PDS}/xrpc/com.atproto.identity.resolveHandle?handle=stranger.bsky.social",
+        json={"did": target_did},
+    )
+    httpx_mock.add_response(
+        method="GET",
+        url=(
+            f"{FAKE_PDS}/xrpc/com.atproto.repo.listRecords"
+            f"?repo={FAKE_DID}&collection=app.bsky.graph.follow&limit=100"
+        ),
+        json={"records": []},
+    )
+    from slop_salon.tools.bsky import unfollow_app
+
+    result = runner.invoke(unfollow_app, ["--handle", "stranger.bsky.social"])
+    assert result.exit_code == 0, result.output
+    assert "not following" in result.output
+
+    # Crucially, no deleteRecord call should have been made.
+    delete_calls = [
+        r for r in httpx_mock.get_requests() if "deleteRecord" in str(r.url)
+    ]
+    assert delete_calls == []
+
+
 # === Reads ================================================================
 
 
