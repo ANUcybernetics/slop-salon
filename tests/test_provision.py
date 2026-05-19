@@ -103,15 +103,6 @@ def test_git_config_cmd_chmods_credentials():
     assert "chmod 600 ~/.git-credentials" in cmd
 
 
-def test_create_tick_service_cmd_uses_sprite_env():
-    from slop_salon.provision import _build_create_tick_service_cmd
-
-    cmd = _build_create_tick_service_cmd()
-    assert "sprite-env services create" in cmd
-    assert "tick" in cmd
-    assert "slop-tick-loop" in cmd
-
-
 def test_write_env_file_cmd_encodes_safely_and_chmods_600():
     import base64
 
@@ -219,13 +210,13 @@ siblings = ["other"]
 
     sprites.create_sprite.assert_called_once()
 
-    # env-file write, apt, uv-install, clone+symlink, pre-commit, git-config,
-    # tick-service = 7 execs
-    assert sprites.exec.call_count >= 7
+    # env-file write, apt, uv-install, clone+symlink, pre-commit, git-config = 6 execs
+    assert sprites.exec.call_count >= 6
 
-    # The tick service is created via sprite-env services, not crontab.
+    # Ticks are driven by the GH Actions wake workflow, not an in-sprite service
+    # or cron. Provisioning must not create one.
     exec_commands = [c[0][1][-1] for c in sprites.exec.call_args_list]
-    assert any("sprite-env services create tick" in cmd for cmd in exec_commands)
+    assert not any("sprite-env services create tick" in cmd for cmd in exec_commands)
     assert not any("crontab" in cmd for cmd in exec_commands)
 
     # claude is pre-installed in the sprite image, so provisioning must not reinstall it.
