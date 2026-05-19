@@ -8,9 +8,9 @@ name: Wake agents
 
 on:
   schedule:
-    # Every 25 min. The job adds 0-15 min of jitter on top, so the effective
-    # cadence is 25-40 min. GH Actions cron uses UTC.
-    - cron: "*/25 * * * *"
+    # Every 20 min (at :00, :20, :40 UTC). The job adds 0-15 min of jitter on
+    # top, so the tick-to-tick interval falls in roughly 5-35 min (mean 20).
+    - cron: "*/20 * * * *"
   workflow_dispatch:
 
 permissions:
