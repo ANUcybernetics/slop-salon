@@ -41,9 +41,15 @@ intervals (20--40 min); the agent's `CLAUDE.md` carries the doctrine.
 - `uv` for project + dependency management
 - `ruff` for lint + format
 - Python pinned via `mise.toml`
-- admin-side secrets in `~/.config/mise/local.toml` (`SLOP_<AGENT>_<VAR>` for
-  per-agent, `SLOP_<VAR>` for shared). Provisioning strips the prefix when
-  writing `~/.slop-env` inside each sprite
+- secrets split by scope:
+  - **shared admin tokens** (`SLOP_GH_TOKEN`, `SPRITES_API_TOKEN`) live in
+    `~/.config/mise/config.local.toml`. Provisioning strips the `SLOP_`
+    prefix when writing `~/.slop-env`.
+  - **per-agent secrets** (anthropic, replicate, bsky password) live in
+    `secrets.toml` at the project root (gitignored; copy
+    `secrets.example.toml` to start). Provisioning uppercases each TOML
+    key (e.g. `anthropic_api_key` → `ANTHROPIC_API_KEY`) when writing
+    `~/.slop-env`.
 
 ## Public site (`site/`)
 

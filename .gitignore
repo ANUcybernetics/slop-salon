@@ -7,3 +7,6 @@ dist/
 build/
 *.egg-info/
 .worktrees/
+
+# Per-agent secrets — copy secrets.example.toml and fill in.
+secrets.toml

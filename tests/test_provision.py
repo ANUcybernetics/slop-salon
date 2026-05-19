@@ -5,51 +5,99 @@ from __future__ import annotations
 import os
 from unittest.mock import MagicMock, patch
 
-import pytest
 
+def test_resolve_secrets_merges_shared_env_and_per_agent_file(monkeypatch, tmp_path):
+    from slop_salon.provision import resolve_secrets
 
-def test_resolve_secrets_strips_per_agent_and_shared_prefixes(monkeypatch):
-    from slop_salon.provision import resolve_secrets_from_env
-
-    # Clear any pre-existing SLOP_* so the test is hermetic.
     for k in list(os.environ):
         if k.startswith("SLOP_"):
             monkeypatch.delenv(k, raising=False)
 
-    monkeypatch.setenv("SLOP_LOU_BSKY_PASSWORD", "lou-pw")
-    monkeypatch.setenv("SLOP_LOU_REPLICATE_API_TOKEN", "lou-replicate")
     monkeypatch.setenv("SLOP_GH_TOKEN", "ghp_shared")
     monkeypatch.setenv("SLOP_ANTHROPIC_BASE_URL", "https://proxy")
-    # An unrelated SLOP_*_*-style env that happens to start with SLOP_ but isn't
-    # one of ours — covered by the "other-agent" exclusion below.
+    # Non-SLOP_ env vars are not propagated — SPRITES_API_TOKEN stays admin-side.
     monkeypatch.setenv("SPRITES_API_TOKEN", "not-leaked-to-sprite")
 
-    env = resolve_secrets_from_env("lou", ["lou", "mina"])
+    secrets = tmp_path / "secrets.toml"
+    secrets.write_text(
+        """
+[agents.lou]
+bsky_password = "lou-pw"
+replicate_api_token = "lou-replicate"
+"""
+    )
+
+    env = resolve_secrets("lou", ["lou", "mina"], secrets_path=secrets)
 
     assert env["BSKY_PASSWORD"] == "lou-pw"
     assert env["REPLICATE_API_TOKEN"] == "lou-replicate"
     assert env["GH_TOKEN"] == "ghp_shared"
     assert env["ANTHROPIC_BASE_URL"] == "https://proxy"
-    # Non-SLOP_ env vars are not propagated — SPRITES_API_TOKEN stays admin-side.
     assert "SPRITES_API_TOKEN" not in env
 
 
-def test_resolve_secrets_excludes_other_agents(monkeypatch):
-    from slop_salon.provision import resolve_secrets_from_env
+def test_resolve_secrets_excludes_other_agents_from_file(monkeypatch, tmp_path):
+    from slop_salon.provision import resolve_secrets
 
     for k in list(os.environ):
         if k.startswith("SLOP_"):
             monkeypatch.delenv(k, raising=False)
 
-    monkeypatch.setenv("SLOP_LOU_BSKY_PASSWORD", "lou-pw")
-    monkeypatch.setenv("SLOP_MINA_BSKY_PASSWORD", "mina-pw")
+    secrets = tmp_path / "secrets.toml"
+    secrets.write_text(
+        """
+[agents.lou]
+bsky_password = "lou-pw"
 
-    env = resolve_secrets_from_env("lou", ["lou", "mina"])
+[agents.mina]
+bsky_password = "mina-pw"
+"""
+    )
+
+    env = resolve_secrets("lou", ["lou", "mina"], secrets_path=secrets)
 
     assert env["BSKY_PASSWORD"] == "lou-pw"
     # Mina's secrets must not land in lou's sprite.
-    assert "MINA_BSKY_PASSWORD" not in env
     assert all(not k.startswith("MINA_") for k in env)
+
+
+def test_resolve_secrets_ignores_stray_per_agent_env_vars(monkeypatch, tmp_path):
+    """If someone leaves a SLOP_<AGENT>_* env var around, it must not leak in."""
+    from slop_salon.provision import resolve_secrets
+
+    for k in list(os.environ):
+        if k.startswith("SLOP_"):
+            monkeypatch.delenv(k, raising=False)
+
+    # Stray env vars from the old convention — should be ignored entirely.
+    monkeypatch.setenv("SLOP_LOU_BSKY_PASSWORD", "from-env-should-not-win")
+    monkeypatch.setenv("SLOP_MINA_BSKY_PASSWORD", "from-env-should-not-win")
+
+    env = resolve_secrets("lou", ["lou", "mina"], secrets_path=tmp_path / "missing.toml")
+
+    assert "BSKY_PASSWORD" not in env
+
+
+def test_resolve_secrets_skips_empty_placeholders(monkeypatch, tmp_path):
+    from slop_salon.provision import resolve_secrets
+
+    for k in list(os.environ):
+        if k.startswith("SLOP_"):
+            monkeypatch.delenv(k, raising=False)
+
+    secrets = tmp_path / "secrets.toml"
+    secrets.write_text(
+        """
+[agents.gert]
+bsky_password = ""
+anthropic_api_key = "real-value"
+"""
+    )
+
+    env = resolve_secrets("gert", ["gert"], secrets_path=secrets)
+
+    assert env["ANTHROPIC_API_KEY"] == "real-value"
+    assert "BSKY_PASSWORD" not in env
 
 
 def test_apt_install_cmd_uses_required_packages():
@@ -193,7 +241,7 @@ siblings = ["other"]
         return MagicMock(stdout="", returncode=0)
 
     with (
-        patch.object(provision, "resolve_secrets_from_env", return_value=fake_secrets),
+        patch.object(provision, "resolve_secrets", return_value=fake_secrets),
         patch.object(provision, "SpritesClient") as mock_sprites_class,
         patch.object(provision, "subprocess") as mock_sub,
     ):

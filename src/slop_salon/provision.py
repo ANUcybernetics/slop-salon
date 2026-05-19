@@ -14,6 +14,7 @@ import base64
 import os
 import shlex
 import subprocess
+import tomllib
 from pathlib import Path
 
 import typer
@@ -28,28 +29,37 @@ APT_PACKAGES = "imagemagick ffmpeg sox"
 SLOP_SALON_REPO = "git+https://github.com/ANUcybernetics/slop-salon"
 
 
-def resolve_secrets_from_env(name: str, all_agent_names: list[str]) -> dict[str, str]:
-    """Read SLOP_* env vars from os.environ, strip prefixes, return sprite-side names.
+def resolve_secrets(
+    name: str,
+    all_agent_names: list[str],
+    secrets_path: str | Path = "secrets.toml",
+) -> dict[str, str]:
+    """Resolve the env dict for a sprite-side install of `name`.
 
-    Convention:
-    - `SLOP_<AGENT>_<X>` is per-agent; the strip yields `<X>` (e.g. for `name='lou'`,
-      `SLOP_LOU_BSKY_PASSWORD` becomes `BSKY_PASSWORD`).
-    - `SLOP_<X>` is shared across all agents; the strip yields `<X>` (e.g.
-      `SLOP_GH_TOKEN` becomes `GH_TOKEN`).
-    - Other agents' `SLOP_<OTHER>_<X>` vars are excluded (so e.g. `mina`'s
-      bsky password doesn't end up in `lou`'s sprite).
+    Two sources, merged:
+    - Shared admin tokens come from `SLOP_*` env vars (e.g. `SLOP_GH_TOKEN`
+      → `GH_TOKEN`). Any `SLOP_<AGENT>_*` are skipped — per-agent secrets
+      live in the file, not the env.
+    - Per-agent secrets come from `[agents.<name>]` in `secrets_path`. TOML
+      keys are uppercased into env names (anthropic_api_key →
+      ANTHROPIC_API_KEY). File values win on key collision.
 
-    Non-`SLOP_`-prefixed env vars (e.g. `SPRITES_API_TOKEN`) are intentionally
-    excluded: they're for the admin machine, not the sprite.
+    Non-`SLOP_`-prefixed env vars (e.g. `SPRITES_API_TOKEN`) stay admin-side.
     """
-    agent_prefix = f"SLOP_{name.upper()}_"
-    other_agent_prefixes = [f"SLOP_{n.upper()}_" for n in all_agent_names if n != name]
+    agent_prefixes = tuple(f"SLOP_{n.upper()}_" for n in all_agent_names)
     env: dict[str, str] = {}
     for k, v in os.environ.items():
-        if k.startswith(agent_prefix):
-            env[k.removeprefix(agent_prefix)] = v
-        elif k.startswith("SLOP_") and not any(k.startswith(p) for p in other_agent_prefixes):
+        if k.startswith("SLOP_") and not k.startswith(agent_prefixes):
             env[k.removeprefix("SLOP_")] = v
+
+    p = Path(secrets_path)
+    if p.exists():
+        with p.open("rb") as f:
+            data = tomllib.load(f)
+        agent_secrets = data.get("agents", {}).get(name, {})
+        for k, v in agent_secrets.items():
+            if v:  # skip empty placeholders
+                env[k.upper()] = v
     return env
 
 
@@ -190,12 +200,12 @@ def provision_agent(
         raise typer.BadParameter(f"agent {name!r} not in {config.path}")
     agent = config.agents[name]
 
-    env = resolve_secrets_from_env(name, list(config.agents.keys()))
+    env = resolve_secrets(name, list(config.agents.keys()))
     gh_token = env.get("GH_TOKEN")
     if not gh_token:
         raise RuntimeError(
             f"GH_TOKEN missing from resolved env for {name!r}; "
-            f"check ~/.config/mise/local.toml for SLOP_GH_TOKEN"
+            f"check ~/.config/mise/config.local.toml for SLOP_GH_TOKEN"
         )
     # BSKY_HANDLE is public config (lives in slop_salon.toml), not a secret;
     # inject it here so the sprite-side tools see it alongside the secrets.
