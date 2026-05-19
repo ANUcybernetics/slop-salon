@@ -46,7 +46,12 @@ def test_post_text_only(bsky_env, mock_atproto_client):
     result = runner.invoke(post_app, ["--text", "hello world"])
 
     assert result.exit_code == 0
-    mock_atproto_client.login.assert_called_once_with("lou.slopsalon.art", "test-password")
+    # We bypass Client.login() (which does an AppView get_profile that fails
+    # on fresh accounts) and call _get_and_set_session directly.
+    mock_atproto_client._get_and_set_session.assert_called_once_with(
+        "lou.slopsalon.art", "test-password", None
+    )
+    mock_atproto_client.login.assert_not_called()
     mock_atproto_client.send_post.assert_called_once()
     args, kwargs = mock_atproto_client.send_post.call_args
     assert kwargs.get("text") == "hello world" or (args and args[0] == "hello world")

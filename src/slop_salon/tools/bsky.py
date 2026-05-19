@@ -8,13 +8,24 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import typer
 from atproto import Client
 
 
 def _get_client() -> Client:
-    """Authenticate against Bluesky using env-var credentials."""
+    """Authenticate against Bluesky using env-var credentials.
+
+    `Client.login()` follows up createSession with `app.bsky.actor.get_profile`
+    (an AppView call) to populate `self.me`. That AppView call returns
+    "Profile not found" until the AppView crawler has indexed the handle —
+    which can lag by minutes-to-hours after a handle change, leaving fresh
+    accounts unable to use the SDK at all. Bypass by calling the underlying
+    session setup directly and synthesising the minimal `me` object the
+    SDK's higher-level methods actually need (just `did` for send_post,
+    nothing for get_timeline/list_notifications).
+    """
     handle = os.environ.get("BSKY_HANDLE")
     password = os.environ.get("BSKY_PASSWORD")
     if not handle:
@@ -24,7 +35,8 @@ def _get_client() -> Client:
         typer.echo("error: BSKY_PASSWORD env var is required", err=True)
         raise typer.Exit(code=1)
     client = Client()
-    client.login(handle, password)
+    session = client._get_and_set_session(handle, password, None)
+    client.me = SimpleNamespace(did=session.did, handle=session.handle)
     return client
 
 
