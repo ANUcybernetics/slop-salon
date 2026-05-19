@@ -2,29 +2,63 @@
 
 Each command is exposed as a separate typer app via [project.scripts].
 All commands read BSKY_HANDLE and BSKY_PASSWORD from env.
+
+We talk to the ATProto XRPC API directly (no Python SDK). The atproto
+SDK's `Client.login()` follows up createSession with an unconditional
+`app.bsky.actor.get_profile` call against AppView; that call hangs for
+hours when AppView hasn't reindexed a freshly-changed handle, making
+every tool unusable for new agents. Direct HTTP gives us exactly the
+calls Bluesky's docs describe — and tests can assert at the wire level.
 """
 
 from __future__ import annotations
 
+import json
+import mimetypes
 import os
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
-from types import SimpleNamespace
 
+import httpx
 import typer
-from atproto import Client
+
+DEFAULT_PDS = "https://bsky.social"
+DEFAULT_LANG = "en"
+DEFAULT_TIMEOUT = 20.0
+UPLOAD_TIMEOUT = 60.0
 
 
-def _get_client() -> Client:
-    """Authenticate against Bluesky using env-var credentials.
+@dataclass(frozen=True)
+class Session:
+    did: str
+    handle: str
+    access_jwt: str
+    pds: str
 
-    `Client.login()` follows up createSession with `app.bsky.actor.get_profile`
-    (an AppView call) to populate `self.me`. That AppView call returns
-    "Profile not found" until the AppView crawler has indexed the handle —
-    which can lag by minutes-to-hours after a handle change, leaving fresh
-    accounts unable to use the SDK at all. Bypass by calling the underlying
-    session setup directly and synthesising the minimal `me` object the
-    SDK's higher-level methods actually need (just `did` for send_post,
-    nothing for get_timeline/list_notifications).
+    @property
+    def auth_headers(self) -> dict[str, str]:
+        return {"Authorization": f"Bearer {self.access_jwt}"}
+
+
+def _xrpc_error(resp: httpx.Response, endpoint: str) -> None:
+    """Print an XRPC error and exit. Bluesky returns JSON {error, message} on failure."""
+    try:
+        body = resp.json()
+        detail = f"{body.get('error', '?')}: {body.get('message', resp.text)}"
+    except ValueError:
+        detail = resp.text
+    typer.echo(f"error: {endpoint} returned {resp.status_code}: {detail}", err=True)
+    raise typer.Exit(code=1)
+
+
+def _get_session() -> Session:
+    """Authenticate against bsky.social and point future calls at the user's real PDS.
+
+    bsky.social is the auth entry point; the actual PDS endpoint (where the
+    repo lives) is in the returned didDoc's `AtprotoPersonalDataServer`
+    service entry. For accounts on bsky.social's hosting fleet, that's
+    typically `https://<shard>.us-west.host.bsky.network`.
     """
     handle = os.environ.get("BSKY_HANDLE")
     password = os.environ.get("BSKY_PASSWORD")
@@ -34,10 +68,108 @@ def _get_client() -> Client:
     if not password:
         typer.echo("error: BSKY_PASSWORD env var is required", err=True)
         raise typer.Exit(code=1)
-    client = Client()
-    session = client._get_and_set_session(handle, password, None)
-    client.me = SimpleNamespace(did=session.did, handle=session.handle)
-    return client
+    resp = httpx.post(
+        f"{DEFAULT_PDS}/xrpc/com.atproto.server.createSession",
+        json={"identifier": handle, "password": password},
+        timeout=DEFAULT_TIMEOUT,
+    )
+    if resp.status_code != 200:
+        _xrpc_error(resp, "createSession")
+    data = resp.json()
+    pds = DEFAULT_PDS
+    for svc in data.get("didDoc", {}).get("service") or []:
+        if svc.get("type") == "AtprotoPersonalDataServer":
+            pds = svc["serviceEndpoint"]
+            break
+    return Session(
+        did=data["did"], handle=data["handle"], access_jwt=data["accessJwt"], pds=pds
+    )
+
+
+def _now_iso() -> str:
+    """ISO 8601 timestamp with ms precision and trailing Z (Bluesky's createdAt format)."""
+    return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def _mime_of(path: Path) -> str:
+    mime, _ = mimetypes.guess_type(str(path))
+    return mime or "application/octet-stream"
+
+
+def _upload_blob(session: Session, path: Path) -> dict:
+    """Upload a blob to the user's PDS. Returns the BlobRef the embed needs."""
+    resp = httpx.post(
+        f"{session.pds}/xrpc/com.atproto.repo.uploadBlob",
+        headers={**session.auth_headers, "Content-Type": _mime_of(path)},
+        content=path.read_bytes(),
+        timeout=UPLOAD_TIMEOUT,
+    )
+    if resp.status_code != 200:
+        _xrpc_error(resp, "uploadBlob")
+    return resp.json()["blob"]
+
+
+def _get_posts(session: Session, uris: list[str]) -> list[dict]:
+    """Look up posts by AT URI (used to build reply/quote refs)."""
+    resp = httpx.get(
+        f"{session.pds}/xrpc/app.bsky.feed.getPosts",
+        params={"uris": uris},
+        headers=session.auth_headers,
+        timeout=DEFAULT_TIMEOUT,
+    )
+    if resp.status_code != 200:
+        _xrpc_error(resp, "getPosts")
+    return resp.json().get("posts", [])
+
+
+def _create_post_record(session: Session, record: dict) -> dict:
+    """Create an app.bsky.feed.post record on the user's repo. Returns {uri, cid}."""
+    resp = httpx.post(
+        f"{session.pds}/xrpc/com.atproto.repo.createRecord",
+        headers=session.auth_headers,
+        json={
+            "repo": session.did,
+            "collection": "app.bsky.feed.post",
+            "record": record,
+        },
+        timeout=DEFAULT_TIMEOUT,
+    )
+    if resp.status_code != 200:
+        _xrpc_error(resp, "createRecord")
+    return resp.json()
+
+
+def _validate_media_args(images: list, alts: list) -> None:
+    if len(images) > 4:
+        typer.echo("error: at most 4 images per post (Bluesky limit)", err=True)
+        raise typer.Exit(code=1)
+    if images and len(alts) != len(images):
+        typer.echo(
+            "error: each --image needs a matching --alt (alt text is mandatory)",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+
+def _build_image_embed(session: Session, images: list[Path], alts: list[str]) -> dict:
+    uploaded = [
+        {"alt": alt_text, "image": _upload_blob(session, path)}
+        for path, alt_text in zip(images, alts, strict=True)
+    ]
+    return {"$type": "app.bsky.embed.images", "images": uploaded}
+
+
+def _build_video_embed(session: Session, video: Path) -> dict:
+    return {"$type": "app.bsky.embed.video", "video": _upload_blob(session, video)}
+
+
+def _base_post_record(text: str) -> dict:
+    return {
+        "$type": "app.bsky.feed.post",
+        "text": text,
+        "createdAt": _now_iso(),
+        "langs": [DEFAULT_LANG],
+    }
 
 
 # --- bsky-post ---
@@ -59,35 +191,16 @@ def post(
     """Post text + optional media to Bluesky."""
     images = image or []
     alts = alt or []
+    _validate_media_args(images, alts)
 
-    if len(images) > 4:
-        typer.echo("error: at most 4 images per post (Bluesky limit)", err=True)
-        raise typer.Exit(code=1)
-    if images and len(alts) != len(images):
-        typer.echo(
-            "error: each --image needs a matching --alt (alt text is mandatory)",
-            err=True,
-        )
-        raise typer.Exit(code=1)
-
-    client = _get_client()
-
-    embed = None
+    session = _get_session()
+    record = _base_post_record(text)
     if images:
-        uploaded = []
-        for path, alt_text in zip(images, alts, strict=True):
-            blob = client.upload_blob(path.read_bytes()).blob
-            uploaded.append({"alt": alt_text, "image": blob})
-        embed = {"$type": "app.bsky.embed.images", "images": uploaded}
+        record["embed"] = _build_image_embed(session, images, alts)
     elif video:
-        blob = client.upload_blob(video.read_bytes()).blob
-        embed = {"$type": "app.bsky.embed.video", "video": blob}
-
-    if embed:
-        client.send_post(text=text, embed=embed)
-    else:
-        client.send_post(text=text)
-    typer.echo("posted")
+        record["embed"] = _build_video_embed(session, video)
+    result = _create_post_record(session, record)
+    typer.echo(f"posted {result['uri']}")
 
 
 # --- bsky-reply ---
@@ -95,20 +208,18 @@ def post(
 reply_app = typer.Typer(add_completion=False, help="Reply in an existing Bluesky thread.")
 
 
-def _build_reply_ref(client: Client, parent_uri: str) -> dict:
+def _build_reply_ref(session: Session, parent_uri: str) -> dict:
     """Look up a parent post and build the reply ref structure (parent + root)."""
-    posts = client.get_posts([parent_uri]).posts
+    posts = _get_posts(session, [parent_uri])
     if not posts:
         typer.echo(f"error: parent post not found: {parent_uri}", err=True)
         raise typer.Exit(code=1)
     parent = posts[0]
-    parent_ref = {"uri": parent.uri, "cid": parent.cid}
-    # If parent is itself a reply, root traces back to parent.record.reply.root.
+    parent_ref = {"uri": parent["uri"], "cid": parent["cid"]}
+    # If parent is itself a reply, the root traces back via parent.record.reply.root.
     # Otherwise, parent IS the root.
-    existing_reply = getattr(parent.record, "reply", None)
-    root_ref = existing_reply.root if existing_reply else parent_ref
-    if not isinstance(root_ref, dict):
-        root_ref = {"uri": root_ref.uri, "cid": root_ref.cid}
+    existing_reply = parent.get("record", {}).get("reply")
+    root_ref = existing_reply["root"] if existing_reply else parent_ref
     return {"parent": parent_ref, "root": root_ref}
 
 
@@ -122,29 +233,15 @@ def reply(
     """Reply to a Bluesky post."""
     images = image or []
     alts = alt or []
-    if len(images) > 4:
-        typer.echo("error: at most 4 images per post", err=True)
-        raise typer.Exit(code=1)
-    if images and len(alts) != len(images):
-        typer.echo("error: each --image needs a matching --alt", err=True)
-        raise typer.Exit(code=1)
+    _validate_media_args(images, alts)
 
-    client = _get_client()
-    reply_ref = _build_reply_ref(client, parent)
-
-    embed = None
+    session = _get_session()
+    record = _base_post_record(text)
+    record["reply"] = _build_reply_ref(session, parent)
     if images:
-        uploaded = []
-        for path, alt_text in zip(images, alts, strict=True):
-            blob = client.upload_blob(path.read_bytes()).blob
-            uploaded.append({"alt": alt_text, "image": blob})
-        embed = {"$type": "app.bsky.embed.images", "images": uploaded}
-
-    kwargs = {"text": text, "reply_to": reply_ref}
-    if embed:
-        kwargs["embed"] = embed
-    client.send_post(**kwargs)
-    typer.echo("replied")
+        record["embed"] = _build_image_embed(session, images, alts)
+    result = _create_post_record(session, record)
+    typer.echo(f"replied {result['uri']}")
 
 
 # --- bsky-quote-post ---
@@ -164,35 +261,77 @@ def quote_post(
     """Post an original that quotes another post."""
     images = image or []
     alts = alt or []
-    if len(images) > 4:
-        typer.echo("error: at most 4 images per post", err=True)
-        raise typer.Exit(code=1)
-    if images and len(alts) != len(images):
-        typer.echo("error: each --image needs a matching --alt", err=True)
-        raise typer.Exit(code=1)
+    _validate_media_args(images, alts)
 
-    client = _get_client()
-    posts = client.get_posts([quoted]).posts
+    session = _get_session()
+    posts = _get_posts(session, [quoted])
     if not posts:
         typer.echo(f"error: quoted post not found: {quoted}", err=True)
         raise typer.Exit(code=1)
-    quoted_ref = {"uri": posts[0].uri, "cid": posts[0].cid}
+    quoted_ref = {"uri": posts[0]["uri"], "cid": posts[0]["cid"]}
 
+    record = _base_post_record(text)
     if images:
-        uploaded = []
-        for path, alt_text in zip(images, alts, strict=True):
-            blob = client.upload_blob(path.read_bytes()).blob
-            uploaded.append({"alt": alt_text, "image": blob})
-        embed = {
+        uploaded = [
+            {"alt": alt_text, "image": _upload_blob(session, path)}
+            for path, alt_text in zip(images, alts, strict=True)
+        ]
+        record["embed"] = {
             "$type": "app.bsky.embed.recordWithMedia",
             "record": {"$type": "app.bsky.embed.record", "record": quoted_ref},
             "media": {"$type": "app.bsky.embed.images", "images": uploaded},
         }
     else:
-        embed = {"$type": "app.bsky.embed.record", "record": quoted_ref}
+        record["embed"] = {"$type": "app.bsky.embed.record", "record": quoted_ref}
+    result = _create_post_record(session, record)
+    typer.echo(f"quoted {result['uri']}")
 
-    client.send_post(text=text, embed=embed)
-    typer.echo("quoted")
+
+# --- bsky-follow ---
+
+follow_app = typer.Typer(add_completion=False, help="Follow another Bluesky account by handle.")
+
+
+def _resolve_handle(session: Session, handle: str) -> str:
+    """Resolve a handle to a DID via the PDS. Hits the PDS, not AppView, so works
+    even when AppView hasn't reindexed a recently-changed handle."""
+    resp = httpx.get(
+        f"{session.pds}/xrpc/com.atproto.identity.resolveHandle",
+        params={"handle": handle},
+        headers=session.auth_headers,
+        timeout=DEFAULT_TIMEOUT,
+    )
+    if resp.status_code != 200:
+        _xrpc_error(resp, "resolveHandle")
+    return resp.json()["did"]
+
+
+@follow_app.command()
+def follow(
+    handle: str = typer.Option(..., "--handle", help="Handle to follow, e.g. mina.slopsalon.art"),
+):
+    """Follow another account. Idempotent only at the API level — Bluesky
+    won't refuse a duplicate follow but will create a second record. Don't
+    spam it."""
+    session = _get_session()
+    subject_did = _resolve_handle(session, handle)
+    resp = httpx.post(
+        f"{session.pds}/xrpc/com.atproto.repo.createRecord",
+        headers=session.auth_headers,
+        json={
+            "repo": session.did,
+            "collection": "app.bsky.graph.follow",
+            "record": {
+                "$type": "app.bsky.graph.follow",
+                "subject": subject_did,
+                "createdAt": _now_iso(),
+            },
+        },
+        timeout=DEFAULT_TIMEOUT,
+    )
+    if resp.status_code != 200:
+        _xrpc_error(resp, "createRecord (follow)")
+    typer.echo(f"followed {handle} ({subject_did}) at {resp.json()['uri']}")
 
 
 # --- bsky-read-timeline ---
@@ -202,29 +341,23 @@ read_timeline_app = typer.Typer(
 )
 
 
-def _dump_feed(feed_view) -> list[dict]:
-    """Serialise a list of FeedViewPost to JSON-safe plain dicts.
-
-    `mode="json"` coerces non-JSON-native values (datetime, etc.) to strings;
-    without it, json.dumps would fail on real atproto responses.
-    """
-    return [item.model_dump(mode="json", exclude_none=True) for item in feed_view]
-
-
 @read_timeline_app.command()
 def read_timeline(
     actor: str = typer.Option(None, "--actor", help="Handle of an actor (default: your home feed)"),
     limit: int = typer.Option(20, "--limit", help="Number of posts to return"),
 ):
     """Print recent feed posts as JSON to stdout."""
-    import json
-
-    client = _get_client()
+    session = _get_session()
     if actor:
-        response = client.get_author_feed(actor=actor, limit=limit)
+        url = f"{session.pds}/xrpc/app.bsky.feed.getAuthorFeed"
+        params = {"actor": actor, "limit": limit}
     else:
-        response = client.get_timeline(limit=limit)
-    typer.echo(json.dumps(_dump_feed(response.feed), indent=2))
+        url = f"{session.pds}/xrpc/app.bsky.feed.getTimeline"
+        params = {"limit": limit}
+    resp = httpx.get(url, params=params, headers=session.auth_headers, timeout=DEFAULT_TIMEOUT)
+    if resp.status_code != 200:
+        _xrpc_error(resp, "getTimeline" if not actor else "getAuthorFeed")
+    typer.echo(json.dumps(resp.json().get("feed", []), indent=2))
 
 
 # --- bsky-read-notifications ---
@@ -240,9 +373,13 @@ def read_notifications(
     limit: int = typer.Option(20, "--limit", help="Number of notifications to return"),
 ):
     """Print recent notifications as JSON to stdout."""
-    import json
-
-    client = _get_client()
-    response = client.app.bsky.notification.list_notifications(params={"limit": limit})
-    payload = [item.model_dump(mode="json", exclude_none=True) for item in response.notifications]
-    typer.echo(json.dumps(payload, indent=2))
+    session = _get_session()
+    resp = httpx.get(
+        f"{session.pds}/xrpc/app.bsky.notification.listNotifications",
+        params={"limit": limit},
+        headers=session.auth_headers,
+        timeout=DEFAULT_TIMEOUT,
+    )
+    if resp.status_code != 200:
+        _xrpc_error(resp, "listNotifications")
+    typer.echo(json.dumps(resp.json().get("notifications", []), indent=2))
