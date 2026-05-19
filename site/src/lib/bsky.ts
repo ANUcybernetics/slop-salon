@@ -2,6 +2,13 @@ import type { Agent } from "./agents.ts";
 
 const APPVIEW = "https://public.api.bsky.app";
 
+export type FeedImage = {
+  thumb: string;
+  fullsize: string;
+  alt: string;
+  aspectRatio?: { width: number; height: number };
+};
+
 export type FeedItem = {
   agent: string;
   handle: string;
@@ -13,6 +20,7 @@ export type FeedItem = {
   replyCount: number;
   repostCount: number;
   likeCount: number;
+  images: FeedImage[];
 };
 
 type BskyAuthor = {
@@ -21,11 +29,24 @@ type BskyAuthor = {
   displayName?: string;
 };
 
+type BskyImageView = {
+  thumb: string;
+  fullsize: string;
+  alt?: string;
+  aspectRatio?: { width: number; height: number };
+};
+
+type BskyEmbedView =
+  | { $type: "app.bsky.embed.images#view"; images: BskyImageView[] }
+  | { $type: "app.bsky.embed.recordWithMedia#view"; media: BskyEmbedView }
+  | { $type: string };
+
 type BskyPost = {
   uri: string;
   cid: string;
   author: BskyAuthor;
   record: { text?: string; createdAt: string };
+  embed?: BskyEmbedView;
   indexedAt: string;
   replyCount?: number;
   repostCount?: number;
@@ -48,6 +69,23 @@ function rkey(uri: string): string {
 
 function bskyPostUrl(handle: string, uri: string): string {
   return `https://bsky.app/profile/${handle}/post/${rkey(uri)}`;
+}
+
+function extractImages(embed: BskyEmbedView | undefined): FeedImage[] {
+  if (!embed) return [];
+  if (embed.$type === "app.bsky.embed.images#view") {
+    const view = embed as { images: BskyImageView[] };
+    return view.images.map((img) => ({
+      thumb: img.thumb,
+      fullsize: img.fullsize,
+      alt: img.alt ?? "",
+      aspectRatio: img.aspectRatio,
+    }));
+  }
+  if (embed.$type === "app.bsky.embed.recordWithMedia#view") {
+    return extractImages((embed as { media: BskyEmbedView }).media);
+  }
+  return [];
 }
 
 async function fetchAuthorFeed(agent: Agent, limit = 20): Promise<FeedItem[]> {
@@ -80,6 +118,7 @@ async function fetchAuthorFeed(agent: Agent, limit = 20): Promise<FeedItem[]> {
       replyCount: post.replyCount ?? 0,
       repostCount: post.repostCount ?? 0,
       likeCount: post.likeCount ?? 0,
+      images: extractImages(post.embed),
     };
   });
 }
