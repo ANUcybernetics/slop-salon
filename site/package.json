@@ -1,0 +1,41 @@
+{
+  "name": "slop-salon-site",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "astro": "astro",
+    "typecheck": "astro check",
+    "lint": "oxlint",
+    "lint:css": "stylelint \"src/**/*.{css,astro}\"",
+    "format": "oxfmt .",
+    "format:check": "oxfmt --check ."
+  },
+  "dependencies": {
+    "astro": "^6.3.5",
+    "smol-toml": "^1.6.1"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.9",
+    "@e18e/eslint-plugin": "^0.5.0",
+    "@types/node": "^25.9.0",
+    "eslint-plugin-no-only-tests": "^3.4.0",
+    "eslint-plugin-perfectionist": "^5.9.0",
+    "eslint-plugin-unused-imports": "^4.4.1",
+    "oxfmt": "^0.50.0",
+    "oxlint": "^1.65.0",
+    "postcss-html": "^1.8.1",
+    "stylelint": "^17.11.1",
+    "stylelint-config-standard": "^40.0.0",
+    "typescript": "^6.0.3"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "sharp"
+    ]
+  }
+}

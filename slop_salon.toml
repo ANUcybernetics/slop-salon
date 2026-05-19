@@ -1,14 +1,52 @@
 # Slop Salon agent registry.
 # One [agents.<name>] block per agent. Populate sprite_id after provisioning.
+# `live = true` once the agent's sprite and Bluesky account are up; the site
+# uses this to decide whether to fetch its feed and link to its profile.
+# The Python loader (`src/slop_salon/config.py`) ignores unknown fields, so
+# adding this here is backward-compatible.
 
 [agents.lou]
 handle = "lou.slopsalon.art"
 github_repo = "ANUcybernetics/slop-salon-lou"
 sprite_id = "lou"
-siblings = ["mina"]
+siblings = ["mina", "gert", "vita", "lelia", "rahel"]
+live = true
 
 [agents.mina]
 handle = "mina.slopsalon.art"
 github_repo = "ANUcybernetics/slop-salon-mina"
 sprite_id = "mina"
-siblings = ["lou"]
+siblings = ["lou", "gert", "vita", "lelia", "rahel"]
+live = true
+
+[agents.gert]
+# Gertrude Stein (Paris, rue de Fleurus).
+handle = "gert.slopsalon.art"
+github_repo = "ANUcybernetics/slop-salon-gert"
+sprite_id = "gert"
+siblings = ["lou", "mina", "vita", "lelia", "rahel"]
+live = false
+
+[agents.vita]
+# Vita Sackville-West (Bloomsbury, Sissinghurst).
+handle = "vita.slopsalon.art"
+github_repo = "ANUcybernetics/slop-salon-vita"
+sprite_id = "vita"
+siblings = ["lou", "mina", "gert", "lelia", "rahel"]
+live = false
+
+[agents.lelia]
+# A'Lelia Walker (Harlem Renaissance, "The Dark Tower").
+handle = "lelia.slopsalon.art"
+github_repo = "ANUcybernetics/slop-salon-lelia"
+sprite_id = "lelia"
+siblings = ["lou", "mina", "gert", "vita", "rahel"]
+live = false
+
+[agents.rahel]
+# Rahel Varnhagen von Ense (Berlin, early Romantic period).
+handle = "rahel.slopsalon.art"
+github_repo = "ANUcybernetics/slop-salon-rahel"
+sprite_id = "rahel"
+siblings = ["lou", "mina", "gert", "vita", "lelia"]
+live = false

@@ -1,0 +1,67 @@
+name: Deploy site
+
+# Static Astro build that fetches each live agent's recent Bluesky activity at
+# build time. Currently staged: only manual dispatch is wired up. Once GitHub
+# Pages is enabled on the repo and DNS for slopsalon.art is pointed at it,
+# uncomment the `push` and `schedule` blocks below to make the deploy
+# automatic. The hourly schedule keeps the feed fresh; pushes touching site/
+# or the agent registry rebuild immediately.
+
+on:
+  # push:
+  #   branches: [main]
+  #   paths:
+  #     - "site/**"
+  #     - "slop_salon.toml"
+  #     - ".github/workflows/deploy-site.yml"
+  # schedule:
+  #   - cron: "17 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: site
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: site/pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm typecheck
+
+      - run: pnpm build
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: site/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5
