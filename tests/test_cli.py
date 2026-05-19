@@ -140,6 +140,87 @@ def test_talk_runs_slop_tick_with_prompt(fake_config):
         assert "your last three posts felt similar" in joined
 
 
+def test_drift_reports_clean_and_drift(fake_config, tmp_path):
+    # Create a templates dir + SOUL.md alongside the config
+    templates = tmp_path / "templates"
+    templates.mkdir()
+    (templates / "CLAUDE.md").write_text("You are {{name}} ({{handle}}).\n")
+    (templates / "slop-tick").write_text("#!/bin/bash\necho tick\n")
+    (tmp_path / "SOUL.md").write_text("immutable constitution\n")
+
+    def fake_fetch(repo: str, files):
+        # lou's CLAUDE.md has drifted (extra line); SOUL.md and slop-tick are clean
+        if "lou" in repo:
+            return {
+                "SOUL.md": "immutable constitution\n",
+                "CLAUDE.md": "You are lou (lou.slopsalon.art).\nself-added line\n",
+                "slop-tick": "#!/bin/bash\necho tick\n",
+            }
+        # other: everything clean
+        return {
+            "SOUL.md": "immutable constitution\n",
+            "CLAUDE.md": "You are other (other.slopsalon.art).\n",
+            "slop-tick": "#!/bin/bash\necho tick\n",
+        }
+
+    with patch("slop_salon.cli._fetch_live_files", side_effect=fake_fetch):
+        result = runner.invoke(app, ["drift", "lou"])
+
+        assert result.exit_code == 0, result.output
+        assert "SOUL.md" in result.output and "clean" in result.output
+        assert "CLAUDE.md" in result.output and "drift" in result.output
+        assert "+self-added line" in result.output
+
+
+def test_drift_scans_all_agents_when_no_name(fake_config, tmp_path):
+    templates = tmp_path / "templates"
+    templates.mkdir()
+    (templates / "CLAUDE.md").write_text("You are {{name}}.\n")
+    (templates / "slop-tick").write_text("tick\n")
+    (tmp_path / "SOUL.md").write_text("soul\n")
+
+    captured_repos = []
+
+    def fake_fetch(repo, files):
+        captured_repos.append(repo)
+        return {f: None for f in files}
+
+    with patch("slop_salon.cli._fetch_live_files", side_effect=fake_fetch):
+        result = runner.invoke(app, ["drift"])
+
+        assert result.exit_code == 0, result.output
+        assert "ANUcybernetics/slop-salon-lou" in captured_repos
+        assert "ANUcybernetics/slop-salon-other" in captured_repos
+
+
+def test_drift_handles_missing_repo_gracefully(fake_config, tmp_path):
+    import subprocess as sp
+
+    templates = tmp_path / "templates"
+    templates.mkdir()
+    (templates / "CLAUDE.md").write_text("You are {{name}}.\n")
+    (tmp_path / "SOUL.md").write_text("soul\n")
+
+    def fake_fetch(repo, files):
+        if "lou" in repo:
+            raise sp.CalledProcessError(
+                1,
+                ["gh", "repo", "clone", repo],
+                stderr=b"GraphQL: Could not resolve to a Repository",
+            )
+        return {f: "soul\n" if f == "SOUL.md" else "You are other.\n" for f in files}
+
+    with patch("slop_salon.cli._fetch_live_files", side_effect=fake_fetch):
+        result = runner.invoke(app, ["drift"])
+
+        assert result.exit_code == 0, result.output
+        assert "lou" in result.output
+        assert "could not fetch" in result.output
+        # other should still get processed after lou fails
+        assert "other" in result.output
+        assert "clean" in result.output
+
+
 def test_new_invokes_provisioning(fake_config):
     with patch("slop_salon.cli.provision_agent") as mock_provision:
         result = runner.invoke(app, ["new", "lou", "--yes-dns"])
