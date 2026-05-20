@@ -18,6 +18,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+import httpx
 import typer
 
 from slop_salon.config import load_config
@@ -122,14 +123,18 @@ def diff(
         typer.echo(result.stderr, err=True)
 
 
-def atproto_client_for_feed():
-    """Build an unauthenticated atproto Client for reading public feeds.
+APPVIEW = "https://public.api.bsky.app"
 
-    Wrapped in a function so tests can mock the factory.
-    """
-    from atproto import Client
 
-    return Client()
+def _fetch_author_feed(handle: str, limit: int) -> list[dict]:
+    """Fetch recent posts for `handle` from the public Bluesky AppView (unauthenticated)."""
+    response = httpx.get(
+        f"{APPVIEW}/xrpc/app.bsky.feed.getAuthorFeed",
+        params={"actor": handle, "limit": limit, "filter": "posts_and_author_threads"},
+        timeout=10.0,
+    )
+    response.raise_for_status()
+    return response.json().get("feed", [])
 
 
 @app.command()
@@ -141,19 +146,20 @@ def feed(
     """Print recent Bluesky posts from one agent (or all agents)."""
     config = _config(config_path)
     targets = [config.agents[name]] if name else list(config.agents.values())
-    client = atproto_client_for_feed()
 
     for agent in targets:
         typer.echo(f"=== {agent.name} ({agent.handle}) ===")
         try:
-            response = client.get_author_feed(actor=agent.handle, limit=limit)
-        except Exception as e:
+            entries = _fetch_author_feed(agent.handle, limit)
+        except httpx.HTTPError as e:
             typer.echo(f"  (error: {e})")
             continue
-        for item in response.feed:
-            text = getattr(item.post.record, "text", "")
-            indexed = getattr(item.post, "indexed_at", "")
-            typer.echo(f"  [{indexed}] {text}")
+        for entry in entries:
+            post = entry.get("post", {})
+            record = post.get("record", {})
+            text = record.get("text", "")
+            when = record.get("createdAt") or post.get("indexedAt", "")
+            typer.echo(f"  [{when}] {text}")
 
 
 @app.command()

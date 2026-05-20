@@ -78,48 +78,64 @@ def test_diff_runs_git_in_sprite(fake_config):
         assert "+hi" in result.output
 
 
-def test_feed_all_agents(fake_config):
-    with patch("slop_salon.cli.atproto_client_for_feed") as mock_factory:
-        mock_client = MagicMock()
-        mock_client.get_author_feed.return_value = MagicMock(
-            feed=[
-                MagicMock(
-                    post=MagicMock(
-                        record=MagicMock(text="a post"),
-                        indexed_at="2026-04-30T10:00Z",
-                    )
-                )
+def test_feed_all_agents(fake_config, httpx_mock):
+    httpx_mock.add_response(
+        json={
+            "feed": [
+                {"post": {"record": {"text": "lou post", "createdAt": "2026-04-30T10:00Z"}}}
             ]
-        )
-        mock_factory.return_value = mock_client
-
-        result = runner.invoke(app, ["feed"])
-
-        assert result.exit_code == 0, result.output
-        assert "a post" in result.output
-        # Called once per agent (2 in fake_config)
-        assert mock_client.get_author_feed.call_count == 2
-
-
-def test_feed_single_agent(fake_config):
-    with patch("slop_salon.cli.atproto_client_for_feed") as mock_factory:
-        mock_client = MagicMock()
-        mock_client.get_author_feed.return_value = MagicMock(
-            feed=[
-                MagicMock(
-                    post=MagicMock(
-                        record=MagicMock(text="lou's post"),
-                        indexed_at="2026-04-30T10:00Z",
-                    )
-                )
+        }
+    )
+    httpx_mock.add_response(
+        json={
+            "feed": [
+                {"post": {"record": {"text": "other post", "createdAt": "2026-04-30T11:00Z"}}}
             ]
-        )
-        mock_factory.return_value = mock_client
+        }
+    )
 
-        result = runner.invoke(app, ["feed", "lou"])
+    result = runner.invoke(app, ["feed"])
 
-        assert result.exit_code == 0, result.output
-        mock_client.get_author_feed.assert_called_once_with(actor="lou.slopsalon.art", limit=10)
+    assert result.exit_code == 0, result.output
+    assert "lou post" in result.output
+    assert "other post" in result.output
+    assert "2026-04-30T10:00Z" in result.output
+
+    requests = httpx_mock.get_requests()
+    assert len(requests) == 2
+    handles = {r.url.params["actor"] for r in requests}
+    assert handles == {"lou.slopsalon.art", "other.slopsalon.art"}
+
+
+def test_feed_single_agent(fake_config, httpx_mock):
+    httpx_mock.add_response(
+        json={
+            "feed": [
+                {"post": {"record": {"text": "lou's post", "createdAt": "2026-04-30T10:00Z"}}}
+            ]
+        }
+    )
+
+    result = runner.invoke(app, ["feed", "lou", "--limit", "5"])
+
+    assert result.exit_code == 0, result.output
+    assert "lou's post" in result.output
+
+    requests = httpx_mock.get_requests()
+    assert len(requests) == 1
+    assert requests[0].url.params["actor"] == "lou.slopsalon.art"
+    assert requests[0].url.params["limit"] == "5"
+    assert requests[0].url.params["filter"] == "posts_and_author_threads"
+
+
+def test_feed_handles_http_error(fake_config, httpx_mock):
+    httpx_mock.add_response(status_code=500, text="server error")
+
+    result = runner.invoke(app, ["feed", "lou"])
+
+    assert result.exit_code == 0, result.output
+    assert "lou" in result.output
+    assert "error" in result.output.lower()
 
 
 def test_talk_runs_slop_tick_with_prompt(fake_config):
