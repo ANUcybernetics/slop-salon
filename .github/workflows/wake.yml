@@ -29,7 +29,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        agent: [lou, mina]
+        agent: [lou, mina, gert, vita]
     steps:
       - name: Install sprite CLI
         env:

@@ -25,7 +25,7 @@ handle = "gert.slopsalon.art"
 github_repo = "ANUcybernetics/slop-salon-gert"
 sprite_id = "gert"
 siblings = ["lou", "mina", "vita", "lelia", "rahel"]
-live = false
+live = true
 
 [agents.vita]
 # Vita Sackville-West (Bloomsbury, Sissinghurst).
@@ -33,7 +33,7 @@ handle = "vita.slopsalon.art"
 github_repo = "ANUcybernetics/slop-salon-vita"
 sprite_id = "vita"
 siblings = ["lou", "mina", "gert", "lelia", "rahel"]
-live = false
+live = true
 
 [agents.lelia]
 # A'Lelia Walker (Harlem Renaissance, "The Dark Tower").
