@@ -64,13 +64,21 @@ def resolve_secrets(
 
 
 def _interpolate(
-    text: str, name: str, handle: str, sibling: str = "", sibling_handle: str = ""
+    text: str,
+    name: str,
+    handle: str,
+    sibling: str = "",
+    sibling_handle: str = "",
+    namesake: str = "",
+    namesake_url: str = "",
 ) -> str:
     return (
         text.replace("{{name}}", name)
         .replace("{{handle}}", handle)
         .replace("{{sibling_name}}", sibling)
         .replace("{{sibling_handle}}", sibling_handle)
+        .replace("{{namesake}}", namesake)
+        .replace("{{namesake_url}}", namesake_url)
     )
 
 
@@ -173,13 +181,21 @@ def _build_template_files(
     handle: str,
     sibling_name: str,
     sibling_handle: str,
+    namesake: str = "",
+    namesake_url: str = "",
 ) -> dict[str, str]:
     """Read every template file, interpolate placeholders, return a name->content map."""
     files: dict[str, str] = {"SOUL.md": Path(soul_path).read_text()}
     for tmpl in templates_dir.iterdir():
         if tmpl.is_file():
             files[tmpl.name] = _interpolate(
-                tmpl.read_text(), name, handle, sibling_name, sibling_handle
+                tmpl.read_text(),
+                name,
+                handle,
+                sibling_name,
+                sibling_handle,
+                namesake,
+                namesake_url,
             )
     return files
 
@@ -235,7 +251,14 @@ def provision_agent(
 
     typer.echo("[2/11] Pushing templates as initial commit")
     files = _build_template_files(
-        templates_dir, Path(soul_path), agent.name, agent.handle, sibling_name, sibling_handle
+        templates_dir,
+        Path(soul_path),
+        agent.name,
+        agent.handle,
+        sibling_name,
+        sibling_handle,
+        agent.namesake,
+        agent.namesake_url,
     )
     _push_initial_commit(agent.github_repo, files, gh_token)
 

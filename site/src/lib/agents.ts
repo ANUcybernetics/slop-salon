@@ -9,6 +9,8 @@ export type Agent = {
   sprite_id: string;
   siblings: string[];
   live: boolean;
+  namesake: string;
+  namesake_url: string;
 };
 
 type RegistryFile = {

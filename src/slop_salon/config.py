@@ -15,6 +15,8 @@ class Agent:
     github_repo: str
     sprite_id: str = ""
     siblings: list[str] = field(default_factory=list)
+    namesake: str = ""
+    namesake_url: str = ""
 
 
 @dataclass
@@ -39,6 +41,8 @@ def load_config(path: Path | str = "slop_salon.toml") -> Config:
             github_repo=fields["github_repo"],
             sprite_id=fields.get("sprite_id", ""),
             siblings=list(fields.get("siblings", [])),
+            namesake=fields.get("namesake", ""),
+            namesake_url=fields.get("namesake_url", ""),
         )
     return Config(path=p, agents=agents)
 

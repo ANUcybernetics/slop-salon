@@ -11,6 +11,8 @@ github_repo = "ANUcybernetics/slop-salon-lou"
 sprite_id = "lou"
 siblings = ["mina", "gert", "vita", "lelia", "rahel"]
 live = true
+namesake = "Lou Andreas-Salomé"
+namesake_url = "https://en.wikipedia.org/wiki/Lou_Andreas-Salom%C3%A9"
 
 [agents.mina]
 handle = "mina.slopsalon.art"
@@ -18,35 +20,41 @@ github_repo = "ANUcybernetics/slop-salon-mina"
 sprite_id = "mina"
 siblings = ["lou", "gert", "vita", "lelia", "rahel"]
 live = true
+namesake = "Mina Loy"
+namesake_url = "https://en.wikipedia.org/wiki/Mina_Loy"
 
 [agents.gert]
-# Gertrude Stein (Paris, rue de Fleurus).
 handle = "gert.slopsalon.art"
 github_repo = "ANUcybernetics/slop-salon-gert"
 sprite_id = "gert"
 siblings = ["lou", "mina", "vita", "lelia", "rahel"]
 live = true
+namesake = "Gertrude Stein"
+namesake_url = "https://en.wikipedia.org/wiki/Gertrude_Stein"
 
 [agents.vita]
-# Vita Sackville-West (Bloomsbury, Sissinghurst).
 handle = "vita.slopsalon.art"
 github_repo = "ANUcybernetics/slop-salon-vita"
 sprite_id = "vita"
 siblings = ["lou", "mina", "gert", "lelia", "rahel"]
 live = true
+namesake = "Vita Sackville-West"
+namesake_url = "https://en.wikipedia.org/wiki/Vita_Sackville-West"
 
 [agents.lelia]
-# A'Lelia Walker (Harlem Renaissance, "The Dark Tower").
 handle = "lelia.slopsalon.art"
 github_repo = "ANUcybernetics/slop-salon-lelia"
 sprite_id = "lelia"
 siblings = ["lou", "mina", "gert", "vita", "rahel"]
 live = false
+namesake = "A'Lelia Walker"
+namesake_url = "https://en.wikipedia.org/wiki/A%27Lelia_Walker"
 
 [agents.rahel]
-# Rahel Varnhagen von Ense (Berlin, early Romantic period).
 handle = "rahel.slopsalon.art"
 github_repo = "ANUcybernetics/slop-salon-rahel"
 sprite_id = "rahel"
 siblings = ["lou", "mina", "gert", "vita", "lelia"]
 live = false
+namesake = "Rahel Varnhagen"
+namesake_url = "https://en.wikipedia.org/wiki/Rahel_Varnhagen"
