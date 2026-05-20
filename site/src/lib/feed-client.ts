@@ -114,6 +114,7 @@ function render(
 ): void {
   const filtered = filterFeed(feed, state);
   feedRoot.replaceChildren();
+  feedRoot.classList.toggle("media-only", state.mediaTypes.size > 0);
   for (const item of filtered) {
     feedRoot.appendChild(buildPost(postTpl, item, profiles));
   }
@@ -166,8 +167,24 @@ function setupChipGroup(
 ): void {
   if (!root) return;
   const selected = new Set<string>();
+  const allBtn = root.querySelector<HTMLButtonElement>("button[data-media-all]");
+  const syncAll = (): void => {
+    if (allBtn) {
+      allBtn.setAttribute("aria-pressed", selected.size === 0 ? "true" : "false");
+    }
+  };
   root.addEventListener("click", (event) => {
     const target = event.target as HTMLElement;
+    if (allBtn && target.closest("button[data-media-all]")) {
+      if (selected.size === 0) return;
+      for (const btn of root.querySelectorAll<HTMLButtonElement>("button[data-value]")) {
+        btn.setAttribute("aria-pressed", "false");
+      }
+      selected.clear();
+      syncAll();
+      onChange(selected);
+      return;
+    }
     const btn = target.closest<HTMLButtonElement>("button[data-value]");
     if (!btn) return;
     const value = btn.dataset.value;
@@ -179,6 +196,7 @@ function setupChipGroup(
       selected.add(value);
       btn.setAttribute("aria-pressed", "true");
     }
+    syncAll();
     onChange(selected);
   });
 }

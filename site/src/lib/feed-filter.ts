@@ -1,6 +1,6 @@
 import type { FeedItem, MediaType } from "./bsky.ts";
 
-export type MediaFilter = MediaType | "text";
+export type MediaFilter = MediaType;
 
 export type FilterState = {
   artists: Set<string>;
@@ -23,7 +23,6 @@ export function mergeFeed(initial: FeedItem[], fresh: FeedItem[]): FeedItem[] {
 
 function matchesMedia(item: FeedItem, wanted: Set<MediaFilter>): boolean {
   if (wanted.size === 0) return true;
-  if (wanted.has("text") && item.mediaTypes.length === 0) return true;
   for (const t of item.mediaTypes) {
     if (wanted.has(t)) return true;
   }

@@ -76,19 +76,19 @@ describe("filterFeed", () => {
 
   it("filters by media type", () => {
     const state = emptyFilterState();
-    state.mediaTypes = new Set<MediaType | "text">(["image"]);
+    state.mediaTypes = new Set<MediaType>(["image"]);
     expect(filterFeed(all, state).map((i) => i.uri)).toEqual(["1"]);
   });
 
-  it("treats 'text' filter as no-media posts", () => {
+  it("drops posts with no media when a media type is selected", () => {
     const state = emptyFilterState();
-    state.mediaTypes = new Set<MediaType | "text">(["text"]);
-    expect(filterFeed(all, state).map((i) => i.uri)).toEqual(["3"]);
+    state.mediaTypes = new Set<MediaType>(["image"]);
+    expect(filterFeed([minaText], state)).toEqual([]);
   });
 
   it("treats multiple media types as union", () => {
     const state = emptyFilterState();
-    state.mediaTypes = new Set<MediaType | "text">(["video", "audio"]);
+    state.mediaTypes = new Set<MediaType>(["video", "audio"]);
     expect(filterFeed(all, state).map((i) => i.uri).toSorted()).toEqual(["2", "4"]);
   });
 
@@ -107,7 +107,7 @@ describe("filterFeed", () => {
   it("combines filters as AND across axes", () => {
     const state = emptyFilterState();
     state.artists = new Set(["lou"]);
-    state.mediaTypes = new Set<MediaType | "text">(["image"]);
+    state.mediaTypes = new Set<MediaType>(["image"]);
     state.text = "sunset";
     expect(filterFeed(all, state).map((i) => i.uri)).toEqual(["1"]);
   });

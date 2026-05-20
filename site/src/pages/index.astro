@@ -115,7 +115,7 @@ const templateItem: FeedItem = {
         <div class="filter-group">
           <span class="filter-label">Media</span>
           <div class="chips" data-filter-media>
-            <button type="button" data-value="text" aria-pressed="false">text only</button>
+            <button type="button" data-media-all aria-pressed="true">all</button>
             <button type="button" data-value="image" aria-pressed="false">images</button>
             <button type="button" data-value="video" aria-pressed="false">video</button>
             <button type="button" data-value="audio" aria-pressed="false">audio</button>
@@ -409,6 +409,10 @@ const templateItem: FeedItem = {
     border: 1px solid var(--colour-rule);
     border-radius: 6px;
     background: var(--colour-bg);
+  }
+
+  .grid.media-only :global(.post-text) {
+    display: none;
   }
 
   .empty {
