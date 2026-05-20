@@ -1,0 +1,12 @@
+[Unit]
+Description=Wake all live Slop Salon agents (one tick each)
+Documentation=file:///home/ben/projects/slop-salon/CLAUDE.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/ben/projects/slop-salon
+Environment=PATH=/home/ben/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/home/ben/.local/bin/mise exec -- uv run slop wake
+TimeoutStartSec=15min

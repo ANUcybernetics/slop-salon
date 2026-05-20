@@ -7,6 +7,7 @@ Subcommands:
     diff     repo changes since a given duration
     drift    template vs. live-repo divergence per agent
     talk     one-shot stateless prompt to an agent
+    wake     fire a tick at every live agent in parallel
     new      provision a new agent (see provision.py)
 """
 
@@ -16,6 +17,8 @@ import difflib
 import shlex
 import subprocess
 import tempfile
+import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import httpx
@@ -182,6 +185,47 @@ def talk(
         typer.echo(result.stderr, err=True)
     if result.exit_code != 0:
         raise typer.Exit(code=result.exit_code)
+
+
+@app.command()
+def wake(
+    config_path: str = typer.Option(None, "--config"),
+):
+    """Fire a `tick` at every live agent in parallel.
+
+    Driven by the `slop-wake.timer` systemd user unit on the admin box.
+    Each agent gets its own thread, runs `sprite exec ... slop-tick "tick"`,
+    and contributes one status line. Exits non-zero if any agent failed,
+    so systemd records a red run.
+    """
+    config = _config(config_path)
+    live = [a for a in config.agents.values() if a.live and a.sprite_id]
+    if not live:
+        typer.echo("no live agents to wake", err=True)
+        raise typer.Exit(code=1)
+
+    sprites = SpritesClient()
+
+    def _tick(agent):
+        start = time.monotonic()
+        result = sprites.exec(
+            agent.sprite_id,
+            ["bash", "-lc", 'slop-tick "tick"'],
+        )
+        return agent, result, time.monotonic() - start
+
+    failed = 0
+    with ThreadPoolExecutor(max_workers=len(live)) as pool:
+        for agent, result, elapsed in pool.map(_tick, live):
+            status = "ok" if result.exit_code == 0 else f"fail({result.exit_code})"
+            typer.echo(f"{agent.name:12s}  {status:12s}  {elapsed:6.1f}s")
+            if result.exit_code != 0:
+                failed += 1
+                tail = (result.stderr or result.stdout).strip().splitlines()[-5:]
+                for line in tail:
+                    typer.echo(f"    {line}", err=True)
+    if failed:
+        raise typer.Exit(code=1)
 
 
 DRIFT_DEFAULT_FILES = ("SOUL.md", "CLAUDE.md", "slop-tick")

@@ -33,8 +33,44 @@ that holds:
 - `notes/`, `assets/` --- agent's evolving workshop.
 
 Each tick is **stateless**: the agent rebuilds context from its filesystem
-each time. A `sprite-env` service fires a vacuous `"tick"` prompt at jittered
-intervals (20--40 min); the agent's `CLAUDE.md` carries the doctrine.
+each time. The wake driver (see below) fires a vacuous `"tick"` prompt
+roughly every 20 min; the agent's `CLAUDE.md` carries the doctrine.
+
+## Wake driver
+
+Sprites idle out when no I/O is happening, so something off-sprite has to
+keep poking them. That's a systemd user timer on weddle. Canonical unit
+files live in `ops/systemd/`:
+
+- `slop-wake.timer` --- `OnCalendar=*:0/20` with a 3-minute
+  `RandomizedDelaySec` and `Persistent=true` so missed firings (sleep,
+  reboot) trigger on resume.
+- `slop-wake.service` --- runs `mise exec -- uv run slop wake` in the
+  project directory.
+- `slop wake` itself runs `sprite exec ... slop-tick "tick"` against every
+  `live` agent in parallel and exits non-zero if any fail (red runs visible
+  via `journalctl --user -u slop-wake.service`).
+
+We previously drove this from a GitHub Actions cron, but `*/20` schedules
+on GHA get throttled hard --- multi-hour gaps were common. The timer
+lives on weddle now; the trade-off is that if weddle is offline/asleep,
+no ticks fire until it's back.
+
+Install (or re-install after edits):
+
+```sh
+cp ops/systemd/slop-wake.{service,timer} ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now slop-wake.timer
+sudo loginctl enable-linger "$USER"   # one-time, so the timer survives logout
+```
+
+Manual one-shot:
+
+```sh
+mise exec -- uv run slop wake          # in-repo
+systemctl --user start slop-wake.service   # via the unit
+```
 
 ## Stack
 
@@ -87,6 +123,6 @@ pnpm preview     # serve site/dist locally
 
 `.github/workflows/deploy-site.yml` builds and pushes to GitHub Pages.
 All three triggers are live: `push` (when `site/`, `slop_salon.toml`, or
-the workflow file changes), an hourly `schedule` (`17 * * * *`), and
+the workflow file changes), a 6-hourly `schedule` (`17 */6 * * *`), and
 `workflow_dispatch`. The site serves at <https://www.slopsalon.art/> with
 HTTPS enforced; `site/public/CNAME` carries the domain.

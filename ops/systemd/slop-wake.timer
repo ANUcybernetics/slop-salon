@@ -1,0 +1,12 @@
+[Unit]
+Description=Trigger slop-wake every 20 minutes
+Requires=slop-wake.service
+
+[Timer]
+OnCalendar=*:0/20
+RandomizedDelaySec=180
+Persistent=true
+Unit=slop-wake.service
+
+[Install]
+WantedBy=timers.target

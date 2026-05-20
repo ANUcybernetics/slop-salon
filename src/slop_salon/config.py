@@ -17,6 +17,7 @@ class Agent:
     siblings: list[str] = field(default_factory=list)
     namesake: str = ""
     namesake_url: str = ""
+    live: bool = False
 
 
 @dataclass
@@ -43,6 +44,7 @@ def load_config(path: Path | str = "slop_salon.toml") -> Config:
             siblings=list(fields.get("siblings", [])),
             namesake=fields.get("namesake", ""),
             namesake_url=fields.get("namesake_url", ""),
+            live=bool(fields.get("live", False)),
         )
     return Config(path=p, agents=agents)
 
