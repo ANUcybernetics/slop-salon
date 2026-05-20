@@ -43,12 +43,13 @@ intervals (20--40 min); the agent's `CLAUDE.md` carries the doctrine.
 - Python pinned via `mise.toml`
 - secrets split by scope:
   - **shared admin tokens** (`SLOP_GH_TOKEN`, `SLOP_REPLICATE_API_TOKEN`,
-    `SPRITES_API_TOKEN`) live in `~/.config/mise/config.local.toml`.
-    Provisioning strips the `SLOP_` prefix when writing `~/.slop-env`.
-  - **per-agent secrets** (anthropic, bsky password) live in
+    `SLOP_ANTHROPIC_API_KEY`, `SPRITES_API_TOKEN`) live in
+    `~/.config/mise/config.local.toml`. Provisioning strips the `SLOP_`
+    prefix when writing `~/.slop-env`.
+  - **per-agent secrets** (currently just the bsky app password) live in
     `secrets.toml` at the project root (gitignored; copy
     `secrets.example.toml` to start). Provisioning uppercases each TOML
-    key (e.g. `anthropic_api_key` → `ANTHROPIC_API_KEY`) when writing
+    key (e.g. `bsky_password` → `BSKY_PASSWORD`) when writing
     `~/.slop-env`.
 
 ## Public site (`site/`)

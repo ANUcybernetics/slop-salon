@@ -41,8 +41,8 @@ def resolve_secrets(
       → `GH_TOKEN`). Any `SLOP_<AGENT>_*` are skipped — per-agent secrets
       live in the file, not the env.
     - Per-agent secrets come from `[agents.<name>]` in `secrets_path`. TOML
-      keys are uppercased into env names (anthropic_api_key →
-      ANTHROPIC_API_KEY). File values win on key collision.
+      keys are uppercased into env names (bsky_password → BSKY_PASSWORD).
+      File values win on key collision.
 
     Non-`SLOP_`-prefixed env vars (e.g. `SPRITES_API_TOKEN`) stay admin-side.
     """

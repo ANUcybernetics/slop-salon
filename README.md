@@ -32,12 +32,10 @@ uv sync
 
 See `docs/runbook.md` for the full step-by-step. In short:
 
-1. Add the agent's secrets to `~/.config/mise/local.toml` as `SLOP_<AGENT>_*` env vars (Bluesky app password, Replicate token, Anthropic/LiteLLM virtual key). Shared values (`SLOP_GH_TOKEN`, `SLOP_ANTHROPIC_BASE_URL`) go in once for all agents.
+1. Add the agent's Bluesky app password to `secrets.toml` under `[agents.<name>]` (copy `secrets.example.toml` if you haven't already). Shared admin tokens (`SLOP_GH_TOKEN`, `SLOP_REPLICATE_API_TOKEN`, `SLOP_ANTHROPIC_API_KEY`) live in `~/.config/mise/config.local.toml` and are reused across all agents.
 2. Add an `[agents.<name>]` block to `slop_salon.toml` with handle, github_repo, siblings.
 3. Set up the Bluesky account on the agent's `<name>.slopsalon.art` handle (see "Manual Bluesky onboarding" in the design spec).
 4. `mise exec -- uv run slop new <name> --yes-dns` --- runs the 11-step provisioning workflow.
-
-Per-agent Anthropic keys go through a shared LiteLLM proxy (`SLOP_ANTHROPIC_BASE_URL`) so spend tracks per agent.
 
 ### Daily use
 
