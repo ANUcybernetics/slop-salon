@@ -1,3 +1,4 @@
+import { registerMasonry } from "masonry-pf";
 import { agents } from "./agents.ts";
 import { loadCombinedFeed, type FeedItem } from "./bsky.ts";
 import {
@@ -12,12 +13,40 @@ import { formatAbsolute, formatRelative } from "./time.ts";
 const POST_LIMIT_PER_AGENT = 20;
 const SEARCH_DEBOUNCE_MS = 150;
 
+type AgentProfile = { displayName: string; avatar: string };
+type ProfileMap = Record<string, AgentProfile>;
+
 function buildPost(
   postTpl: HTMLTemplateElement,
   item: FeedItem,
+  profiles: ProfileMap,
 ): DocumentFragment {
   const frag = postTpl.content.cloneNode(true) as DocumentFragment;
   const article = frag.querySelector(".post") as HTMLElement;
+
+  const profile = profiles[item.agent];
+  const displayName = profile?.displayName || item.agent;
+  const avatarUrl = profile?.avatar ?? "";
+
+  const authorLink = article.querySelector(".post-author") as HTMLAnchorElement;
+  authorLink.href = item.agent ? `/agents/${item.agent}` : "#";
+  const nameEl = article.querySelector(".post-author-name") as HTMLElement;
+  nameEl.textContent = displayName;
+  const avatarEl = article.querySelector(".post-avatar") as HTMLElement;
+  if (avatarUrl && avatarEl instanceof HTMLImageElement) {
+    avatarEl.src = avatarUrl;
+    avatarEl.alt = "";
+  } else {
+    const placeholder = document.createElement("span");
+    placeholder.className = "post-avatar placeholder";
+    placeholder.setAttribute("aria-hidden", "true");
+    placeholder.textContent = (item.agent[0] || "?").toUpperCase();
+    avatarEl.replaceWith(placeholder);
+  }
+
+  const handleEl = article.querySelector(".post-handle") as HTMLAnchorElement;
+  handleEl.href = item.handle ? `https://bsky.app/profile/${item.handle}` : "#";
+  handleEl.textContent = `@${item.handle}`;
 
   const badge = article.querySelector(".badge") as HTMLElement;
   badge.hidden = !item.isRepost;
@@ -75,45 +104,21 @@ function buildPost(
   return frag;
 }
 
-function groupByAgent(items: FeedItem[]): Map<string, FeedItem[]> {
-  const byAgent = new Map<string, FeedItem[]>();
-  for (const item of items) {
-    let bucket = byAgent.get(item.agent);
-    if (!bucket) {
-      bucket = [];
-      byAgent.set(item.agent, bucket);
-    }
-    bucket.push(item);
-  }
-  return byAgent;
-}
-
 function render(
   feed: FeedItem[],
   state: FilterState,
   feedRoot: HTMLElement,
   emptyEl: HTMLElement,
   postTpl: HTMLTemplateElement,
+  profiles: ProfileMap,
 ): void {
   const filtered = filterFeed(feed, state);
-  const byAgent = groupByAgent(filtered);
-  const cols = feedRoot.querySelectorAll<HTMLElement>("[data-agent-col]");
-
-  let totalRendered = 0;
-  for (const col of cols) {
-    const name = col.dataset.agentCol ?? "";
-    const items = byAgent.get(name) ?? [];
-    const postsContainer = col.querySelector<HTMLElement>("[data-col-posts]");
-    if (!postsContainer) continue;
-    postsContainer.replaceChildren();
-    for (const item of items) {
-      postsContainer.appendChild(buildPost(postTpl, item));
-    }
-    col.hidden = items.length === 0;
-    totalRendered += items.length;
+  feedRoot.replaceChildren();
+  for (const item of filtered) {
+    feedRoot.appendChild(buildPost(postTpl, item, profiles));
   }
 
-  if (totalRendered === 0) {
+  if (filtered.length === 0) {
     emptyEl.hidden = false;
     emptyEl.textContent =
       feed.length === 0
@@ -142,6 +147,16 @@ function readInitial(id: string): FeedItem[] {
     return JSON.parse(el.textContent) as FeedItem[];
   } catch {
     return [];
+  }
+}
+
+function readProfiles(id: string): ProfileMap {
+  const el = document.getElementById(id);
+  if (!el?.textContent) return {};
+  try {
+    return JSON.parse(el.textContent) as ProfileMap;
+  } catch {
+    return {};
   }
 }
 
@@ -181,8 +196,14 @@ export function init(): void {
   if (!feedRoot || !emptyEl || !postTpl) return;
 
   let feed: FeedItem[] = readInitial("initial-feed");
+  const profiles = readProfiles("agent-profiles");
   const state: FilterState = emptyFilterState();
-  const update = (): void => render(feed, state, feedRoot, emptyEl, postTpl);
+  let masonryCleanup: (() => void) | undefined;
+  const update = (): void => {
+    render(feed, state, feedRoot, emptyEl, postTpl, profiles);
+    masonryCleanup?.();
+    masonryCleanup = registerMasonry(feedRoot);
+  };
 
   if (filtersEl) filtersEl.hidden = false;
 

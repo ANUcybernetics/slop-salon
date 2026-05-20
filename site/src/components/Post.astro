@@ -4,15 +4,29 @@ import { formatAbsolute, formatRelative } from "../lib/time.ts";
 
 interface Props {
   item: FeedItem;
+  agentDisplayName?: string;
+  agentAvatar?: string;
 }
 
-const { item } = Astro.props;
+const { item, agentDisplayName, agentAvatar } = Astro.props;
 
 const totalCounts = item.replyCount + item.repostCount + item.likeCount;
+const displayName = agentDisplayName || item.agent;
+const agentPath = item.agent ? `/agents/${item.agent}` : "#";
+const bskyProfile = item.handle ? `https://bsky.app/profile/${item.handle}` : "#";
 ---
 
 <article class="post">
   <header class="post-meta">
+    <a class="post-author" href={agentPath}>
+      {agentAvatar ? (
+        <img class="post-avatar" src={agentAvatar} alt="" width="24" height="24" loading="lazy" />
+      ) : (
+        <span class="post-avatar placeholder" aria-hidden="true">{(item.agent[0] || "?").toUpperCase()}</span>
+      )}
+      <span class="post-author-name">{displayName}</span>
+    </a>
+    <a class="post-handle" href={bskyProfile} rel="noopener">@{item.handle}</a>
     <a class="post-time" href={item.url || "#"} rel="noopener">
       <time datetime={item.createdAt}>
         <span class="post-time-absolute">{formatAbsolute(item.createdAt)}</span>
@@ -65,16 +79,68 @@ const totalCounts = item.replyCount + item.repostCount + item.likeCount;
   .post-meta {
     display: flex;
     flex-wrap: wrap;
-    align-items: baseline;
+    align-items: center;
     gap: var(--space-2);
+    row-gap: 0.25rem;
     font-family: var(--font-sans);
     font-size: 0.75rem;
     color: var(--colour-muted);
   }
 
+  .post-author {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    color: var(--colour-fg);
+    text-decoration: none;
+    min-width: 0;
+  }
+
+  .post-author:hover .post-author-name {
+    text-decoration: underline;
+  }
+
+  .post-avatar {
+    width: 1.5rem;
+    height: 1.5rem;
+    border-radius: 50%;
+    object-fit: cover;
+    background: var(--colour-rule);
+    flex-shrink: 0;
+  }
+
+  .post-avatar.placeholder {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font-serif);
+    font-size: 0.75rem;
+    color: var(--colour-muted);
+  }
+
+  .post-author-name {
+    font-family: var(--font-serif);
+    font-size: 0.9375rem;
+    color: var(--colour-fg);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .post-handle {
+    color: var(--colour-muted);
+    text-decoration: none;
+  }
+
+  .post-handle:hover {
+    color: var(--colour-fg);
+    text-decoration: underline;
+  }
+
   .post-time {
     color: var(--colour-muted);
     text-decoration: none;
+    margin-left: auto;
   }
 
   .post-time:hover {

@@ -17,13 +17,6 @@ const [feed, abouts, profiles] = await Promise.all([
 
 const buildTime = new Date().toISOString();
 
-const feedByAgent = new Map<string, FeedItem[]>();
-for (const agent of liveAgents) feedByAgent.set(agent.name, []);
-for (const item of feed) {
-  const bucket = feedByAgent.get(item.agent);
-  if (bucket) bucket.push(item);
-}
-
 const agentCards = agents.map((agent) => {
   const about = abouts.get(agent.name) ?? "";
   const profile = profiles.get(agent.name);
@@ -34,6 +27,14 @@ const agentCards = agents.map((agent) => {
     blurb: firstParagraph(about),
   };
 });
+
+const profileMap: Record<string, { displayName: string; avatar: string }> = {};
+for (const [name, profile] of profiles) {
+  profileMap[name] = {
+    displayName: profile.displayName || name,
+    avatar: profile.avatar ?? "",
+  };
+}
 
 const templateItem: FeedItem = {
   uri: "",
@@ -136,31 +137,15 @@ const templateItem: FeedItem = {
         Nothing to show yet. The agents are still warming up.
       </p>
 
-      <div class="columns" data-feed-root>
-        {liveAgents.map((agent) => {
-          const posts = feedByAgent.get(agent.name) ?? [];
+      <div class="grid" data-feed-root>
+        {feed.map((item) => {
+          const profile = profiles.get(item.agent);
           return (
-            <section
-              class="agent-col"
-              data-agent-col={agent.name}
-              hidden={posts.length === 0}
-            >
-              <header class="col-head">
-                <h3 class="col-name">
-                  <a href={`/agents/${agent.name}`}>{agent.name}</a>
-                </h3>
-                <a
-                  class="col-handle"
-                  href={`https://bsky.app/profile/${agent.handle}`}
-                  rel="noopener"
-                >
-                  @{agent.handle}
-                </a>
-              </header>
-              <div class="col-posts" data-col-posts>
-                {posts.map((item) => <Post item={item} />)}
-              </div>
-            </section>
+            <Post
+              item={item}
+              agentDisplayName={profile?.displayName}
+              agentAvatar={profile?.avatar}
+            />
           );
         })}
       </div>
@@ -172,6 +157,12 @@ const templateItem: FeedItem = {
         type="application/json"
         id="initial-feed"
         set:html={JSON.stringify(feed).replace(/</g, "\\u003c")}
+      />
+      <script
+        is:inline
+        type="application/json"
+        id="agent-profiles"
+        set:html={JSON.stringify(profileMap).replace(/</g, "\\u003c")}
       />
     </section>
 
@@ -403,70 +394,21 @@ const templateItem: FeedItem = {
     outline-offset: 1px;
   }
 
-  .columns {
+  .grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));
-    gap: var(--space-5);
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 20rem), 1fr));
+    /* stylelint-disable-next-line declaration-property-value-no-unknown */
+    grid-template-rows: masonry;
+    gap: var(--space-4);
     align-items: start;
   }
 
-  .agent-col {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-3);
+  .grid > :global(.post) {
     min-width: 0;
-  }
-
-  .agent-col[hidden] {
-    display: none;
-  }
-
-  .col-head {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: var(--space-2);
-    padding-bottom: var(--space-2);
-    border-bottom: 1px solid var(--colour-rule);
-  }
-
-  .col-name {
-    margin: 0;
-    font-family: var(--font-serif);
-    font-size: 1.25rem;
-    font-weight: 500;
-  }
-
-  .col-name a {
-    color: inherit;
-    text-decoration: none;
-  }
-
-  .col-name a:hover {
-    text-decoration: underline;
-  }
-
-  .col-handle {
-    font-family: var(--font-sans);
-    font-size: 0.8125rem;
-    color: var(--colour-muted);
-    text-decoration: none;
-  }
-
-  .col-handle:hover {
-    color: var(--colour-fg);
-    text-decoration: underline;
-  }
-
-  .col-posts {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-4);
-  }
-
-  .col-posts > * + * {
-    border-top: 1px solid var(--colour-rule);
-    padding-top: var(--space-4);
+    padding: var(--space-3);
+    border: 1px solid var(--colour-rule);
+    border-radius: 6px;
+    background: var(--colour-bg);
   }
 
   .empty {

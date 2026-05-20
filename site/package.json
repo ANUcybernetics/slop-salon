@@ -18,6 +18,7 @@
   "dependencies": {
     "astro": "^6.3.5",
     "markdown-it": "^14.1.1",
+    "masonry-pf": "^1.1.1",
     "smol-toml": "^1.6.1"
   },
   "devDependencies": {
