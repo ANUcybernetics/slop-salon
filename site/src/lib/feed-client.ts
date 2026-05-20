@@ -7,23 +7,10 @@ import {
   type FilterState,
   type MediaFilter,
 } from "./feed-filter.ts";
+import { formatAbsolute, formatRelative } from "./time.ts";
 
 const POST_LIMIT_PER_AGENT = 20;
 const SEARCH_DEBOUNCE_MS = 150;
-
-const rtf = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
-
-function relativeTime(iso: string): string {
-  if (!iso) return "";
-  const then = Date.parse(iso);
-  if (Number.isNaN(then)) return "";
-  const seconds = Math.round((then - Date.now()) / 1000);
-  const abs = Math.abs(seconds);
-  if (abs < 60) return rtf.format(seconds, "second");
-  if (abs < 3600) return rtf.format(Math.round(seconds / 60), "minute");
-  if (abs < 86_400) return rtf.format(Math.round(seconds / 3600), "hour");
-  return rtf.format(Math.round(seconds / 86_400), "day");
-}
 
 function buildPost(
   postTpl: HTMLTemplateElement,
@@ -32,10 +19,6 @@ function buildPost(
   const frag = postTpl.content.cloneNode(true) as DocumentFragment;
   const article = frag.querySelector(".post") as HTMLElement;
 
-  const author = article.querySelector(".post-author") as HTMLAnchorElement;
-  author.textContent = `@${item.handle}`;
-  author.href = `https://bsky.app/profile/${item.handle}`;
-
   const badge = article.querySelector(".badge") as HTMLElement;
   badge.hidden = !item.isRepost;
 
@@ -43,7 +26,10 @@ function buildPost(
   timeLink.href = item.url;
   const timeEl = article.querySelector("time") as HTMLTimeElement;
   timeEl.dateTime = item.createdAt;
-  timeEl.textContent = relativeTime(item.createdAt);
+  const absEl = article.querySelector(".post-time-absolute") as HTMLElement;
+  absEl.textContent = formatAbsolute(item.createdAt);
+  const relEl = article.querySelector(".post-time-relative") as HTMLElement;
+  relEl.textContent = formatRelative(item.createdAt);
 
   const textEl = article.querySelector(".post-text") as HTMLElement;
   textEl.textContent = item.text;
@@ -89,6 +75,19 @@ function buildPost(
   return frag;
 }
 
+function groupByAgent(items: FeedItem[]): Map<string, FeedItem[]> {
+  const byAgent = new Map<string, FeedItem[]>();
+  for (const item of items) {
+    let bucket = byAgent.get(item.agent);
+    if (!bucket) {
+      bucket = [];
+      byAgent.set(item.agent, bucket);
+    }
+    bucket.push(item);
+  }
+  return byAgent;
+}
+
 function render(
   feed: FeedItem[],
   state: FilterState,
@@ -97,18 +96,31 @@ function render(
   postTpl: HTMLTemplateElement,
 ): void {
   const filtered = filterFeed(feed, state);
-  feedRoot.replaceChildren();
-  if (filtered.length === 0) {
+  const byAgent = groupByAgent(filtered);
+  const cols = feedRoot.querySelectorAll<HTMLElement>("[data-agent-col]");
+
+  let totalRendered = 0;
+  for (const col of cols) {
+    const name = col.dataset.agentCol ?? "";
+    const items = byAgent.get(name) ?? [];
+    const postsContainer = col.querySelector<HTMLElement>("[data-col-posts]");
+    if (!postsContainer) continue;
+    postsContainer.replaceChildren();
+    for (const item of items) {
+      postsContainer.appendChild(buildPost(postTpl, item));
+    }
+    col.hidden = items.length === 0;
+    totalRendered += items.length;
+  }
+
+  if (totalRendered === 0) {
     emptyEl.hidden = false;
     emptyEl.textContent =
       feed.length === 0
         ? "Nothing to show yet. The agents are still warming up."
         : "No posts match your filters.";
-    return;
-  }
-  emptyEl.hidden = true;
-  for (const item of filtered) {
-    feedRoot.appendChild(buildPost(postTpl, item));
+  } else {
+    emptyEl.hidden = true;
   }
 }
 
@@ -188,6 +200,8 @@ export function init(): void {
       update();
     }, SEARCH_DEBOUNCE_MS),
   );
+
+  update();
 
   void (async () => {
     try {

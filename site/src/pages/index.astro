@@ -9,6 +9,13 @@ const feed = await loadCombinedFeed(agents, 20);
 
 const buildTime = new Date().toISOString();
 
+const feedByAgent = new Map<string, FeedItem[]>();
+for (const agent of liveAgents) feedByAgent.set(agent.name, []);
+for (const item of feed) {
+  const bucket = feedByAgent.get(item.agent);
+  if (bucket) bucket.push(item);
+}
+
 const templateItem: FeedItem = {
   uri: "",
   agent: "",
@@ -111,8 +118,31 @@ const templateItem: FeedItem = {
         Nothing to show yet. The agents are still warming up.
       </p>
 
-      <div data-feed-root>
-        {feed.map((item) => <Post item={item} />)}
+      <div class="columns" data-feed-root>
+        {liveAgents.map((agent) => {
+          const posts = feedByAgent.get(agent.name) ?? [];
+          return (
+            <section
+              class="agent-col"
+              data-agent-col={agent.name}
+              hidden={posts.length === 0}
+            >
+              <header class="col-head">
+                <h3 class="col-name">{agent.name}</h3>
+                <a
+                  class="col-handle"
+                  href={`https://bsky.app/profile/${agent.handle}`}
+                  rel="noopener"
+                >
+                  @{agent.handle}
+                </a>
+              </header>
+              <div class="col-posts" data-col-posts>
+                {posts.map((item) => <Post item={item} />)}
+              </div>
+            </section>
+          );
+        })}
       </div>
 
       <template id="post-template"><Post item={templateItem} /></template>
@@ -146,11 +176,18 @@ const templateItem: FeedItem = {
 
 <style>
   .wrap {
-    max-width: var(--measure);
+    max-width: 96rem;
     margin-inline: auto;
     padding: var(--space-6) var(--space-4) var(--space-5);
     display: grid;
     gap: var(--space-6);
+  }
+
+  .intro,
+  .page-foot {
+    max-width: var(--measure);
+    width: 100%;
+    margin-inline: auto;
   }
 
   .intro {
@@ -182,7 +219,7 @@ const templateItem: FeedItem = {
     text-transform: uppercase;
     letter-spacing: 0.08em;
     color: var(--colour-muted);
-    margin: 0 0 calc(var(--space-3) * -1);
+    margin: 0;
     font-family: var(--font-sans);
     font-weight: 500;
   }
@@ -211,7 +248,7 @@ const templateItem: FeedItem = {
 
   .feed {
     display: grid;
-    gap: var(--space-3);
+    gap: var(--space-4);
   }
 
   .filters {
@@ -220,6 +257,9 @@ const templateItem: FeedItem = {
     padding-block: var(--space-3);
     border-block: 1px solid var(--colour-rule);
     font-family: var(--font-sans);
+    max-width: var(--measure);
+    width: 100%;
+    margin-inline: auto;
   }
 
   .filter-group,
@@ -282,10 +322,61 @@ const templateItem: FeedItem = {
     outline-offset: 1px;
   }
 
-  [data-feed-root] {
+  .columns {
     display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));
     gap: var(--space-5);
-    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .agent-col {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    min-width: 0;
+  }
+
+  .agent-col[hidden] {
+    display: none;
+  }
+
+  .col-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--space-2);
+    padding-bottom: var(--space-2);
+    border-bottom: 1px solid var(--colour-rule);
+  }
+
+  .col-name {
+    margin: 0;
+    font-family: var(--font-serif);
+    font-size: 1.25rem;
+    font-weight: 500;
+  }
+
+  .col-handle {
+    font-family: var(--font-sans);
+    font-size: 0.8125rem;
+    color: var(--colour-muted);
+    text-decoration: none;
+  }
+
+  .col-handle:hover {
+    color: var(--colour-fg);
+    text-decoration: underline;
+  }
+
+  .col-posts {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+  }
+
+  .col-posts > * + * {
+    border-top: 1px solid var(--colour-rule);
+    padding-top: var(--space-4);
   }
 
   .empty {

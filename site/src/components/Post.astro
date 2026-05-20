@@ -1,5 +1,6 @@
 ---
 import type { FeedItem } from "../lib/bsky.ts";
+import { formatAbsolute, formatRelative } from "../lib/time.ts";
 
 interface Props {
   item: FeedItem;
@@ -7,32 +8,19 @@ interface Props {
 
 const { item } = Astro.props;
 
-const rtf = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
-function relativeTime(iso: string): string {
-  if (!iso) return "";
-  const then = Date.parse(iso);
-  if (Number.isNaN(then)) return "";
-  const seconds = Math.round((then - Date.now()) / 1000);
-  const abs = Math.abs(seconds);
-  if (abs < 60) return rtf.format(seconds, "second");
-  if (abs < 3600) return rtf.format(Math.round(seconds / 60), "minute");
-  if (abs < 86_400) return rtf.format(Math.round(seconds / 3600), "hour");
-  return rtf.format(Math.round(seconds / 86_400), "day");
-}
-
 const totalCounts = item.replyCount + item.repostCount + item.likeCount;
-const profileHref = item.handle ? `https://bsky.app/profile/${item.handle}` : "#";
 ---
 
 <article class="post">
   <header class="post-meta">
-    <a class="post-author" href={profileHref} rel="noopener">
-      {item.handle ? `@${item.handle}` : ""}
+    <a class="post-time" href={item.url || "#"} rel="noopener">
+      <time datetime={item.createdAt}>
+        <span class="post-time-absolute">{formatAbsolute(item.createdAt)}</span>
+        <span class="post-time-sep" aria-hidden="true">·</span>
+        <span class="post-time-relative">{formatRelative(item.createdAt)}</span>
+      </time>
     </a>
     <span class="badge" hidden={!item.isRepost}>reposted</span>
-    <a class="post-time" href={item.url || "#"} rel="noopener">
-      <time datetime={item.createdAt}>{relativeTime(item.createdAt)}</time>
-    </a>
   </header>
   <p class="post-text">{item.text}</p>
   <div
@@ -71,41 +59,41 @@ const profileHref = item.handle ? `https://bsky.app/profile/${item.handle}` : "#
   .post {
     display: grid;
     gap: var(--space-2);
-    padding-block: var(--space-4);
-    border-top: 1px solid var(--colour-rule);
     min-width: 0;
-  }
-
-  .post:first-child {
-    border-top: 0;
-    padding-top: 0;
   }
 
   .post-meta {
     display: flex;
     flex-wrap: wrap;
     align-items: baseline;
-    gap: var(--space-3);
-    font-size: 0.875rem;
-  }
-
-  .post-author {
-    font-weight: 600;
+    gap: var(--space-2);
+    font-family: var(--font-sans);
+    font-size: 0.75rem;
+    color: var(--colour-muted);
   }
 
   .post-time {
     color: var(--colour-muted);
     text-decoration: none;
-    margin-left: auto;
   }
 
   .post-time:hover {
     color: var(--colour-fg);
-    text-decoration: underline;
+  }
+
+  .post-time time {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 0.45em;
+    align-items: baseline;
+  }
+
+  .post-time-sep {
+    opacity: 0.6;
   }
 
   .badge {
-    font-size: 0.75rem;
+    font-size: 0.7rem;
     text-transform: uppercase;
     letter-spacing: 0.05em;
     color: var(--colour-muted);
@@ -115,8 +103,8 @@ const profileHref = item.handle ? `https://bsky.app/profile/${item.handle}` : "#
     margin: 0;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
-    font-size: 1.0625rem;
-    line-height: 1.55;
+    font-size: 1rem;
+    line-height: 1.5;
   }
 
   .post-images {
@@ -152,7 +140,7 @@ const profileHref = item.handle ? `https://bsky.app/profile/${item.handle}` : "#
   .post-counts {
     display: flex;
     gap: var(--space-3);
-    font-size: 0.8125rem;
+    font-size: 0.75rem;
     color: var(--colour-muted);
   }
 </style>
