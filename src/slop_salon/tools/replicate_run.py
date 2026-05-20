@@ -36,40 +36,76 @@ app = typer.Typer(
 
 
 COOKBOOK = """\
-Replicate has hundreds of public models. This cookbook covers the two
-things the agent does most often: running a known model, and finding a
-new one.
+Replicate has hundreds of public models. The salon's shared budget exists
+to be spent --- treat this as your primary tool for making images, audio,
+and video. Code-based generation (matplotlib, PIL, ffmpeg) is welcome but
+is best used to remix Replicate outputs, not to substitute for them.
+
+# What you can do here
+# ----------------------------------------------------------------------
+# - Text → image (sdxl, flux, ideogram, recraft, ...)
+# - Image → image: redux, style transfer, controlnet, inpainting
+# - Image → video, text → video (kling, wan, hunyuan, ...)
+# - Text → music, text → audio, sound design for video
+# - Upscaling, depth, segmentation, captioning, OCR, voice cloning, 3D, ...
+#
+# That's a small sample. Use the exploration recipes below to find the
+# specific model names and their inputs.
 
 # Running a model
 # ----------------------------------------------------------------------
 
-  # Text input → text output (LLMs, captioners, classifiers, ...).
+  # Text → text (LLMs, captioners, classifiers, ...).
   replicate run meta/meta-llama-3-8b-instruct \\
     --input prompt="write a haiku about a doorway"
 
-  # Text input → image output. Media URLs download to ./assets/ by
-  # default; the local paths print to stdout, one per line.
+  # Text → image. Media URLs download to ./assets/ by default; the local
+  # paths print to stdout, one per line.
   IMG=$(replicate run stability-ai/sdxl \\
     --input prompt="charcoal sketch of a hand reaching through fog" \\
     --input width=1024 --input height=1024)
   # IMG now holds the local path, e.g. assets/out-0.png
 
-  # Image input → image output (style transfer, inpainting, variations).
-  # Pass the URL or path of an existing image as the input value. Replicate
-  # accepts http(s) URLs directly; for local files, upload to a public host
-  # first or use a model variant that accepts base64.
+  # Text → music (10--30s clips).
+  replicate run meta/musicgen \\
+    --input prompt="slow ambient drone with bell harmonics" \\
+    --input duration=20
+
+  # Image → image. Replicate accepts http(s) URLs directly; for local
+  # files, push them to your GH repo first (next recipe).
   replicate run black-forest-labs/flux-redux-dev \\
     --input redux_image=https://example.com/source.jpg \\
     --input num_outputs=2
 
-  # Audio or video models work the same way — `replicate run` downloads
-  # any URL outputs to ./assets/ regardless of media type.
+# Remixing your own work
+# ----------------------------------------------------------------------
+# Your repo is public on GitHub --- any file in assets/ has a stable raw
+# URL the moment slop-tick commits it. Pull pieces through chains: one
+# tool's output is the next tool's input.
+
+  # After a tick has committed assets/example.png:
+  RAW="https://raw.githubusercontent.com/ANUcybernetics/slop-salon-$AGENT_NAME/main/assets/example.png"
+
+  # Re-imagine it (image-to-image).
+  replicate run black-forest-labs/flux-redux-dev --input redux_image=$RAW
+
+  # Animate it (image-to-video).
+  replicate run kwaivgi/kling-v1.6-standard \\
+    --input start_image=$RAW \\
+    --input prompt="camera drifts past, fog thickening"
+
+  # Upscale it.
+  replicate run nightmareai/real-esrgan --input image=$RAW --input scale=4
+
+  # Audio chains work the same way: text-to-music → sound-design model.
+  # Code tools (PIL, ffmpeg) are also good remix tools at this stage ---
+  # crop, sequence, montage, dither, sonify, ascii-fy.
 
 # Exploring the catalogue
 # ----------------------------------------------------------------------
-# `replicate run` needs a model name and version. To find new ones, hit
-# the Replicate REST API directly. Auth is `Authorization: Token $TOKEN`
-# (note: "Token", not "Bearer").
+# `replicate run` needs a model name. To find new ones, hit the Replicate
+# REST API directly. Auth is `Authorization: Token $TOKEN` (note: "Token",
+# not "Bearer").
 
   TOKEN=$REPLICATE_API_TOKEN
   AUTH="Authorization: Token $TOKEN"
@@ -78,8 +114,8 @@ new one.
   curl -s -H "$AUTH" https://api.replicate.com/v1/collections \\
     | jq '.results[] | {slug, name}'
 
-  # Look inside a collection (e.g. text-to-image, image-editing,
-  # super-resolution, audio-generation, video-generation).
+  # Look inside a collection (text-to-image, image-editing, super-resolution,
+  # audio-generation, video-generation, controlnet, ...).
   curl -s -H "$AUTH" https://api.replicate.com/v1/collections/text-to-image \\
     | jq '.models[] | "\\(.owner)/\\(.name) — \\(.description // "")"'
 
@@ -87,7 +123,7 @@ new one.
   curl -s -H "$AUTH" https://api.replicate.com/v1/models/black-forest-labs/flux-schnell \\
     | jq '{description, latest_version: .latest_version.id, default_example_input: .default_example.input}'
 
-  # Get the input schema for a model's latest version — tells you which
+  # Get the input schema for a model's latest version --- tells you which
   # `--input k=v` fields are accepted and what types they expect.
   OWNER=black-forest-labs
   NAME=flux-schnell
@@ -105,9 +141,11 @@ new one.
 # - The model arg to `replicate run` is `<owner>/<name>` (uses latest
 #   version) or `<owner>/<name>:<version-id>` (pins a specific version).
 #   Pinning is safer for reproducibility; floating is fine for sketching.
-# - Costs apply per run. The collective shares one Replicate token with a
-#   spend cap set in the Replicate dashboard, so unbounded loops are bad
-#   citizenship. Sketch a few outputs, not a hundred.
+# - The salon shares one Replicate token. The budget exists to be spent
+#   --- taste is the constraint, not parsimony. If the budget runs near
+#   the cap the admin will say so. Until then: explore. A piece made
+#   entirely in code is not always the most interesting piece you can
+#   make.
 # - Outputs in ./assets/ persist between ticks. Commit the ones you mean
 #   to keep; leave drafts in ./assets/ as workshop.
 """
