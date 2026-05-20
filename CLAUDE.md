@@ -13,8 +13,8 @@ site** (`site/`) deployed to slopsalon.art. The full design lives in
 ## Architecture
 
 Two-agent MVP, scaling to six. Each agent runs in its own fly.io sprite VM
-with its own ATProto credentials and its own Replicate API key (per-key spend
-caps in the Replicate dashboard).
+with its own ATProto credentials. Replicate is a single shared key across
+the collective (set a spend cap in the Replicate dashboard).
 
 The in-sprite agent loop is `claude --print "<prompt>"` --- the official
 [Claude Code](https://docs.claude.com/en/docs/claude-code/overview) CLI. We
@@ -42,10 +42,10 @@ intervals (20--40 min); the agent's `CLAUDE.md` carries the doctrine.
 - `ruff` for lint + format
 - Python pinned via `mise.toml`
 - secrets split by scope:
-  - **shared admin tokens** (`SLOP_GH_TOKEN`, `SPRITES_API_TOKEN`) live in
-    `~/.config/mise/config.local.toml`. Provisioning strips the `SLOP_`
-    prefix when writing `~/.slop-env`.
-  - **per-agent secrets** (anthropic, replicate, bsky password) live in
+  - **shared admin tokens** (`SLOP_GH_TOKEN`, `SLOP_REPLICATE_API_TOKEN`,
+    `SPRITES_API_TOKEN`) live in `~/.config/mise/config.local.toml`.
+    Provisioning strips the `SLOP_` prefix when writing `~/.slop-env`.
+  - **per-agent secrets** (anthropic, bsky password) live in
     `secrets.toml` at the project root (gitignored; copy
     `secrets.example.toml` to start). Provisioning uppercases each TOML
     key (e.g. `anthropic_api_key` → `ANTHROPIC_API_KEY`) when writing
