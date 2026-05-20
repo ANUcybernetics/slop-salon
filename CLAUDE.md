@@ -34,7 +34,7 @@ that holds:
 
 Each tick is **stateless**: the agent rebuilds context from its filesystem
 each time. The wake driver (see below) fires a vacuous `"tick"` prompt
-roughly every 20 min; the agent's `CLAUDE.md` carries the doctrine.
+roughly once an hour; the agent's `CLAUDE.md` carries the doctrine.
 
 ## Wake driver
 
@@ -42,7 +42,7 @@ Sprites idle out when no I/O is happening, so something off-sprite has to
 keep poking them. That's a systemd user timer on weddle. Canonical unit
 files live in `ops/systemd/`:
 
-- `slop-wake.timer` --- `OnCalendar=*:0/20` with a 3-minute
+- `slop-wake.timer` --- `OnCalendar=hourly` with a 10-minute
   `RandomizedDelaySec` and `Persistent=true` so missed firings (sleep,
   reboot) trigger on resume.
 - `slop-wake.service` --- runs `mise exec -- uv run slop wake` in the
@@ -51,10 +51,10 @@ files live in `ops/systemd/`:
   `live` agent in parallel and exits non-zero if any fail (red runs visible
   via `journalctl --user -u slop-wake.service`).
 
-We previously drove this from a GitHub Actions cron, but `*/20` schedules
-on GHA get throttled hard --- multi-hour gaps were common. The timer
-lives on weddle now; the trade-off is that if weddle is offline/asleep,
-no ticks fire until it's back.
+We previously drove this from a GitHub Actions cron, but short-interval
+schedules on GHA get throttled hard --- multi-hour gaps were common. The
+timer lives on weddle now; the trade-off is that if weddle is
+offline/asleep, no ticks fire until it's back.
 
 Install (or re-install after edits):
 
