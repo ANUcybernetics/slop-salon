@@ -1,19 +1,22 @@
 """Admin `slop` CLI.
 
 Subcommands:
-    status   one-line dashboard per agent
-    feed     recent Bluesky posts (across or per agent)
-    logs     recent transcripts from a sprite
-    diff     repo changes since a given duration
-    drift    template vs. live-repo divergence per agent
-    talk     one-shot stateless prompt to an agent
-    wake     fire a tick at every live agent in parallel
-    new      provision a new agent (see provision.py)
+    status         one-line dashboard per agent
+    feed           recent Bluesky posts (across or per agent)
+    logs           recent transcripts from a sprite
+    diff           repo changes since a given duration
+    drift          template vs. live-repo divergence per agent
+    talk           one-shot stateless prompt to an agent
+    wake           fire a tick at every live agent in parallel
+    new            provision a new agent (see provision.py)
+    sync-siblings  backfill missing sibling entries in live SIBLINGS.md
 """
 
 from __future__ import annotations
 
 import difflib
+import os
+import re
 import shlex
 import subprocess
 import tempfile
@@ -25,7 +28,12 @@ import httpx
 import typer
 
 from slop_salon.config import load_config
-from slop_salon.provision import _build_template_files, provision_agent
+from slop_salon.provision import (
+    _build_template_files,
+    _render_sibling_block,
+    provision_agent,
+    resolve_secrets,
+)
 from slop_salon.sprites import SpritesClient
 
 app = typer.Typer(add_completion=False, help="Slop Salon admin CLI.")
@@ -274,15 +282,15 @@ def drift(
     for i, agent in enumerate(targets):
         if i:
             typer.echo("")
-        sibling_name = agent.siblings[0] if agent.siblings else ""
-        sibling_handle = config.agents[sibling_name].handle if sibling_name in config.agents else ""
+        siblings = [
+            (s, config.agents[s].handle) for s in agent.siblings if s in config.agents
+        ]
         expected = _build_template_files(
             Path(templates_dir),
             Path(soul_path),
             agent.name,
             agent.handle,
-            sibling_name,
-            sibling_handle,
+            siblings,
             agent.namesake,
             agent.namesake_url,
         )
@@ -335,3 +343,95 @@ def new(
         config_path=config_path or "slop_salon.toml",
         skip_dns_confirm=yes_dns,
     )
+
+
+SIBLINGS_HEADER_RE = re.compile(r"^## (\S+)\s*$", re.MULTILINE)
+
+
+@app.command(name="sync-siblings")
+def sync_siblings(
+    name: str = typer.Argument(None, help="Agent name (omit to sync all live agents)"),
+    config_path: str = typer.Option(None, "--config"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Report missing entries but do not commit/push"
+    ),
+):
+    """Backfill missing sibling entries in each live agent's SIBLINGS.md.
+
+    Preserves existing entries (and any notes the agent has accumulated);
+    appends fresh stubs for siblings listed in slop_salon.toml but not yet
+    present as `## <name>` headers. Idempotent.
+    """
+    config = _config(config_path)
+    if name:
+        if name not in config.agents:
+            typer.echo(f"error: unknown agent {name!r}", err=True)
+            raise typer.Exit(code=1)
+        targets = [config.agents[name]]
+    else:
+        targets = [a for a in config.agents.values() if a.live]
+    if not targets:
+        typer.echo("no live agents to sync", err=True)
+        raise typer.Exit(code=1)
+
+    gh_token = resolve_secrets(targets[0].name, list(config.agents.keys())).get("GH_TOKEN")
+    if not gh_token:
+        typer.echo("error: SLOP_GH_TOKEN missing from env", err=True)
+        raise typer.Exit(code=1)
+    push_env = {**os.environ, "GH_TOKEN": gh_token}
+
+    for agent in targets:
+        sibling_handles = {
+            s: config.agents[s].handle for s in agent.siblings if s in config.agents
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            clone_dir = Path(tmp) / "repo"
+            subprocess.run(
+                ["gh", "repo", "clone", agent.github_repo, str(clone_dir)],
+                check=True,
+                capture_output=True,
+                env=push_env,
+            )
+            siblings_path = clone_dir / "SIBLINGS.md"
+            current = siblings_path.read_text() if siblings_path.exists() else ""
+            present = set(SIBLINGS_HEADER_RE.findall(current))
+            missing = [s for s in agent.siblings if s in sibling_handles and s not in present]
+
+            if not missing:
+                typer.echo(f"{agent.name:12s}  clean")
+                continue
+
+            new_blocks = "\n\n".join(
+                _render_sibling_block(s, sibling_handles[s]) for s in missing
+            )
+            if current.strip():
+                new_content = current.rstrip() + "\n\n" + new_blocks + "\n"
+            else:
+                new_content = (
+                    "# Siblings\n\n"
+                    "The other artists in the Slop Salon. "
+                    "Your accumulated observations go below.\n\n"
+                    + new_blocks
+                    + "\n"
+                )
+
+            if dry_run:
+                typer.echo(f"{agent.name:12s}  would add: {', '.join(missing)}")
+                continue
+
+            siblings_path.write_text(new_content)
+            subprocess.run(["git", "add", "SIBLINGS.md"], cwd=clone_dir, check=True)
+            subprocess.run(
+                ["git", "commit", "-m", "Sync siblings from slop_salon.toml"],
+                cwd=clone_dir,
+                check=True,
+                capture_output=True,
+            )
+            subprocess.run(
+                ["git", "push"],
+                cwd=clone_dir,
+                check=True,
+                capture_output=True,
+                env=push_env,
+            )
+            typer.echo(f"{agent.name:12s}  added: {', '.join(missing)}")

@@ -63,20 +63,31 @@ def resolve_secrets(
     return env
 
 
+SIBLING_STUB = "(No observations yet. Update this file as you encounter their work.)"
+
+
+def _render_sibling_block(name: str, handle: str) -> str:
+    """One sibling entry as it appears in SIBLINGS.md."""
+    return f"## {name}\n\nHandle: `{handle}`\n\n{SIBLING_STUB}"
+
+
+def _build_siblings_section(siblings: list[tuple[str, str]]) -> str:
+    """The body that replaces {{siblings_section}} in templates/SIBLINGS.md."""
+    return "\n\n".join(_render_sibling_block(n, h) for n, h in siblings)
+
+
 def _interpolate(
     text: str,
     name: str,
     handle: str,
-    sibling: str = "",
-    sibling_handle: str = "",
+    siblings_section: str = "",
     namesake: str = "",
     namesake_url: str = "",
 ) -> str:
     return (
         text.replace("{{name}}", name)
         .replace("{{handle}}", handle)
-        .replace("{{sibling_name}}", sibling)
-        .replace("{{sibling_handle}}", sibling_handle)
+        .replace("{{siblings_section}}", siblings_section)
         .replace("{{namesake}}", namesake)
         .replace("{{namesake_url}}", namesake_url)
     )
@@ -179,12 +190,12 @@ def _build_template_files(
     soul_path: Path,
     name: str,
     handle: str,
-    sibling_name: str,
-    sibling_handle: str,
+    siblings: list[tuple[str, str]],
     namesake: str = "",
     namesake_url: str = "",
 ) -> dict[str, str]:
     """Read every template file, interpolate placeholders, return a name->content map."""
+    siblings_section = _build_siblings_section(siblings)
     files: dict[str, str] = {"SOUL.md": Path(soul_path).read_text()}
     for tmpl in templates_dir.iterdir():
         if tmpl.is_file():
@@ -192,8 +203,7 @@ def _build_template_files(
                 tmpl.read_text(),
                 name,
                 handle,
-                sibling_name,
-                sibling_handle,
+                siblings_section,
                 namesake,
                 namesake_url,
             )
@@ -227,8 +237,9 @@ def provision_agent(
     # inject it here so the sprite-side tools see it alongside the secrets.
     env["BSKY_HANDLE"] = agent.handle
 
-    sibling_name = agent.siblings[0] if agent.siblings else ""
-    sibling_handle = config.agents[sibling_name].handle if sibling_name in config.agents else ""
+    siblings = [
+        (s, config.agents[s].handle) for s in agent.siblings if s in config.agents
+    ]
     templates_dir = Path(templates_dir)
 
     repo_exists = (
@@ -255,8 +266,7 @@ def provision_agent(
         Path(soul_path),
         agent.name,
         agent.handle,
-        sibling_name,
-        sibling_handle,
+        siblings,
         agent.namesake,
         agent.namesake_url,
     )

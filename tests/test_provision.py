@@ -184,7 +184,7 @@ def test_build_template_files_interpolates_placeholders(tmp_path):
     templates_dir = tmp_path / "templates"
     templates_dir.mkdir()
     (templates_dir / "CLAUDE.md").write_text("Hi {{name}} ({{handle}})")
-    (templates_dir / "SIBLINGS.md").write_text("Sibling: {{sibling_name}}")
+    (templates_dir / "SIBLINGS.md").write_text("Siblings:\n\n{{siblings_section}}")
     (templates_dir / "ABOUT.md").write_text("Named after [{{namesake}}]({{namesake_url}}).")
     soul = tmp_path / "SOUL.md"
     soul.write_text("# Constitution")
@@ -194,15 +194,17 @@ def test_build_template_files_interpolates_placeholders(tmp_path):
         soul,
         "lou",
         "lou.slopsalon.art",
-        "other",
-        "other.slopsalon.art",
+        [("mina", "mina.slopsalon.art"), ("gert", "gert.slopsalon.art")],
         "Lou Andreas-Salomé",
         "https://example.org/lou",
     )
 
     assert files["SOUL.md"] == "# Constitution"
     assert files["CLAUDE.md"] == "Hi lou (lou.slopsalon.art)"
-    assert files["SIBLINGS.md"] == "Sibling: other"
+    assert "## mina" in files["SIBLINGS.md"]
+    assert "Handle: `mina.slopsalon.art`" in files["SIBLINGS.md"]
+    assert "## gert" in files["SIBLINGS.md"]
+    assert "Handle: `gert.slopsalon.art`" in files["SIBLINGS.md"]
     assert files["ABOUT.md"] == "Named after [Lou Andreas-Salomé](https://example.org/lou)."
 
 
