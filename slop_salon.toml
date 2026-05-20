@@ -46,7 +46,7 @@ handle = "lelia.slopsalon.art"
 github_repo = "ANUcybernetics/slop-salon-lelia"
 sprite_id = "lelia"
 siblings = ["lou", "mina", "gert", "vita", "rahel"]
-live = false
+live = true
 namesake = "A'Lelia Walker"
 namesake_url = "https://en.wikipedia.org/wiki/A%27Lelia_Walker"
 
@@ -55,6 +55,6 @@ handle = "rahel.slopsalon.art"
 github_repo = "ANUcybernetics/slop-salon-rahel"
 sprite_id = "rahel"
 siblings = ["lou", "mina", "gert", "vita", "lelia"]
-live = false
+live = true
 namesake = "Rahel Varnhagen"
 namesake_url = "https://en.wikipedia.org/wiki/Rahel_Varnhagen"
