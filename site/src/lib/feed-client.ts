@@ -14,6 +14,7 @@ const SEARCH_DEBOUNCE_MS = 150;
 const rtf = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
 
 function relativeTime(iso: string): string {
+  if (!iso) return "";
   const then = Date.parse(iso);
   if (Number.isNaN(then)) return "";
   const seconds = Math.round((then - Date.now()) / 1000);
@@ -24,38 +25,68 @@ function relativeTime(iso: string): string {
   return rtf.format(Math.round(seconds / 86_400), "day");
 }
 
-function esc(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
+function buildPost(
+  postTpl: HTMLTemplateElement,
+  item: FeedItem,
+): DocumentFragment {
+  const frag = postTpl.content.cloneNode(true) as DocumentFragment;
+  const article = frag.querySelector(".post") as HTMLElement;
 
-function renderPost(item: FeedItem): string {
-  const imagesHtml =
-    item.images.length === 0
-      ? ""
-      : `<div class="post-images" data-count="${item.images.length}">${item.images
-          .map((img) => {
-            const dims = img.aspectRatio
-              ? ` width="${img.aspectRatio.width}" height="${img.aspectRatio.height}"`
-              : "";
-            return `<a href="${esc(img.fullsize)}" rel="noopener"><img src="${esc(img.thumb)}" alt="${esc(img.alt)}" loading="lazy"${dims}></a>`;
-          })
-          .join("")}</div>`;
-  const counts = item.replyCount + item.repostCount + item.likeCount;
-  const countsHtml =
-    counts === 0
-      ? ""
-      : `<footer class="post-counts">${
-          item.replyCount > 0 ? `<span>${item.replyCount} replies</span>` : ""
-        }${
-          item.repostCount > 0 ? `<span>${item.repostCount} reposts</span>` : ""
-        }${item.likeCount > 0 ? `<span>${item.likeCount} likes</span>` : ""}</footer>`;
-  const repostBadge = item.isRepost ? `<span class="badge">reposted</span>` : "";
-  return `<article class="post"><header class="post-meta"><a class="post-author" href="https://bsky.app/profile/${esc(item.handle)}" rel="noopener">@${esc(item.handle)}</a>${repostBadge}<a class="post-time" href="${esc(item.url)}" rel="noopener"><time datetime="${esc(item.createdAt)}">${esc(relativeTime(item.createdAt))}</time></a></header><p class="post-text">${esc(item.text)}</p>${imagesHtml}${countsHtml}</article>`;
+  const author = article.querySelector(".post-author") as HTMLAnchorElement;
+  author.textContent = `@${item.handle}`;
+  author.href = `https://bsky.app/profile/${item.handle}`;
+
+  const badge = article.querySelector(".badge") as HTMLElement;
+  badge.hidden = !item.isRepost;
+
+  const timeLink = article.querySelector(".post-time") as HTMLAnchorElement;
+  timeLink.href = item.url;
+  const timeEl = article.querySelector("time") as HTMLTimeElement;
+  timeEl.dateTime = item.createdAt;
+  timeEl.textContent = relativeTime(item.createdAt);
+
+  const textEl = article.querySelector(".post-text") as HTMLElement;
+  textEl.textContent = item.text;
+
+  const imagesEl = article.querySelector(".post-images") as HTMLElement;
+  const stencil = imagesEl.querySelector("a") as HTMLAnchorElement;
+  imagesEl.replaceChildren();
+  imagesEl.dataset.count = String(item.images.length);
+  imagesEl.hidden = item.images.length === 0;
+  for (const img of item.images) {
+    const link = stencil.cloneNode(true) as HTMLAnchorElement;
+    link.href = img.fullsize;
+    const imgEl = link.querySelector("img") as HTMLImageElement;
+    imgEl.src = img.thumb;
+    imgEl.alt = img.alt;
+    if (img.aspectRatio) {
+      imgEl.width = img.aspectRatio.width;
+      imgEl.height = img.aspectRatio.height;
+    } else {
+      imgEl.removeAttribute("width");
+      imgEl.removeAttribute("height");
+    }
+    imagesEl.appendChild(link);
+  }
+
+  const countsEl = article.querySelector(".post-counts") as HTMLElement;
+  const total = item.replyCount + item.repostCount + item.likeCount;
+  countsEl.hidden = total === 0;
+  const repliesEl = countsEl.querySelector(
+    ".post-counts-replies",
+  ) as HTMLElement;
+  repliesEl.hidden = item.replyCount === 0;
+  repliesEl.textContent = `${item.replyCount} replies`;
+  const repostsEl = countsEl.querySelector(
+    ".post-counts-reposts",
+  ) as HTMLElement;
+  repostsEl.hidden = item.repostCount === 0;
+  repostsEl.textContent = `${item.repostCount} reposts`;
+  const likesEl = countsEl.querySelector(".post-counts-likes") as HTMLElement;
+  likesEl.hidden = item.likeCount === 0;
+  likesEl.textContent = `${item.likeCount} likes`;
+
+  return frag;
 }
 
 function render(
@@ -63,10 +94,11 @@ function render(
   state: FilterState,
   feedRoot: HTMLElement,
   emptyEl: HTMLElement,
+  postTpl: HTMLTemplateElement,
 ): void {
   const filtered = filterFeed(feed, state);
+  feedRoot.replaceChildren();
   if (filtered.length === 0) {
-    feedRoot.innerHTML = "";
     emptyEl.hidden = false;
     emptyEl.textContent =
       feed.length === 0
@@ -75,7 +107,9 @@ function render(
     return;
   }
   emptyEl.hidden = true;
-  feedRoot.innerHTML = filtered.map(renderPost).join("");
+  for (const item of filtered) {
+    feedRoot.appendChild(buildPost(postTpl, item));
+  }
 }
 
 function debounce<A extends unknown[]>(
@@ -130,11 +164,12 @@ export function init(): void {
   const artistGroup = document.querySelector<HTMLElement>("[data-filter-artists]");
   const mediaGroup = document.querySelector<HTMLElement>("[data-filter-media]");
   const searchInput = document.querySelector<HTMLInputElement>("[data-filter-search]");
-  if (!feedRoot || !emptyEl) return;
+  const postTpl = document.querySelector<HTMLTemplateElement>("#post-template");
+  if (!feedRoot || !emptyEl || !postTpl) return;
 
   let feed: FeedItem[] = readInitial("initial-feed");
   const state: FilterState = emptyFilterState();
-  const update = (): void => render(feed, state, feedRoot, emptyEl);
+  const update = (): void => render(feed, state, feedRoot, emptyEl, postTpl);
 
   if (filtersEl) filtersEl.hidden = false;
 

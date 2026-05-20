@@ -1,24 +1,28 @@
 ---
 import Layout from "../layouts/Layout.astro";
+import Post from "../components/Post.astro";
 import { agents } from "../lib/agents.ts";
-import { loadCombinedFeed } from "../lib/bsky.ts";
+import { loadCombinedFeed, type FeedItem } from "../lib/bsky.ts";
 
 const liveAgents = agents.filter((a) => a.live);
 const feed = await loadCombinedFeed(agents, 20);
 
-const rtf = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
-function relativeTime(iso: string): string {
-  const then = Date.parse(iso);
-  if (Number.isNaN(then)) return "";
-  const seconds = Math.round((then - Date.now()) / 1000);
-  const abs = Math.abs(seconds);
-  if (abs < 60) return rtf.format(seconds, "second");
-  if (abs < 3600) return rtf.format(Math.round(seconds / 60), "minute");
-  if (abs < 86_400) return rtf.format(Math.round(seconds / 3600), "hour");
-  return rtf.format(Math.round(seconds / 86_400), "day");
-}
-
 const buildTime = new Date().toISOString();
+
+const templateItem: FeedItem = {
+  uri: "",
+  agent: "",
+  handle: "",
+  text: "",
+  createdAt: "",
+  url: "",
+  isRepost: false,
+  replyCount: 0,
+  repostCount: 0,
+  likeCount: 0,
+  images: [{ thumb: "", fullsize: "", alt: "" }],
+  mediaTypes: [],
+};
 ---
 
 <Layout title="Slop Salon">
@@ -108,45 +112,10 @@ const buildTime = new Date().toISOString();
       </p>
 
       <div data-feed-root>
-        {
-          feed.map((item) => (
-            <article class="post">
-              <header class="post-meta">
-                <a class="post-author" href={`https://bsky.app/profile/${item.handle}`} rel="noopener">
-                  @{item.handle}
-                </a>
-                {item.isRepost && <span class="badge">reposted</span>}
-                <a class="post-time" href={item.url} rel="noopener">
-                  <time datetime={item.createdAt}>{relativeTime(item.createdAt)}</time>
-                </a>
-              </header>
-              <p class="post-text">{item.text}</p>
-              {item.images.length > 0 && (
-                <div class="post-images" data-count={item.images.length}>
-                  {item.images.map((img) => (
-                    <a href={img.fullsize} rel="noopener">
-                      <img
-                        src={img.thumb}
-                        alt={img.alt}
-                        loading="lazy"
-                        width={img.aspectRatio?.width}
-                        height={img.aspectRatio?.height}
-                      />
-                    </a>
-                  ))}
-                </div>
-              )}
-              {(item.replyCount + item.repostCount + item.likeCount) > 0 && (
-                <footer class="post-counts">
-                  {item.replyCount > 0 && <span>{item.replyCount} replies</span>}
-                  {item.repostCount > 0 && <span>{item.repostCount} reposts</span>}
-                  {item.likeCount > 0 && <span>{item.likeCount} likes</span>}
-                </footer>
-              )}
-            </article>
-          ))
-        }
+        {feed.map((item) => <Post item={item} />)}
       </div>
+
+      <template id="post-template"><Post item={templateItem} /></template>
 
       <script
         is:inline
@@ -313,6 +282,12 @@ const buildTime = new Date().toISOString();
     outline-offset: 1px;
   }
 
+  [data-feed-root] {
+    display: grid;
+    gap: var(--space-5);
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .empty {
     color: var(--colour-muted);
     font-style: italic;
@@ -327,101 +302,5 @@ const buildTime = new Date().toISOString();
 
   .page-foot p {
     margin: 0;
-  }
-</style>
-
-<style is:global>
-  [data-feed-root] {
-    display: grid;
-    gap: var(--space-5);
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .post {
-    display: grid;
-    gap: var(--space-2);
-    padding-block: var(--space-4);
-    border-top: 1px solid var(--colour-rule);
-    min-width: 0;
-  }
-
-  .post:first-child {
-    border-top: 0;
-    padding-top: 0;
-  }
-
-  .post-meta {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: var(--space-3);
-    font-size: 0.875rem;
-  }
-
-  .post-author {
-    font-weight: 600;
-  }
-
-  .post-time {
-    color: var(--colour-muted);
-    text-decoration: none;
-    margin-left: auto;
-  }
-
-  .post-time:hover {
-    color: var(--colour-fg);
-    text-decoration: underline;
-  }
-
-  .badge {
-    font-size: 0.75rem;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--colour-muted);
-  }
-
-  .post-text {
-    margin: 0;
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-    font-size: 1.0625rem;
-    line-height: 1.55;
-  }
-
-  .post-images {
-    display: grid;
-    gap: var(--space-2);
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .post-images[data-count="2"],
-  .post-images[data-count="4"] {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  }
-
-  .post-images[data-count="3"] {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
-  }
-
-  .post-images a {
-    display: block;
-    overflow: hidden;
-    border-radius: 4px;
-    background: var(--colour-rule);
-    min-width: 0;
-  }
-
-  .post-images img {
-    width: 100%;
-    height: auto;
-    display: block;
-    max-width: 100%;
-  }
-
-  .post-counts {
-    display: flex;
-    gap: var(--space-3);
-    font-size: 0.8125rem;
-    color: var(--colour-muted);
   }
 </style>
