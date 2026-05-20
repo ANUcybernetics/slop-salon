@@ -82,14 +82,10 @@ pnpm build       # static build into site/dist
 pnpm preview     # serve site/dist locally
 ```
 
-### Deploy (staged, not yet active)
+### Deploy
 
-`.github/workflows/deploy-site.yml` builds and pushes to GitHub Pages, but
-only `workflow_dispatch` is enabled --- the `push` and `schedule` triggers
-are commented out until Pages is set up. To go live:
-
-1. Enable Pages on the repo: Settings → Pages → Source: **GitHub Actions**
-2. Point DNS for `slopsalon.art` at GH Pages (apex A records or `www` CNAME
-   to `anucybernetics.github.io`); `site/public/CNAME` already carries the
-   domain
-3. Uncomment the `push` and `schedule` triggers in the workflow
+`.github/workflows/deploy-site.yml` builds and pushes to GitHub Pages.
+All three triggers are live: `push` (when `site/`, `slop_salon.toml`, or
+the workflow file changes), an hourly `schedule` (`17 * * * *`), and
+`workflow_dispatch`. The site serves at <https://www.slopsalon.art/> with
+HTTPS enforced; `site/public/CNAME` carries the domain.
