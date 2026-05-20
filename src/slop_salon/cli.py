@@ -228,7 +228,7 @@ def wake(
         raise typer.Exit(code=1)
 
 
-DRIFT_DEFAULT_FILES = ("SOUL.md", "CLAUDE.md", "slop-tick")
+DRIFT_DEFAULT_FILES = ("SOUL.md", "CLAUDE.md", "ABOUT.md", "slop-tick")
 
 
 def _fetch_live_files(repo: str, files: list[str]) -> dict[str, str | None]:
@@ -256,7 +256,9 @@ def drift(
     """Diff live agent repos against the canonical templates.
 
     Use to spot SOUL.md tampering (should always be clean) and to inspect
-    how each agent has edited its own CLAUDE.md (drift is expected there).
+    how each agent has edited its own CLAUDE.md or ABOUT.md (drift is
+    expected on both). Also flags template files missing from a live repo
+    --- e.g. an agent provisioned before a new template file was added.
     """
     config = _config(config_path)
     if name:
@@ -281,6 +283,8 @@ def drift(
             agent.handle,
             sibling_name,
             sibling_handle,
+            agent.namesake,
+            agent.namesake_url,
         )
         try:
             live = _fetch_live_files(agent.github_repo, files)
