@@ -9,6 +9,7 @@
     "preview": "astro preview",
     "astro": "astro",
     "typecheck": "astro check",
+    "test": "vitest run",
     "lint": "oxlint",
     "lint:css": "stylelint \"src/**/*.{css,astro}\"",
     "format": "oxfmt .",
@@ -30,6 +31,7 @@
     "postcss-html": "^1.8.1",
     "stylelint": "^17.11.1",
     "stylelint-config-standard": "^40.0.0",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.6"
   }
 }

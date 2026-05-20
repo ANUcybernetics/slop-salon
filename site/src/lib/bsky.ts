@@ -9,7 +9,10 @@ export type FeedImage = {
   aspectRatio?: { width: number; height: number };
 };
 
+export type MediaType = "image" | "video" | "audio";
+
 export type FeedItem = {
+  uri: string;
   agent: string;
   handle: string;
   text: string;
@@ -21,6 +24,7 @@ export type FeedItem = {
   repostCount: number;
   likeCount: number;
   images: FeedImage[];
+  mediaTypes: MediaType[];
 };
 
 type BskyAuthor = {
@@ -36,8 +40,17 @@ type BskyImageView = {
   aspectRatio?: { width: number; height: number };
 };
 
+type BskyExternalView = {
+  uri: string;
+  title?: string;
+  description?: string;
+  thumb?: string;
+};
+
 type BskyEmbedView =
   | { $type: "app.bsky.embed.images#view"; images: BskyImageView[] }
+  | { $type: "app.bsky.embed.video#view"; playlist: string; thumbnail?: string }
+  | { $type: "app.bsky.embed.external#view"; external: BskyExternalView }
   | { $type: "app.bsky.embed.recordWithMedia#view"; media: BskyEmbedView }
   | { $type: string };
 
@@ -88,6 +101,38 @@ function extractImages(embed: BskyEmbedView | undefined): FeedImage[] {
   return [];
 }
 
+const AUDIO_HOSTS = [
+  "soundcloud.com",
+  "bandcamp.com",
+  "spotify.com",
+  "music.apple.com",
+  "audius.co",
+  "suno.com",
+];
+
+function isAudioUrl(uri: string): boolean {
+  try {
+    const host = new URL(uri).hostname.toLowerCase();
+    return AUDIO_HOSTS.some((h) => host === h || host.endsWith(`.${h}`));
+  } catch {
+    return false;
+  }
+}
+
+export function extractMediaTypes(embed: BskyEmbedView | undefined): MediaType[] {
+  if (!embed) return [];
+  if (embed.$type === "app.bsky.embed.images#view") return ["image"];
+  if (embed.$type === "app.bsky.embed.video#view") return ["video"];
+  if (embed.$type === "app.bsky.embed.external#view") {
+    const view = embed as { external: BskyExternalView };
+    return isAudioUrl(view.external.uri) ? ["audio"] : [];
+  }
+  if (embed.$type === "app.bsky.embed.recordWithMedia#view") {
+    return extractMediaTypes((embed as { media: BskyEmbedView }).media);
+  }
+  return [];
+}
+
 async function fetchAuthorFeed(agent: Agent, limit = 20): Promise<FeedItem[]> {
   const url = `${APPVIEW}/xrpc/app.bsky.feed.getAuthorFeed?actor=${encodeURIComponent(agent.handle)}&limit=${limit}&filter=posts_and_author_threads`;
   let res: Response;
@@ -105,7 +150,11 @@ async function fetchAuthorFeed(agent: Agent, limit = 20): Promise<FeedItem[]> {
   return data.feed.map((entry) => {
     const post = entry.post;
     const isRepost = entry.reason?.$type === "app.bsky.feed.defs#reasonRepost";
+    const images = extractImages(post.embed);
+    const mediaTypes = extractMediaTypes(post.embed);
+    if (images.length > 0 && !mediaTypes.includes("image")) mediaTypes.push("image");
     return {
+      uri: post.uri,
       agent: agent.name,
       handle: agent.handle,
       text: post.record.text ?? "",
@@ -118,7 +167,8 @@ async function fetchAuthorFeed(agent: Agent, limit = 20): Promise<FeedItem[]> {
       replyCount: post.replyCount ?? 0,
       repostCount: post.repostCount ?? 0,
       likeCount: post.likeCount ?? 0,
-      images: extractImages(post.embed),
+      images,
+      mediaTypes,
     };
   });
 }
