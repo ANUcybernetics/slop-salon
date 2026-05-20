@@ -1,14 +1,20 @@
-"""Bluesky CLI tools for slop-salon agents.
+"""Single `bsky` CLI: a thin wrapper over the ATProto XRPC API.
 
-Each command is exposed as a separate typer app via [project.scripts].
-All commands read BSKY_HANDLE and BSKY_PASSWORD from env.
+Three subcommands cover everything Bluesky can do:
 
-We talk to the ATProto XRPC API directly (no Python SDK). The atproto
-SDK's `Client.login()` follows up createSession with an unconditional
-`app.bsky.actor.get_profile` call against AppView; that call hangs for
-hours when AppView hasn't reindexed a freshly-changed handle, making
-every tool unusable for new agents. Direct HTTP gives us exactly the
-calls Bluesky's docs describe — and tests can assert at the wire level.
+- `bsky get <nsid> [--param k=v ...]` — call a query method (GET)
+- `bsky post <nsid> [--json '<body>' | --file <path>]` — call a procedure (POST)
+- `bsky whoami` — print {did, handle, pds} as JSON
+
+Auth via BSKY_HANDLE / BSKY_PASSWORD env vars. Each invocation runs
+createSession against bsky.social, then follows didDoc to find the user's
+real PDS, so every call hits the right server even when AppView is lagging
+on a freshly-changed handle.
+
+We ship no record-shape helpers — the agent constructs JSON bodies itself
+(typically with `jq`). The reasoning: a single thin wrapper is easier for an
+agent to model than a fleet of per-operation tools, and the agent's
+`CLAUDE.md` plus `bsky --help` carry the recipes for everything common.
 """
 
 from __future__ import annotations
@@ -17,16 +23,97 @@ import json
 import mimetypes
 import os
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
 import typer
 
 DEFAULT_PDS = "https://bsky.social"
-DEFAULT_LANG = "en"
 DEFAULT_TIMEOUT = 20.0
 UPLOAD_TIMEOUT = 60.0
+
+
+COOKBOOK = """\
+Recipes (the agent reaches for these most often).
+
+Every action is composed from three primitives: `bsky get <nsid>` for queries,
+`bsky post <nsid>` for procedures, `bsky whoami` for your identity. The
+agent constructs JSON bodies with `jq`. Look up any NSID at
+https://docs.bsky.app/docs/api/.
+
+  # Who am I?
+  bsky whoami                                                  # → {"did": "...", "handle": "...", "pds": "..."}
+
+  # Read your home feed / notifications.
+  bsky get app.bsky.feed.getTimeline --param limit=20
+  bsky get app.bsky.notification.listNotifications --param limit=20
+
+  # Read someone else's feed.
+  bsky get app.bsky.feed.getAuthorFeed --param actor=mina.slopsalon.art --param limit=20
+
+  # Post text.
+  DID=$(bsky whoami | jq -r .did)
+  NOW=$(date -u +%Y-%m-%dT%H:%M:%S.000Z)
+  bsky post com.atproto.repo.createRecord --json "$(jq -nc --arg did "$DID" --arg now "$NOW" \\
+    '{repo:$did, collection:"app.bsky.feed.post",
+      record:{"$type":"app.bsky.feed.post", text:"hello", createdAt:$now, langs:["en"]}}')"
+
+  # Post with an image. Alt text is mandatory (editorial norm).
+  BLOB=$(bsky post com.atproto.repo.uploadBlob --file ./assets/sketch.png | jq -c .blob)
+  bsky post com.atproto.repo.createRecord --json "$(jq -nc --arg did "$DID" --arg now "$NOW" --argjson blob "$BLOB" \\
+    '{repo:$did, collection:"app.bsky.feed.post",
+      record:{"$type":"app.bsky.feed.post", text:"today", createdAt:$now, langs:["en"],
+              embed:{"$type":"app.bsky.embed.images", images:[{alt:"sketch of a hand", image:$blob}]}}}')"
+
+  # Reply in a thread. The reply ref must trace back to the THREAD ROOT —
+  # if the parent is itself a reply, copy its root; otherwise parent IS root.
+  # Getting this wrong silently breaks threading.
+  PARENT_URI="at://did:plc:.../app.bsky.feed.post/abc"
+  PARENT=$(bsky get app.bsky.feed.getPosts --param "uris=$PARENT_URI" | jq -c '.posts[0]')
+  REPLY=$(jq -nc --argjson p "$PARENT" \\
+    '{parent:{uri:$p.uri, cid:$p.cid},
+      root:($p.record.reply.root // {uri:$p.uri, cid:$p.cid})}')
+  bsky post com.atproto.repo.createRecord --json "$(jq -nc --arg did "$DID" --arg now "$NOW" --argjson reply "$REPLY" \\
+    '{repo:$did, collection:"app.bsky.feed.post",
+      record:{"$type":"app.bsky.feed.post", text:"agreed", createdAt:$now, langs:["en"], reply:$reply}}')"
+
+  # Quote-post (commentary on another post).
+  QUOTED=$(bsky get app.bsky.feed.getPosts --param "uris=$PARENT_URI" | jq -c '.posts[0] | {uri, cid}')
+  bsky post com.atproto.repo.createRecord --json "$(jq -nc --arg did "$DID" --arg now "$NOW" --argjson q "$QUOTED" \\
+    '{repo:$did, collection:"app.bsky.feed.post",
+      record:{"$type":"app.bsky.feed.post", text:"see also", createdAt:$now, langs:["en"],
+              embed:{"$type":"app.bsky.embed.record", record:$q}}}')"
+
+  # Follow a handle.
+  SUBJ=$(bsky get com.atproto.identity.resolveHandle --param handle=mina.slopsalon.art | jq -r .did)
+  bsky post com.atproto.repo.createRecord --json "$(jq -nc --arg did "$DID" --arg subj "$SUBJ" --arg now "$NOW" \\
+    '{repo:$did, collection:"app.bsky.graph.follow",
+      record:{"$type":"app.bsky.graph.follow", subject:$subj, createdAt:$now}}')"
+
+  # Unfollow. Find the follow record's rkey, then deleteRecord.
+  RKEY=$(bsky get com.atproto.repo.listRecords --param "repo=$DID" --param collection=app.bsky.graph.follow --param limit=100 \\
+         | jq -r --arg subj "$SUBJ" '.records[] | select(.value.subject == $subj) | .uri | split("/") | last')
+  bsky post com.atproto.repo.deleteRecord --json "$(jq -nc --arg did "$DID" --arg rkey "$RKEY" \\
+    '{repo:$did, collection:"app.bsky.graph.follow", rkey:$rkey}')"
+
+  # Set avatar / displayName / description. Read existing profile first so
+  # you don't clobber the other fields. The profile record's rkey is always "self".
+  AVATAR=$(bsky post com.atproto.repo.uploadBlob --file ./assets/pfp.jpg | jq -c .blob)
+  PROFILE=$(bsky get com.atproto.repo.getRecord --param "repo=$DID" --param collection=app.bsky.actor.profile --param rkey=self \\
+            | jq -c '.value // {}')
+  bsky post com.atproto.repo.putRecord --json "$(jq -nc --arg did "$DID" --argjson prof "$PROFILE" --argjson av "$AVATAR" \\
+    '{repo:$did, collection:"app.bsky.actor.profile", rkey:"self",
+      record:($prof + {"$type":"app.bsky.actor.profile", avatar:$av})}')"
+"""
+
+app = typer.Typer(
+    add_completion=False,
+    help=(
+        "Thin wrapper over the Bluesky / ATProto XRPC API. Run `bsky cookbook` "
+        "for worked recipes (post, reply, follow, set avatar, ...)."
+    ),
+    no_args_is_help=True,
+)
 
 
 @dataclass(frozen=True)
@@ -81,14 +168,24 @@ def _get_session() -> Session:
         if svc.get("type") == "AtprotoPersonalDataServer":
             pds = svc["serviceEndpoint"]
             break
-    return Session(
-        did=data["did"], handle=data["handle"], access_jwt=data["accessJwt"], pds=pds
-    )
+    return Session(did=data["did"], handle=data["handle"], access_jwt=data["accessJwt"], pds=pds)
 
 
-def _now_iso() -> str:
-    """ISO 8601 timestamp with ms precision and trailing Z (Bluesky's createdAt format)."""
-    return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+def _parse_params(items: list[str]) -> list[tuple[str, str]]:
+    """Parse repeatable `--param k=v` into ordered (key, value) pairs.
+
+    Kept as a list rather than a dict so the same key can appear more than
+    once (e.g. `--param uris=at://x --param uris=at://y` for getPosts,
+    which takes an array per ATProto's URL-encoding convention).
+    """
+    pairs: list[tuple[str, str]] = []
+    for item in items:
+        if "=" not in item:
+            typer.echo(f"error: --param must be key=value, got {item!r}", err=True)
+            raise typer.Exit(code=1)
+        key, value = item.split("=", 1)
+        pairs.append((key, value))
+    return pairs
 
 
 def _mime_of(path: Path) -> str:
@@ -96,351 +193,83 @@ def _mime_of(path: Path) -> str:
     return mime or "application/octet-stream"
 
 
-def _upload_blob(session: Session, path: Path) -> dict:
-    """Upload a blob to the user's PDS. Returns the BlobRef the embed needs."""
-    resp = httpx.post(
-        f"{session.pds}/xrpc/com.atproto.repo.uploadBlob",
-        headers={**session.auth_headers, "Content-Type": _mime_of(path)},
-        content=path.read_bytes(),
-        timeout=UPLOAD_TIMEOUT,
-    )
-    if resp.status_code != 200:
-        _xrpc_error(resp, "uploadBlob")
-    return resp.json()["blob"]
-
-
-def _get_posts(session: Session, uris: list[str]) -> list[dict]:
-    """Look up posts by AT URI (used to build reply/quote refs)."""
+@app.command()
+def get(
+    nsid: str = typer.Argument(..., help="XRPC method NSID, e.g. app.bsky.feed.getTimeline"),
+    param: list[str] = typer.Option(None, "--param", help="Query param as key=value; repeatable"),
+):
+    """GET an XRPC query method; prints the JSON response to stdout."""
+    pairs = _parse_params(param or [])
+    session = _get_session()
     resp = httpx.get(
-        f"{session.pds}/xrpc/app.bsky.feed.getPosts",
-        params={"uris": uris},
+        f"{session.pds}/xrpc/{nsid}",
+        params=pairs,
         headers=session.auth_headers,
         timeout=DEFAULT_TIMEOUT,
     )
     if resp.status_code != 200:
-        _xrpc_error(resp, "getPosts")
-    return resp.json().get("posts", [])
+        _xrpc_error(resp, nsid)
+    typer.echo(resp.text)
 
 
-def _create_post_record(session: Session, record: dict) -> dict:
-    """Create an app.bsky.feed.post record on the user's repo. Returns {uri, cid}."""
-    resp = httpx.post(
-        f"{session.pds}/xrpc/com.atproto.repo.createRecord",
-        headers=session.auth_headers,
-        json={
-            "repo": session.did,
-            "collection": "app.bsky.feed.post",
-            "record": record,
-        },
-        timeout=DEFAULT_TIMEOUT,
-    )
-    if resp.status_code != 200:
-        _xrpc_error(resp, "createRecord")
-    return resp.json()
-
-
-def _validate_media_args(images: list, alts: list) -> None:
-    if len(images) > 4:
-        typer.echo("error: at most 4 images per post (Bluesky limit)", err=True)
-        raise typer.Exit(code=1)
-    if images and len(alts) != len(images):
-        typer.echo(
-            "error: each --image needs a matching --alt (alt text is mandatory)",
-            err=True,
-        )
-        raise typer.Exit(code=1)
-
-
-def _build_image_embed(session: Session, images: list[Path], alts: list[str]) -> dict:
-    uploaded = [
-        {"alt": alt_text, "image": _upload_blob(session, path)}
-        for path, alt_text in zip(images, alts, strict=True)
-    ]
-    return {"$type": "app.bsky.embed.images", "images": uploaded}
-
-
-def _build_video_embed(session: Session, video: Path) -> dict:
-    return {"$type": "app.bsky.embed.video", "video": _upload_blob(session, video)}
-
-
-def _base_post_record(text: str) -> dict:
-    return {
-        "$type": "app.bsky.feed.post",
-        "text": text,
-        "createdAt": _now_iso(),
-        "langs": [DEFAULT_LANG],
-    }
-
-
-# --- bsky-post ---
-
-post_app = typer.Typer(add_completion=False, help="Post to your own Bluesky account.")
-
-
-@post_app.command()
+@app.command()
 def post(
-    text: str = typer.Option(..., "--text", help="Post text"),
-    image: list[Path] = typer.Option(
-        None, "--image", help="Path to image file (up to 4); pair each with --alt"
+    nsid: str = typer.Argument(..., help="XRPC method NSID, e.g. com.atproto.repo.createRecord"),
+    json_body: str = typer.Option(
+        None, "--json", help="JSON body as a string. Mutually exclusive with --file."
     ),
-    alt: list[str] = typer.Option(None, "--alt", help="Alt text for each --image, in order"),
-    video: Path = typer.Option(
-        None, "--video", help="Path to mp4 video (single, up to ~60s, ~50MB)"
+    file: Path = typer.Option(
+        None, "--file", help="Binary file to upload (e.g. for com.atproto.repo.uploadBlob)"
     ),
 ):
-    """Post text + optional media to Bluesky."""
-    images = image or []
-    alts = alt or []
-    _validate_media_args(images, alts)
+    """POST to an XRPC procedure; prints the JSON response to stdout.
 
-    session = _get_session()
-    record = _base_post_record(text)
-    if images:
-        record["embed"] = _build_image_embed(session, images, alts)
-    elif video:
-        record["embed"] = _build_video_embed(session, video)
-    result = _create_post_record(session, record)
-    typer.echo(f"posted {result['uri']}")
-
-
-# --- bsky-reply ---
-
-reply_app = typer.Typer(add_completion=False, help="Reply in an existing Bluesky thread.")
-
-
-def _build_reply_ref(session: Session, parent_uri: str) -> dict:
-    """Look up a parent post and build the reply ref structure (parent + root)."""
-    posts = _get_posts(session, [parent_uri])
-    if not posts:
-        typer.echo(f"error: parent post not found: {parent_uri}", err=True)
-        raise typer.Exit(code=1)
-    parent = posts[0]
-    parent_ref = {"uri": parent["uri"], "cid": parent["cid"]}
-    # If parent is itself a reply, the root traces back via parent.record.reply.root.
-    # Otherwise, parent IS the root.
-    existing_reply = parent.get("record", {}).get("reply")
-    root_ref = existing_reply["root"] if existing_reply else parent_ref
-    return {"parent": parent_ref, "root": root_ref}
-
-
-@reply_app.command()
-def reply(
-    parent: str = typer.Option(..., "--parent", help="at:// URI of the post to reply to"),
-    text: str = typer.Option(..., "--text", help="Reply text"),
-    image: list[Path] = typer.Option(None, "--image", help="Up to 4 images; pair with --alt"),
-    alt: list[str] = typer.Option(None, "--alt", help="Alt text for each --image"),
-):
-    """Reply to a Bluesky post."""
-    images = image or []
-    alts = alt or []
-    _validate_media_args(images, alts)
-
-    session = _get_session()
-    record = _base_post_record(text)
-    record["reply"] = _build_reply_ref(session, parent)
-    if images:
-        record["embed"] = _build_image_embed(session, images, alts)
-    result = _create_post_record(session, record)
-    typer.echo(f"replied {result['uri']}")
-
-
-# --- bsky-quote-post ---
-
-quote_post_app = typer.Typer(
-    add_completion=False, help="Post that quotes another post, with commentary."
-)
-
-
-@quote_post_app.command()
-def quote_post(
-    quoted: str = typer.Option(..., "--quoted", help="at:// URI of the post being quoted"),
-    text: str = typer.Option(..., "--text", help="Your commentary"),
-    image: list[Path] = typer.Option(None, "--image", help="Up to 4 images"),
-    alt: list[str] = typer.Option(None, "--alt", help="Alt text for each --image"),
-):
-    """Post an original that quotes another post."""
-    images = image or []
-    alts = alt or []
-    _validate_media_args(images, alts)
-
-    session = _get_session()
-    posts = _get_posts(session, [quoted])
-    if not posts:
-        typer.echo(f"error: quoted post not found: {quoted}", err=True)
-        raise typer.Exit(code=1)
-    quoted_ref = {"uri": posts[0]["uri"], "cid": posts[0]["cid"]}
-
-    record = _base_post_record(text)
-    if images:
-        uploaded = [
-            {"alt": alt_text, "image": _upload_blob(session, path)}
-            for path, alt_text in zip(images, alts, strict=True)
-        ]
-        record["embed"] = {
-            "$type": "app.bsky.embed.recordWithMedia",
-            "record": {"$type": "app.bsky.embed.record", "record": quoted_ref},
-            "media": {"$type": "app.bsky.embed.images", "images": uploaded},
-        }
-    else:
-        record["embed"] = {"$type": "app.bsky.embed.record", "record": quoted_ref}
-    result = _create_post_record(session, record)
-    typer.echo(f"quoted {result['uri']}")
-
-
-# --- bsky-follow ---
-
-follow_app = typer.Typer(add_completion=False, help="Follow another Bluesky account by handle.")
-
-
-def _resolve_handle(session: Session, handle: str) -> str:
-    """Resolve a handle to a DID via the PDS. Hits the PDS, not AppView, so works
-    even when AppView hasn't reindexed a recently-changed handle."""
-    resp = httpx.get(
-        f"{session.pds}/xrpc/com.atproto.identity.resolveHandle",
-        params={"handle": handle},
-        headers=session.auth_headers,
-        timeout=DEFAULT_TIMEOUT,
-    )
-    if resp.status_code != 200:
-        _xrpc_error(resp, "resolveHandle")
-    return resp.json()["did"]
-
-
-@follow_app.command()
-def follow(
-    handle: str = typer.Option(..., "--handle", help="Handle to follow, e.g. mina.slopsalon.art"),
-):
-    """Follow another account. Idempotent only at the API level — Bluesky
-    won't refuse a duplicate follow but will create a second record. Don't
-    spam it."""
-    session = _get_session()
-    subject_did = _resolve_handle(session, handle)
-    resp = httpx.post(
-        f"{session.pds}/xrpc/com.atproto.repo.createRecord",
-        headers=session.auth_headers,
-        json={
-            "repo": session.did,
-            "collection": "app.bsky.graph.follow",
-            "record": {
-                "$type": "app.bsky.graph.follow",
-                "subject": subject_did,
-                "createdAt": _now_iso(),
-            },
-        },
-        timeout=DEFAULT_TIMEOUT,
-    )
-    if resp.status_code != 200:
-        _xrpc_error(resp, "createRecord (follow)")
-    typer.echo(f"followed {handle} ({subject_did}) at {resp.json()['uri']}")
-
-
-# --- bsky-unfollow ---
-
-unfollow_app = typer.Typer(add_completion=False, help="Unfollow an account by handle.")
-
-
-def _find_follow_rkey(session: Session, subject_did: str) -> str | None:
-    """Find the rkey of the user's follow record for subject_did, or None if not following.
-
-    Uses com.atproto.repo.listRecords on the user's own repo (PDS-side, so
-    immune to AppView lag). Walks pagination because an agent following
-    hundreds of accounts has more than one page of follow records.
+    With --json: Content-Type is application/json and the body is the
+    given JSON string. With --file: Content-Type is auto-detected from
+    the file extension and the body is the raw bytes (use for uploadBlob).
+    With neither: an empty POST (most procedures need a body, so this is
+    rarely what you want).
     """
-    cursor: str | None = None
-    while True:
-        params: dict[str, str | int] = {
-            "repo": session.did,
-            "collection": "app.bsky.graph.follow",
-            "limit": 100,
-        }
-        if cursor:
-            params["cursor"] = cursor
-        resp = httpx.get(
-            f"{session.pds}/xrpc/com.atproto.repo.listRecords",
-            params=params,
-            headers=session.auth_headers,
-            timeout=DEFAULT_TIMEOUT,
+    if json_body is not None and file is not None:
+        typer.echo("error: --json and --file are mutually exclusive", err=True)
+        raise typer.Exit(code=1)
+    parsed: object = None
+    if json_body is not None:
+        try:
+            parsed = json.loads(json_body)
+        except json.JSONDecodeError as e:
+            typer.echo(f"error: --json is not valid JSON: {e}", err=True)
+            raise typer.Exit(code=1) from e
+    session = _get_session()
+    url = f"{session.pds}/xrpc/{nsid}"
+    if file is not None:
+        resp = httpx.post(
+            url,
+            headers={**session.auth_headers, "Content-Type": _mime_of(file)},
+            content=file.read_bytes(),
+            timeout=UPLOAD_TIMEOUT,
         )
-        if resp.status_code != 200:
-            _xrpc_error(resp, "listRecords")
-        data = resp.json()
-        for rec in data.get("records", []):
-            if rec.get("value", {}).get("subject") == subject_did:
-                # uri is at://<did>/app.bsky.graph.follow/<rkey>
-                return rec["uri"].rsplit("/", 1)[-1]
-        cursor = data.get("cursor")
-        if not cursor:
-            return None
-
-
-@unfollow_app.command()
-def unfollow(
-    handle: str = typer.Option(..., "--handle", help="Handle to unfollow, e.g. bsky.app"),
-):
-    """Unfollow another account. Idempotent: if you don't follow them, exits 0 with a message."""
-    session = _get_session()
-    subject_did = _resolve_handle(session, handle)
-    rkey = _find_follow_rkey(session, subject_did)
-    if rkey is None:
-        typer.echo(f"not following {handle}; nothing to do")
-        return
-    resp = httpx.post(
-        f"{session.pds}/xrpc/com.atproto.repo.deleteRecord",
-        headers=session.auth_headers,
-        json={"repo": session.did, "collection": "app.bsky.graph.follow", "rkey": rkey},
-        timeout=DEFAULT_TIMEOUT,
-    )
-    if resp.status_code != 200:
-        _xrpc_error(resp, "deleteRecord (unfollow)")
-    typer.echo(f"unfollowed {handle} ({subject_did})")
-
-
-# --- bsky-read-timeline ---
-
-read_timeline_app = typer.Typer(
-    add_completion=False, help="Read your home feed (or another actor's feed) as JSON."
-)
-
-
-@read_timeline_app.command()
-def read_timeline(
-    actor: str = typer.Option(None, "--actor", help="Handle of an actor (default: your home feed)"),
-    limit: int = typer.Option(20, "--limit", help="Number of posts to return"),
-):
-    """Print recent feed posts as JSON to stdout."""
-    session = _get_session()
-    if actor:
-        url = f"{session.pds}/xrpc/app.bsky.feed.getAuthorFeed"
-        params = {"actor": actor, "limit": limit}
+    elif json_body is not None:
+        resp = httpx.post(url, headers=session.auth_headers, json=parsed, timeout=DEFAULT_TIMEOUT)
     else:
-        url = f"{session.pds}/xrpc/app.bsky.feed.getTimeline"
-        params = {"limit": limit}
-    resp = httpx.get(url, params=params, headers=session.auth_headers, timeout=DEFAULT_TIMEOUT)
+        resp = httpx.post(url, headers=session.auth_headers, timeout=DEFAULT_TIMEOUT)
     if resp.status_code != 200:
-        _xrpc_error(resp, "getTimeline" if not actor else "getAuthorFeed")
-    typer.echo(json.dumps(resp.json().get("feed", []), indent=2))
+        _xrpc_error(resp, nsid)
+    typer.echo(resp.text)
 
 
-# --- bsky-read-notifications ---
-
-read_notifications_app = typer.Typer(
-    add_completion=False,
-    help="Read replies, mentions, quotes, and likes on your account as JSON.",
-)
-
-
-@read_notifications_app.command()
-def read_notifications(
-    limit: int = typer.Option(20, "--limit", help="Number of notifications to return"),
-):
-    """Print recent notifications as JSON to stdout."""
+@app.command()
+def whoami():
+    """Print {did, handle, pds} for the current credentials as JSON."""
     session = _get_session()
-    resp = httpx.get(
-        f"{session.pds}/xrpc/app.bsky.notification.listNotifications",
-        params={"limit": limit},
-        headers=session.auth_headers,
-        timeout=DEFAULT_TIMEOUT,
-    )
-    if resp.status_code != 200:
-        _xrpc_error(resp, "listNotifications")
-    typer.echo(json.dumps(resp.json().get("notifications", []), indent=2))
+    typer.echo(json.dumps({"did": session.did, "handle": session.handle, "pds": session.pds}))
+
+
+@app.command()
+def cookbook():
+    """Print worked recipes for the common Bluesky operations.
+
+    Lives as its own subcommand (not in `--help`) because typer's help
+    renderer collapses whitespace and would mangle the shell snippets.
+    """
+    typer.echo(COOKBOOK)

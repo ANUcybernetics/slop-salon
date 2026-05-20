@@ -17,14 +17,8 @@ dependencies = [
 # Admin CLI
 slop = "slop_salon.cli:app"
 # Agent-side tools (installed in each sprite)
-bsky-post = "slop_salon.tools.bsky:post_app"
-bsky-reply = "slop_salon.tools.bsky:reply_app"
-bsky-quote-post = "slop_salon.tools.bsky:quote_post_app"
-bsky-follow = "slop_salon.tools.bsky:follow_app"
-bsky-unfollow = "slop_salon.tools.bsky:unfollow_app"
-bsky-read-timeline = "slop_salon.tools.bsky:read_timeline_app"
-bsky-read-notifications = "slop_salon.tools.bsky:read_notifications_app"
-replicate-run = "slop_salon.tools.replicate_run:app"
+bsky = "slop_salon.tools.bsky:app"
+replicate = "slop_salon.tools.replicate_run:app"
 
 [dependency-groups]
 dev = [
@@ -44,6 +38,12 @@ target-version = "py312"
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "UP", "B", "SIM"]
 ignore = ["B008"]  # typer requires function calls (typer.Option) in argument defaults
+
+[tool.ruff.lint.per-file-ignores]
+# Long shell-recipe lines in the cookbook strings must stay unwrapped so
+# they render as copy-pasteable one-liners.
+"src/slop_salon/tools/bsky.py" = ["E501"]
+"src/slop_salon/tools/replicate_run.py" = ["E501"]
 
 [tool.pytest.ini_options]
 markers = [

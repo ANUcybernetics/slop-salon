@@ -1,24 +1,27 @@
-"""Tests for slop_salon.tools.bsky CLI commands.
+"""Tests for the single-tool `bsky` CLI.
 
 Strategy: mock HTTP at the wire level via pytest-httpx and assert on the
 exact requests Bluesky receives — URLs, methods, headers, JSON bodies.
-This catches mistakes in record construction (wrong $type, wrong field
-name, missing createdAt, etc.) that mocking the SDK would silently
-absorb.
+This catches mistakes in URL construction, content-type detection, and
+auth wiring that a higher-level mock would silently absorb.
+
+The tool is intentionally thin: it doesn't know about feed.post / follow /
+reply record shapes. So the tests here only cover the wrapper primitives
+(GET with params, POST with --json, POST with --file, whoami, auth). The
+correctness of multi-call recipes (reply threading, unfollow's rkey
+lookup, etc.) lives in the agent's prompt and the help-text cookbook —
+not in this code.
 """
 
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
 
 runner = CliRunner()
 
-# Wire-level fixtures: the test bsky.social returns these, and every PDS-
-# bound call should go to FAKE_PDS afterwards.
 FAKE_PDS = "https://pds.test.example.com"
 FAKE_DID = "did:plc:fake123"
 FAKE_HANDLE = "lou.slopsalon.art"
@@ -56,7 +59,6 @@ def session_mock(httpx_mock):
 
 
 def _find_request(httpx_mock, path_substring: str):
-    """Return the (single) request whose URL contains the given substring."""
     matches = [r for r in httpx_mock.get_requests() if path_substring in str(r.url)]
     if not matches:
         raise AssertionError(
@@ -68,30 +70,15 @@ def _find_request(httpx_mock, path_substring: str):
     return matches[0]
 
 
-def _json_body(req) -> dict:
-    return json.loads(req.content)
-
-
-def _assert_post_record_basics(record: dict, expected_text: str) -> None:
-    """Every app.bsky.feed.post must have these baseline fields."""
-    assert record["$type"] == "app.bsky.feed.post"
-    assert record["text"] == expected_text
-    assert "createdAt" in record
-    # ISO 8601 with ms precision and Z suffix.
-    assert record["createdAt"].endswith("Z")
-    assert "." in record["createdAt"]
-    assert record["langs"] == ["en"]
-
-
 # === Auth + env validation =================================================
 
 
-def test_post_requires_handle_env(monkeypatch):
+def test_get_requires_handle_env(monkeypatch):
     monkeypatch.delenv("BSKY_HANDLE", raising=False)
     monkeypatch.setenv("BSKY_PASSWORD", "test-password")
-    from slop_salon.tools.bsky import post_app
+    from slop_salon.tools.bsky import app
 
-    result = runner.invoke(post_app, ["--text", "hello"])
+    result = runner.invoke(app, ["get", "app.bsky.feed.getTimeline"])
     assert result.exit_code != 0
     assert "BSKY_HANDLE" in (result.stderr or result.output)
 
@@ -99,437 +86,28 @@ def test_post_requires_handle_env(monkeypatch):
 def test_post_requires_password_env(monkeypatch):
     monkeypatch.setenv("BSKY_HANDLE", FAKE_HANDLE)
     monkeypatch.delenv("BSKY_PASSWORD", raising=False)
-    from slop_salon.tools.bsky import post_app
+    from slop_salon.tools.bsky import app
 
-    result = runner.invoke(post_app, ["--text", "hello"])
+    result = runner.invoke(app, ["post", "com.atproto.repo.createRecord", "--json", "{}"])
     assert result.exit_code != 0
     assert "BSKY_PASSWORD" in (result.stderr or result.output)
 
 
-def test_session_uses_pds_from_did_doc(bsky_env, session_mock, httpx_mock):
-    """createRecord must hit the PDS from didDoc, not bsky.social."""
-    httpx_mock.add_response(
-        method="POST",
-        url=f"{FAKE_PDS}/xrpc/com.atproto.repo.createRecord",
-        json={"uri": "at://x/y/z", "cid": "c"},
-    )
-    from slop_salon.tools.bsky import post_app
-
-    result = runner.invoke(post_app, ["--text", "hi"])
-    assert result.exit_code == 0, result.output
-
-    create_req = _find_request(httpx_mock, "createRecord")
-    assert str(create_req.url).startswith(FAKE_PDS)
-    assert create_req.headers["authorization"] == f"Bearer {FAKE_JWT}"
-
-
-# === Post =================================================================
-
-
-def test_post_text_only(bsky_env, session_mock, httpx_mock):
-    httpx_mock.add_response(
-        method="POST",
-        url=f"{FAKE_PDS}/xrpc/com.atproto.repo.createRecord",
-        json={"uri": "at://did:plc:fake123/app.bsky.feed.post/abc", "cid": "cid-abc"},
-    )
-    from slop_salon.tools.bsky import post_app
-
-    result = runner.invoke(post_app, ["--text", "hello world"])
-    assert result.exit_code == 0, result.output
-    assert "at://did:plc:fake123" in result.output
-
-    body = _json_body(_find_request(httpx_mock, "createRecord"))
-    assert body["repo"] == FAKE_DID
-    assert body["collection"] == "app.bsky.feed.post"
-    _assert_post_record_basics(body["record"], "hello world")
-    assert "embed" not in body["record"]
-    assert "reply" not in body["record"]
-
-
-def test_post_with_one_image(bsky_env, session_mock, httpx_mock, tmp_path):
-    img = tmp_path / "img.jpg"
-    img.write_bytes(b"\xff\xd8\xff\xe0fake-jpeg")
-    fake_blob = {
-        "$type": "blob",
-        "ref": {"$link": "bafy-fake"},
-        "mimeType": "image/jpeg",
-        "size": 14,
-    }
-    httpx_mock.add_response(
-        method="POST",
-        url=f"{FAKE_PDS}/xrpc/com.atproto.repo.uploadBlob",
-        json={"blob": fake_blob},
-    )
-    httpx_mock.add_response(
-        method="POST",
-        url=f"{FAKE_PDS}/xrpc/com.atproto.repo.createRecord",
-        json={"uri": "at://x/y/z", "cid": "c"},
-    )
-    from slop_salon.tools.bsky import post_app
-
-    result = runner.invoke(
-        post_app, ["--text", "look", "--image", str(img), "--alt", "a thing"]
-    )
-    assert result.exit_code == 0, result.output
-
-    upload_req = _find_request(httpx_mock, "uploadBlob")
-    assert upload_req.headers["content-type"] == "image/jpeg"
-    assert upload_req.content == b"\xff\xd8\xff\xe0fake-jpeg"
-
-    body = _json_body(_find_request(httpx_mock, "createRecord"))
-    embed = body["record"]["embed"]
-    assert embed["$type"] == "app.bsky.embed.images"
-    assert len(embed["images"]) == 1
-    assert embed["images"][0]["alt"] == "a thing"
-    assert embed["images"][0]["image"] == fake_blob
-
-
-def test_post_with_video(bsky_env, session_mock, httpx_mock, tmp_path):
-    vid = tmp_path / "clip.mp4"
-    vid.write_bytes(b"\x00\x00fake-mp4")
-    fake_blob = {"$type": "blob", "ref": {"$link": "bafy-vid"}, "mimeType": "video/mp4"}
-    httpx_mock.add_response(
-        method="POST",
-        url=f"{FAKE_PDS}/xrpc/com.atproto.repo.uploadBlob",
-        json={"blob": fake_blob},
-    )
-    httpx_mock.add_response(
-        method="POST",
-        url=f"{FAKE_PDS}/xrpc/com.atproto.repo.createRecord",
-        json={"uri": "at://x/y/z", "cid": "c"},
-    )
-    from slop_salon.tools.bsky import post_app
-
-    result = runner.invoke(post_app, ["--text", "rolling", "--video", str(vid)])
-    assert result.exit_code == 0, result.output
-
-    upload_req = _find_request(httpx_mock, "uploadBlob")
-    assert upload_req.headers["content-type"] == "video/mp4"
-
-    body = _json_body(_find_request(httpx_mock, "createRecord"))
-    embed = body["record"]["embed"]
-    assert embed["$type"] == "app.bsky.embed.video"
-    assert embed["video"] == fake_blob
-
-
-def test_post_rejects_more_than_four_images(bsky_env, tmp_path):
-    """Client-side validation: no HTTP traffic should happen."""
-    images: list[Path] = []
-    for i in range(5):
-        p = tmp_path / f"img{i}.jpg"
-        p.write_bytes(b"x")
-        images.append(p)
-    from slop_salon.tools.bsky import post_app
-
-    args = ["--text", "many"]
-    for p in images:
-        args += ["--image", str(p), "--alt", "x"]
-    result = runner.invoke(post_app, args)
-    assert result.exit_code != 0
-    assert "4" in (result.output + (result.stderr or ""))
-
-
-def test_post_image_without_alt_fails(bsky_env, tmp_path):
-    img = tmp_path / "img.jpg"
-    img.write_bytes(b"x")
-    from slop_salon.tools.bsky import post_app
-
-    result = runner.invoke(post_app, ["--text", "look", "--image", str(img)])
-    assert result.exit_code != 0
-    assert "alt" in (result.output + (result.stderr or "")).lower()
-
-
-# === Reply ================================================================
-
-
-def test_reply_to_top_level_post(bsky_env, session_mock, httpx_mock):
-    parent_uri = "at://did:plc:xyz/app.bsky.feed.post/parent1"
+def test_calls_use_pds_from_did_doc_with_bearer_auth(bsky_env, session_mock, httpx_mock):
+    """After createSession on bsky.social, every call should hit FAKE_PDS with the JWT."""
     httpx_mock.add_response(
         method="GET",
-        url=f"{FAKE_PDS}/xrpc/app.bsky.feed.getPosts?uris={parent_uri}",
-        json={
-            "posts": [
-                {
-                    "uri": parent_uri,
-                    "cid": "cid-parent",
-                    "record": {"$type": "app.bsky.feed.post", "text": "thinking out loud"},
-                }
-            ]
-        },
+        url=f"{FAKE_PDS}/xrpc/app.bsky.feed.getTimeline",
+        json={"feed": []},
     )
-    httpx_mock.add_response(
-        method="POST",
-        url=f"{FAKE_PDS}/xrpc/com.atproto.repo.createRecord",
-        json={"uri": "at://x/y/z", "cid": "c"},
-    )
-    from slop_salon.tools.bsky import reply_app
+    from slop_salon.tools.bsky import app
 
-    result = runner.invoke(reply_app, ["--parent", parent_uri, "--text", "interesting"])
+    result = runner.invoke(app, ["get", "app.bsky.feed.getTimeline"])
     assert result.exit_code == 0, result.output
-
-    body = _json_body(_find_request(httpx_mock, "createRecord"))
-    _assert_post_record_basics(body["record"], "interesting")
-    # For a top-level reply, root and parent are the same.
-    expected_ref = {"uri": parent_uri, "cid": "cid-parent"}
-    assert body["record"]["reply"] == {"parent": expected_ref, "root": expected_ref}
-
-
-def test_reply_to_nested_reply_threads_back_to_root(bsky_env, session_mock, httpx_mock):
-    parent_uri = "at://did:plc:xyz/app.bsky.feed.post/middle"
-    root_ref = {"uri": "at://did:plc:xyz/app.bsky.feed.post/root", "cid": "cid-root"}
-    httpx_mock.add_response(
-        method="GET",
-        url=f"{FAKE_PDS}/xrpc/app.bsky.feed.getPosts?uris={parent_uri}",
-        json={
-            "posts": [
-                {
-                    "uri": parent_uri,
-                    "cid": "cid-middle",
-                    "record": {
-                        "$type": "app.bsky.feed.post",
-                        "text": "mid-thread",
-                        "reply": {"root": root_ref, "parent": {"uri": "...", "cid": "..."}},
-                    },
-                }
-            ]
-        },
-    )
-    httpx_mock.add_response(
-        method="POST",
-        url=f"{FAKE_PDS}/xrpc/com.atproto.repo.createRecord",
-        json={"uri": "at://x/y/z", "cid": "c"},
-    )
-    from slop_salon.tools.bsky import reply_app
-
-    result = runner.invoke(reply_app, ["--parent", parent_uri, "--text", "agree"])
-    assert result.exit_code == 0, result.output
-
-    body = _json_body(_find_request(httpx_mock, "createRecord"))
-    assert body["record"]["reply"]["root"] == root_ref
-    assert body["record"]["reply"]["parent"] == {"uri": parent_uri, "cid": "cid-middle"}
-
-
-# === Quote post ===========================================================
-
-
-def test_quote_post_text_only(bsky_env, session_mock, httpx_mock):
-    quoted_uri = "at://did:plc:abc/app.bsky.feed.post/xyz789"
-    httpx_mock.add_response(
-        method="GET",
-        url=f"{FAKE_PDS}/xrpc/app.bsky.feed.getPosts?uris={quoted_uri}",
-        json={"posts": [{"uri": quoted_uri, "cid": "cid-xyz"}]},
-    )
-    httpx_mock.add_response(
-        method="POST",
-        url=f"{FAKE_PDS}/xrpc/com.atproto.repo.createRecord",
-        json={"uri": "at://x/y/z", "cid": "c"},
-    )
-    from slop_salon.tools.bsky import quote_post_app
-
-    result = runner.invoke(
-        quote_post_app, ["--quoted", quoted_uri, "--text", "look at this"]
-    )
-    assert result.exit_code == 0, result.output
-
-    body = _json_body(_find_request(httpx_mock, "createRecord"))
-    _assert_post_record_basics(body["record"], "look at this")
-    embed = body["record"]["embed"]
-    assert embed["$type"] == "app.bsky.embed.record"
-    assert embed["record"] == {"uri": quoted_uri, "cid": "cid-xyz"}
-
-
-def test_quote_post_with_image_uses_record_with_media(bsky_env, session_mock, httpx_mock, tmp_path):
-    quoted_uri = "at://did:plc:abc/app.bsky.feed.post/xyz"
-    img = tmp_path / "img.png"
-    img.write_bytes(b"\x89PNGfake")
-    httpx_mock.add_response(
-        method="GET",
-        url=f"{FAKE_PDS}/xrpc/app.bsky.feed.getPosts?uris={quoted_uri}",
-        json={"posts": [{"uri": quoted_uri, "cid": "cid-q"}]},
-    )
-    httpx_mock.add_response(
-        method="POST",
-        url=f"{FAKE_PDS}/xrpc/com.atproto.repo.uploadBlob",
-        json={"blob": {"$type": "blob", "ref": {"$link": "bafy"}, "mimeType": "image/png"}},
-    )
-    httpx_mock.add_response(
-        method="POST",
-        url=f"{FAKE_PDS}/xrpc/com.atproto.repo.createRecord",
-        json={"uri": "at://x/y/z", "cid": "c"},
-    )
-    from slop_salon.tools.bsky import quote_post_app
-
-    result = runner.invoke(
-        quote_post_app,
-        ["--quoted", quoted_uri, "--text", "see also", "--image", str(img), "--alt", "thing"],
-    )
-    assert result.exit_code == 0, result.output
-
-    body = _json_body(_find_request(httpx_mock, "createRecord"))
-    embed = body["record"]["embed"]
-    assert embed["$type"] == "app.bsky.embed.recordWithMedia"
-    assert embed["record"]["record"]["uri"] == quoted_uri
-    assert embed["media"]["$type"] == "app.bsky.embed.images"
-
-
-# === Follow ===============================================================
-
-
-def test_follow_resolves_handle_then_creates_record(bsky_env, session_mock, httpx_mock):
-    target_did = "did:plc:mina-fake"
-    httpx_mock.add_response(
-        method="GET",
-        url=f"{FAKE_PDS}/xrpc/com.atproto.identity.resolveHandle?handle=mina.slopsalon.art",
-        json={"did": target_did},
-    )
-    httpx_mock.add_response(
-        method="POST",
-        url=f"{FAKE_PDS}/xrpc/com.atproto.repo.createRecord",
-        json={"uri": f"at://{FAKE_DID}/app.bsky.graph.follow/abc", "cid": "c"},
-    )
-    from slop_salon.tools.bsky import follow_app
-
-    result = runner.invoke(follow_app, ["--handle", "mina.slopsalon.art"])
-    assert result.exit_code == 0, result.output
-
-    body = _json_body(_find_request(httpx_mock, "createRecord"))
-    assert body["repo"] == FAKE_DID
-    assert body["collection"] == "app.bsky.graph.follow"
-    assert body["record"]["$type"] == "app.bsky.graph.follow"
-    assert body["record"]["subject"] == target_did
-    assert "createdAt" in body["record"]
-
-
-# === Unfollow =============================================================
-
-
-def test_unfollow_resolves_handle_lists_records_and_deletes(
-    bsky_env, session_mock, httpx_mock
-):
-    target_did = "did:plc:target"
-    target_rkey = "rkey-target"
-    other_rkey = "rkey-other"
-    httpx_mock.add_response(
-        method="GET",
-        url=f"{FAKE_PDS}/xrpc/com.atproto.identity.resolveHandle?handle=bsky.app",
-        json={"did": target_did},
-    )
-    # listRecords returns two follows; we should pick the one matching subject.
-    httpx_mock.add_response(
-        method="GET",
-        url=(
-            f"{FAKE_PDS}/xrpc/com.atproto.repo.listRecords"
-            f"?repo={FAKE_DID}&collection=app.bsky.graph.follow&limit=100"
-        ),
-        json={
-            "records": [
-                {
-                    "uri": f"at://{FAKE_DID}/app.bsky.graph.follow/{other_rkey}",
-                    "value": {"subject": "did:plc:someone-else"},
-                },
-                {
-                    "uri": f"at://{FAKE_DID}/app.bsky.graph.follow/{target_rkey}",
-                    "value": {"subject": target_did},
-                },
-            ],
-        },
-    )
-    httpx_mock.add_response(
-        method="POST",
-        url=f"{FAKE_PDS}/xrpc/com.atproto.repo.deleteRecord",
-        json={},
-    )
-    from slop_salon.tools.bsky import unfollow_app
-
-    result = runner.invoke(unfollow_app, ["--handle", "bsky.app"])
-    assert result.exit_code == 0, result.output
-
-    body = _json_body(_find_request(httpx_mock, "deleteRecord"))
-    assert body == {
-        "repo": FAKE_DID,
-        "collection": "app.bsky.graph.follow",
-        "rkey": target_rkey,
-    }
-
-
-def test_unfollow_is_idempotent_when_not_following(bsky_env, session_mock, httpx_mock):
-    target_did = "did:plc:stranger"
-    httpx_mock.add_response(
-        method="GET",
-        url=f"{FAKE_PDS}/xrpc/com.atproto.identity.resolveHandle?handle=stranger.bsky.social",
-        json={"did": target_did},
-    )
-    httpx_mock.add_response(
-        method="GET",
-        url=(
-            f"{FAKE_PDS}/xrpc/com.atproto.repo.listRecords"
-            f"?repo={FAKE_DID}&collection=app.bsky.graph.follow&limit=100"
-        ),
-        json={"records": []},
-    )
-    from slop_salon.tools.bsky import unfollow_app
-
-    result = runner.invoke(unfollow_app, ["--handle", "stranger.bsky.social"])
-    assert result.exit_code == 0, result.output
-    assert "not following" in result.output
-
-    # Crucially, no deleteRecord call should have been made.
-    delete_calls = [
-        r for r in httpx_mock.get_requests() if "deleteRecord" in str(r.url)
-    ]
-    assert delete_calls == []
-
-
-# === Reads ================================================================
-
-
-def test_read_timeline_default(bsky_env, session_mock, httpx_mock):
-    httpx_mock.add_response(
-        method="GET",
-        url=f"{FAKE_PDS}/xrpc/app.bsky.feed.getTimeline?limit=5",
-        json={"feed": [{"post": {"text": "hi"}}]},
-    )
-    from slop_salon.tools.bsky import read_timeline_app
-
-    result = runner.invoke(read_timeline_app, ["--limit", "5"])
-    assert result.exit_code == 0, result.output
-    data = json.loads(result.output)
-    assert data == [{"post": {"text": "hi"}}]
 
     req = _find_request(httpx_mock, "getTimeline")
+    assert str(req.url).startswith(FAKE_PDS)
     assert req.headers["authorization"] == f"Bearer {FAKE_JWT}"
-
-
-def test_read_timeline_specific_actor(bsky_env, session_mock, httpx_mock):
-    httpx_mock.add_response(
-        method="GET",
-        url=f"{FAKE_PDS}/xrpc/app.bsky.feed.getAuthorFeed?actor=other.slopsalon.art&limit=3",
-        json={"feed": [{"post": {"text": "by them"}}]},
-    )
-    from slop_salon.tools.bsky import read_timeline_app
-
-    result = runner.invoke(
-        read_timeline_app, ["--actor", "other.slopsalon.art", "--limit", "3"]
-    )
-    assert result.exit_code == 0, result.output
-    _find_request(httpx_mock, "getAuthorFeed")
-
-
-def test_read_notifications(bsky_env, session_mock, httpx_mock):
-    httpx_mock.add_response(
-        method="GET",
-        url=f"{FAKE_PDS}/xrpc/app.bsky.notification.listNotifications?limit=10",
-        json={"notifications": [{"reason": "reply", "uri": "at://x/y/z"}]},
-    )
-    from slop_salon.tools.bsky import read_notifications_app
-
-    result = runner.invoke(read_notifications_app, ["--limit", "10"])
-    assert result.exit_code == 0, result.output
-    data = json.loads(result.output)
-    assert data == [{"reason": "reply", "uri": "at://x/y/z"}]
-
-
-# === Error handling =======================================================
 
 
 def test_create_session_failure_exits_nonzero(bsky_env, httpx_mock):
@@ -539,23 +117,228 @@ def test_create_session_failure_exits_nonzero(bsky_env, httpx_mock):
         status_code=401,
         json={"error": "AuthenticationRequired", "message": "Invalid identifier or password"},
     )
-    from slop_salon.tools.bsky import post_app
+    from slop_salon.tools.bsky import app
 
-    result = runner.invoke(post_app, ["--text", "hi"])
+    result = runner.invoke(app, ["get", "app.bsky.feed.getTimeline"])
     assert result.exit_code != 0
     assert "AuthenticationRequired" in (result.output + (result.stderr or ""))
 
 
-def test_create_record_failure_surfaces_error_message(bsky_env, session_mock, httpx_mock):
+# === whoami ================================================================
+
+
+def test_whoami_prints_did_handle_pds_json(bsky_env, session_mock):
+    from slop_salon.tools.bsky import app
+
+    result = runner.invoke(app, ["whoami"])
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.output)
+    assert data == {"did": FAKE_DID, "handle": FAKE_HANDLE, "pds": FAKE_PDS}
+
+
+def test_cookbook_prints_recipes_with_whitespace_preserved():
+    """The cookbook prints raw text (not via typer's help renderer), so the
+    shell recipe whitespace must survive intact for jq to parse them."""
+    from slop_salon.tools.bsky import app
+
+    result = runner.invoke(app, ["cookbook"])
+    assert result.exit_code == 0, result.output
+    # Spot-check that recipes are present and that the threading caveat
+    # survives (this is the part most likely to silently mislead an agent).
+    assert "bsky whoami" in result.output
+    assert "com.atproto.repo.createRecord" in result.output
+    assert "THREAD ROOT" in result.output
+    assert "app.bsky.actor.profile" in result.output
+
+
+# === get ===================================================================
+
+
+def test_get_with_no_params(bsky_env, session_mock, httpx_mock):
+    httpx_mock.add_response(
+        method="GET",
+        url=f"{FAKE_PDS}/xrpc/app.bsky.notification.listNotifications",
+        json={"notifications": [{"reason": "reply"}]},
+    )
+    from slop_salon.tools.bsky import app
+
+    result = runner.invoke(app, ["get", "app.bsky.notification.listNotifications"])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output) == {"notifications": [{"reason": "reply"}]}
+
+
+def test_get_with_single_param(bsky_env, session_mock, httpx_mock):
+    httpx_mock.add_response(
+        method="GET",
+        url=f"{FAKE_PDS}/xrpc/app.bsky.feed.getTimeline?limit=5",
+        json={"feed": []},
+    )
+    from slop_salon.tools.bsky import app
+
+    result = runner.invoke(app, ["get", "app.bsky.feed.getTimeline", "--param", "limit=5"])
+    assert result.exit_code == 0, result.output
+
+
+def test_get_with_multiple_params_same_key_makes_array(bsky_env, session_mock, httpx_mock):
+    """ATProto arrays in URL params are repeated keys: ?uris=a&uris=b."""
+    uri_a = "at://did:plc:x/app.bsky.feed.post/a"
+    uri_b = "at://did:plc:y/app.bsky.feed.post/b"
+    httpx_mock.add_response(
+        method="GET",
+        url=f"{FAKE_PDS}/xrpc/app.bsky.feed.getPosts?uris={uri_a}&uris={uri_b}",
+        json={"posts": []},
+    )
+    from slop_salon.tools.bsky import app
+
+    result = runner.invoke(
+        app,
+        ["get", "app.bsky.feed.getPosts", "--param", f"uris={uri_a}", "--param", f"uris={uri_b}"],
+    )
+    assert result.exit_code == 0, result.output
+
+
+def test_get_rejects_param_without_equals(bsky_env):
+    """Param validation runs before auth, so no HTTP traffic should happen."""
+    from slop_salon.tools.bsky import app
+
+    result = runner.invoke(app, ["get", "app.bsky.feed.getTimeline", "--param", "limit"])
+    assert result.exit_code != 0
+    assert "key=value" in (result.output + (result.stderr or ""))
+
+
+def test_get_surfaces_xrpc_error(bsky_env, session_mock, httpx_mock):
+    httpx_mock.add_response(
+        method="GET",
+        url=f"{FAKE_PDS}/xrpc/app.bsky.feed.getPosts",
+        status_code=400,
+        json={"error": "InvalidRequest", "message": "missing uris"},
+    )
+    from slop_salon.tools.bsky import app
+
+    result = runner.invoke(app, ["get", "app.bsky.feed.getPosts"])
+    assert result.exit_code != 0
+    assert "InvalidRequest" in (result.output + (result.stderr or ""))
+    assert "missing uris" in (result.output + (result.stderr or ""))
+
+
+# === post ==================================================================
+
+
+def test_post_with_json_body(bsky_env, session_mock, httpx_mock):
+    body = {
+        "repo": FAKE_DID,
+        "collection": "app.bsky.feed.post",
+        "record": {
+            "$type": "app.bsky.feed.post",
+            "text": "hello",
+            "createdAt": "2026-05-20T12:00:00.000Z",
+            "langs": ["en"],
+        },
+    }
+    httpx_mock.add_response(
+        method="POST",
+        url=f"{FAKE_PDS}/xrpc/com.atproto.repo.createRecord",
+        json={"uri": "at://did:plc:fake123/app.bsky.feed.post/abc", "cid": "cid-abc"},
+    )
+    from slop_salon.tools.bsky import app
+
+    result = runner.invoke(
+        app, ["post", "com.atproto.repo.createRecord", "--json", json.dumps(body)]
+    )
+    assert result.exit_code == 0, result.output
+    assert "at://did:plc:fake123" in result.output
+
+    req = _find_request(httpx_mock, "createRecord")
+    assert req.headers.get("content-type", "").startswith("application/json")
+    assert json.loads(req.content) == body
+
+
+def test_post_with_file_uses_detected_mime_and_raw_bytes(
+    bsky_env, session_mock, httpx_mock, tmp_path
+):
+    img = tmp_path / "img.jpg"
+    img.write_bytes(b"\xff\xd8\xff\xe0fake-jpeg")
+    httpx_mock.add_response(
+        method="POST",
+        url=f"{FAKE_PDS}/xrpc/com.atproto.repo.uploadBlob",
+        json={
+            "blob": {
+                "$type": "blob",
+                "ref": {"$link": "bafy-fake"},
+                "mimeType": "image/jpeg",
+                "size": 14,
+            }
+        },
+    )
+    from slop_salon.tools.bsky import app
+
+    result = runner.invoke(app, ["post", "com.atproto.repo.uploadBlob", "--file", str(img)])
+    assert result.exit_code == 0, result.output
+
+    req = _find_request(httpx_mock, "uploadBlob")
+    assert req.headers["content-type"] == "image/jpeg"
+    assert req.content == b"\xff\xd8\xff\xe0fake-jpeg"
+    assert "bafy-fake" in result.output
+
+
+def test_post_file_unknown_extension_falls_back_to_octet_stream(
+    bsky_env, session_mock, httpx_mock, tmp_path
+):
+    blob = tmp_path / "weird.xyzzy"
+    blob.write_bytes(b"opaque")
+    httpx_mock.add_response(
+        method="POST",
+        url=f"{FAKE_PDS}/xrpc/com.atproto.repo.uploadBlob",
+        json={"blob": {}},
+    )
+    from slop_salon.tools.bsky import app
+
+    result = runner.invoke(app, ["post", "com.atproto.repo.uploadBlob", "--file", str(blob)])
+    assert result.exit_code == 0, result.output
+    req = _find_request(httpx_mock, "uploadBlob")
+    assert req.headers["content-type"] == "application/octet-stream"
+
+
+def test_post_rejects_json_and_file_together(bsky_env, tmp_path):
+    """Mutex check runs before auth, so no HTTP traffic should happen."""
+    img = tmp_path / "img.jpg"
+    img.write_bytes(b"x")
+    from slop_salon.tools.bsky import app
+
+    result = runner.invoke(
+        app,
+        [
+            "post",
+            "com.atproto.repo.uploadBlob",
+            "--json",
+            "{}",
+            "--file",
+            str(img),
+        ],
+    )
+    assert result.exit_code != 0
+    assert "mutually exclusive" in (result.output + (result.stderr or ""))
+
+
+def test_post_rejects_invalid_json(bsky_env):
+    """JSON validation runs before auth, so no HTTP traffic should happen."""
+    from slop_salon.tools.bsky import app
+
+    result = runner.invoke(app, ["post", "com.atproto.repo.createRecord", "--json", "{not json"])
+    assert result.exit_code != 0
+    assert "valid JSON" in (result.output + (result.stderr or ""))
+
+
+def test_post_surfaces_xrpc_error(bsky_env, session_mock, httpx_mock):
     httpx_mock.add_response(
         method="POST",
         url=f"{FAKE_PDS}/xrpc/com.atproto.repo.createRecord",
         status_code=400,
         json={"error": "InvalidRequest", "message": "Record is invalid"},
     )
-    from slop_salon.tools.bsky import post_app
+    from slop_salon.tools.bsky import app
 
-    result = runner.invoke(post_app, ["--text", "hi"])
+    result = runner.invoke(app, ["post", "com.atproto.repo.createRecord", "--json", "{}"])
     assert result.exit_code != 0
     assert "InvalidRequest" in (result.output + (result.stderr or ""))
     assert "Record is invalid" in (result.output + (result.stderr or ""))
