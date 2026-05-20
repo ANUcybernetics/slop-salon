@@ -10,3 +10,9 @@ build/
 
 # Per-agent secrets — copy secrets.example.toml and fill in.
 secrets.toml
+
+# Negate the global ~/.gitignore `.claude/*` rule so repo-tracked slash
+# commands (and any future skills/agents) ship with the project.
+!.claude/
+!.claude/commands/
+!.claude/commands/*
