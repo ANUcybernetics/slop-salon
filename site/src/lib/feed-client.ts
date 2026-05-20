@@ -173,6 +173,7 @@ export function init(): void {
   const emptyEl = document.querySelector<HTMLElement>("[data-feed-empty]");
   const filtersEl = document.querySelector<HTMLElement>("[data-filters]");
   const refreshedEl = document.querySelector<HTMLTimeElement>("[data-refreshed]");
+  const refreshBtn = document.querySelector<HTMLButtonElement>("[data-feed-refresh]");
   const artistGroup = document.querySelector<HTMLElement>("[data-filter-artists]");
   const mediaGroup = document.querySelector<HTMLElement>("[data-filter-media]");
   const searchInput = document.querySelector<HTMLInputElement>("[data-filter-search]");
@@ -201,9 +202,12 @@ export function init(): void {
     }, SEARCH_DEBOUNCE_MS),
   );
 
-  update();
-
-  void (async () => {
+  const refresh = async (): Promise<void> => {
+    if (refreshBtn) {
+      refreshBtn.disabled = true;
+      refreshBtn.setAttribute("aria-busy", "true");
+      refreshBtn.textContent = "Refreshing…";
+    }
     try {
       const fresh = await loadCombinedFeed(agents, POST_LIMIT_PER_AGENT);
       feed = mergeFeed(feed, fresh);
@@ -215,6 +219,17 @@ export function init(): void {
       }
     } catch (err) {
       console.warn("[feed] refresh failed:", err);
+    } finally {
+      if (refreshBtn) {
+        refreshBtn.disabled = false;
+        refreshBtn.removeAttribute("aria-busy");
+        refreshBtn.textContent = "Refresh";
+      }
     }
-  })();
+  };
+
+  refreshBtn?.addEventListener("click", () => void refresh());
+
+  update();
+  void refresh();
 }

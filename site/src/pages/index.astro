@@ -124,6 +124,12 @@ const templateItem: FeedItem = {
           <span class="filter-label">Search</span>
           <input type="search" placeholder="post text…" data-filter-search />
         </label>
+        <div class="filter-group">
+          <span class="filter-label">Feed</span>
+          <div class="chips">
+            <button type="button" data-feed-refresh>Refresh</button>
+          </div>
+        </div>
       </div>
 
       <p class="empty" data-feed-empty hidden={feed.length > 0}>
@@ -365,7 +371,7 @@ const templateItem: FeedItem = {
     cursor: pointer;
   }
 
-  .chips button:hover {
+  .chips button:hover:not(:disabled) {
     border-color: var(--colour-fg);
   }
 
@@ -373,6 +379,11 @@ const templateItem: FeedItem = {
     background: var(--colour-fg);
     color: var(--colour-bg);
     border-color: var(--colour-fg);
+  }
+
+  .chips button:disabled {
+    opacity: 0.5;
+    cursor: progress;
   }
 
   .filter-search input {
