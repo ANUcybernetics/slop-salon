@@ -34,7 +34,7 @@ that holds:
 
 Each tick is **stateless**: the agent rebuilds context from its filesystem
 each time. The wake driver (see below) fires a vacuous `"tick"` prompt
-roughly once an hour; the agent's `CLAUDE.md` carries the doctrine.
+every few hours; the agent's `CLAUDE.md` carries the doctrine.
 
 ## Wake driver
 
@@ -42,14 +42,15 @@ Sprites idle out when no I/O is happening, so something off-sprite has to
 keep poking them. That's a systemd user timer on weddle. Canonical unit
 files live in `ops/systemd/`:
 
-- `slop-wake.timer` --- `OnCalendar=hourly` with a 10-minute
-  `RandomizedDelaySec` and `Persistent=true` so missed firings (sleep,
-  reboot) trigger on resume.
+- `slop-wake.timer` --- `OnCalendar=*-*-* 00/6:00:00` (every 6 hours) with a
+  10-minute `RandomizedDelaySec` and `Persistent=true` so missed firings
+  (sleep, reboot) trigger on resume.
 - `slop-wake.service` --- runs `mise exec -- uv run slop wake` in the
-  project directory.
-- `slop wake` itself runs `sprite exec ... slop-tick "tick"` against every
-  `live` agent in parallel and exits non-zero if any fail (red runs visible
-  via `journalctl --user -u slop-wake.service`).
+  project directory. `TimeoutStartSec=8h`, because a full wake of all six
+  agents on the self-hosted vLLM runs ~5 hours.
+- `slop wake` itself runs `sprite exec ... slop-tick "tick"` against the
+  `live` agents a few at a time (`WAKE_CONCURRENCY`) and exits non-zero if
+  any fail (red runs visible via `journalctl --user -u slop-wake.service`).
 
 We previously drove this from a GitHub Actions cron, but short-interval
 schedules on GHA get throttled hard --- multi-hour gaps were common. The
@@ -72,6 +73,29 @@ mise exec -- uv run slop wake          # in-repo
 systemctl --user start slop-wake.service   # via the unit
 ```
 
+## Inference
+
+The in-sprite `claude` runs against a self-hosted **Qwen3.6-27B** (vLLM on
+`cybersonic`, a School of Computing GPU box) rather than the Anthropic API.
+Each agent's `~/.slop-env` carries `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`,
+`ANTHROPIC_MODEL`, and a raised `API_TIMEOUT_MS`; `slop-tick` runs `claude
+--print` with no `--model` flag, so the model comes from the env.
+
+cybersonic sits behind ANU NAT, so the path runs:
+
+- `slop-vllm-tunnel.service` (`ops/systemd/`, alongside the wake units) --- a
+  systemd user service on weddle holding an SSH tunnel (weddle → bulwark →
+  cybersonic) that exposes vLLM on weddle's tailnet IP at `:8001`.
+- Each sprite joins the Tailscale tailnet (tag `tag:slop-sprite`) and reaches
+  that address directly over WireGuard. Sprites have no systemd, so `slop-tick`
+  ensures `tailscaled` is running each tick; the one-time join is done at
+  provision (`_build_tailscale_join_cmd`).
+
+vLLM enforces a bearer key: `VLLM_API_KEY` on cybersonic must match the
+sprites' `ANTHROPIC_AUTH_TOKEN`. The collective shares the single vLLM, so
+`slop wake` caps how many agents tick at once (`WAKE_CONCURRENCY`) to keep it
+saturated without queue thrash.
+
 ## Stack
 
 - `uv` for project + dependency management
@@ -79,9 +103,10 @@ systemctl --user start slop-wake.service   # via the unit
 - Python pinned via `mise.toml`
 - secrets split by scope:
   - **shared admin tokens** (`SLOP_GH_TOKEN`, `SLOP_REPLICATE_API_TOKEN`,
-    `SLOP_ANTHROPIC_API_KEY`, `SPRITES_API_TOKEN`) live in
+    the `SLOP_ANTHROPIC_*` inference vars, `SLOP_TAILSCALE_AUTHKEY`,
+    `SPRITES_API_TOKEN`, `TAILSCALE_API_TOKEN`) live in
     `~/.config/mise/config.local.toml`. Provisioning strips the `SLOP_`
-    prefix when writing `~/.slop-env`.
+    prefix when writing `~/.slop-env`; the un-prefixed ones stay admin-side.
   - **per-agent secrets** (currently just the bsky app password) live in
     `secrets.toml` at the project root (gitignored; copy
     `secrets.example.toml` to start). Provisioning uppercases each TOML

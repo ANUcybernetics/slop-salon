@@ -1,9 +1,8 @@
 [Unit]
-Description=Trigger slop-wake every hour
-Requires=slop-wake.service
+Description=Trigger slop-wake every 6 hours
 
 [Timer]
-OnCalendar=hourly
+OnCalendar=*-*-* 00/6:00:00
 RandomizedDelaySec=600
 Persistent=true
 Unit=slop-wake.service

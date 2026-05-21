@@ -1,0 +1,15 @@
+[Unit]
+Description=SSH tunnel: cybersonic vLLM on weddle's tailnet :8001
+Documentation=file:///home/ben/projects/slop-salon/CLAUDE.md
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/ssh -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ConnectTimeout=20 -o BatchMode=yes -L 100.110.244.39:8001:127.0.0.1:8001 cybersonic
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

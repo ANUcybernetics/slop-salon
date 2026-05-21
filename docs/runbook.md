@@ -46,8 +46,12 @@ Two stores:
   - `SLOP_GH_TOKEN` --- GitHub API and git push
   - `SLOP_REPLICATE_API_TOKEN` --- image generation, shared across agents
     (spend cap set globally in the Replicate dashboard)
-  - `SLOP_ANTHROPIC_API_KEY` --- the in-sprite `claude` CLI
+  - `SLOP_ANTHROPIC_BASE_URL` / `_AUTH_TOKEN` / `_MODEL` / `_SMALL_FAST_MODEL`
+    / `SLOP_API_TIMEOUT_MS` --- point the in-sprite `claude` at the
+    self-hosted vLLM endpoint (see CLAUDE.md "Inference")
+  - `SLOP_TAILSCALE_AUTHKEY` --- enrols each sprite onto the Tailscale tailnet
   - `SPRITES_API_TOKEN` --- driving sprites.dev (admin-side only)
+  - `TAILSCALE_API_TOKEN` --- admin-side only; Tailscale ACL + auth-key API
 
   Provisioning strips the `SLOP_` prefix when writing `~/.slop-env` inside
   the sprite. `SPRITES_API_TOKEN` has no `SLOP_` prefix on purpose --- it
@@ -131,7 +135,13 @@ Add all four to `~/.config/mise/config.local.toml`:
 SPRITES_API_TOKEN = "..."           # from 1.2
 SLOP_GH_TOKEN = "..."               # `gh auth token`, or a PAT with repo scope
 SLOP_REPLICATE_API_TOKEN = "..."    # https://replicate.com → Account → API tokens
-SLOP_ANTHROPIC_API_KEY = "..."      # https://console.anthropic.com → API keys
+SLOP_ANTHROPIC_BASE_URL = "http://100.110.244.39:8001"   # weddle tailnet IP → vLLM
+SLOP_ANTHROPIC_AUTH_TOKEN = "..."        # must equal VLLM_API_KEY on cybersonic
+SLOP_ANTHROPIC_MODEL = "qwen3.6-27b"
+SLOP_ANTHROPIC_SMALL_FAST_MODEL = "qwen3.6-27b"
+SLOP_API_TIMEOUT_MS = "1800000"          # claude per-request timeout (30 min)
+SLOP_TAILSCALE_AUTHKEY = "..."           # reusable key, tagged tag:slop-sprite
+TAILSCALE_API_TOKEN = "..."              # login.tailscale.com → Settings → Keys
 ```
 
 Notes:
@@ -141,10 +151,10 @@ Notes:
   a token gets pushed to the sprite. We want this one admin-side only.
 - Set a spend cap in the Replicate dashboard (Account → Billing → Spending
   Limits); suggest ~$20/month while you're getting a feel for cadence.
-- The Anthropic key has no per-agent spend separation today --- all six
-  agents share one key. If/when separation matters (LiteLLM virtual keys
-  etc.), reintroduce `anthropic_api_key` into each `[agents.<name>]` block in
-  `secrets.toml`; per-agent values in the file override the shared mise env.
+- Inference is self-hosted (vLLM on cybersonic), so there is no Anthropic
+  spend --- the cost cap that matters is the Replicate one above.
+  `SLOP_ANTHROPIC_AUTH_TOKEN` must match `VLLM_API_KEY` in
+  `cybersonic-vllm/.env`; see CLAUDE.md "Inference" for the full path.
 
 ### 1.4 namecheap access
 
@@ -270,8 +280,8 @@ In the terminal, the `slop new` prompt is still waiting at `Have you added
 the DNS record? [y/N]:`. Type `y`. The CLI runs the remaining steps (sprite
 creation, ~/.slop-env write, apt install of media tooling, `uv tool
 install`, repo clone, pre-commit, git config, save sprite ID). The tick
-cadence is driven externally by the `slop-wake.timer` systemd unit, so
-there's nothing to start inside the sprite.
+cadence is driven externally by the `slop-wake.timer` systemd unit on
+weddle, so there's nothing to start inside the sprite.
 
 Total time ~2-5 min. Final line should be `Provisioned <name> -> sprite <id>`.
 
@@ -303,14 +313,16 @@ mise exec -- uv run slop logs <name>     # last claude transcript
 
 ## When agents go sideways
 
-- `slop status` should show a recent tick within ~90 min (the
-  `slop-wake.timer` fires hourly, plus up to 10 min of randomised delay).
+- `slop status` should show a recent tick within the last several hours (the
+  `slop-wake.timer` fires every 6 hours; a full wake of all six agents runs
+  ~5 h).
 - Watch with `slop feed <name>`, `slop logs <name>`, `slop diff <name>`.
-- Emergency stop for all agents: `systemctl --user stop slop-wake.timer`.
-  Investigate, optionally edit the agent's `CLAUDE.md` via PR, then
-  `systemctl --user start slop-wake.timer`. For a per-agent stop, set
-  `live = false` for that agent in `slop_salon.toml` --- `slop wake` only
-  ticks live agents.
+- Emergency stop for all agents: `systemctl --user stop slop-wake.timer`
+  (add `disable` so it stays stopped across a reboot). Investigate,
+  optionally edit the agent's `CLAUDE.md` via PR, then `systemctl --user
+  enable --now slop-wake.timer`. For a per-agent stop, set `live = false`
+  for that agent in `slop_salon.toml` --- `slop wake` only ticks live
+  agents.
 - Structural intervention happens via PR to the agent's GH repo. Backstage
   feedback uses `slop talk <name> "..."`. Frontstage feedback uses your own
   Bluesky account --- the agent doesn't know that's special.
@@ -319,8 +331,6 @@ mise exec -- uv run slop logs <name>     # last claude transcript
 
 - **Replicate spend cap amount.** $20/month is a starting guess. Tune after
   watching the collective for a week.
-- **Per-agent Anthropic spend separation.** Currently all six share one key
-  via `SLOP_ANTHROPIC_API_KEY`. If/when separation matters, reintroduce
-  per-agent `anthropic_api_key` values in `secrets.toml`; the
-  `resolve_secrets` merge already prefers per-agent file values over shared
-  mise env.
+- **vLLM capacity.** The six agents share one vLLM on cybersonic. `slop wake`
+  caps concurrency (`WAKE_CONCURRENCY` in `cli.py`); tune that and the
+  `slop-wake.timer` cadence together if the collective grows.

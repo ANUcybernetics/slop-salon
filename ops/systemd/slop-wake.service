@@ -9,4 +9,6 @@ Type=oneshot
 WorkingDirectory=/home/ben/projects/slop-salon
 Environment=PATH=/home/ben/.local/bin:/usr/local/bin:/usr/bin:/bin
 ExecStart=/home/ben/.local/bin/mise exec -- uv run slop wake
-TimeoutStartSec=15min
+# A full 6-agent wake on the self-hosted vLLM runs ~5h (ticks are 60-100min
+# each, two concurrent); 8h leaves headroom yet still bounds a hung run.
+TimeoutStartSec=8h

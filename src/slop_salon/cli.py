@@ -198,16 +198,22 @@ def talk(
         raise typer.Exit(code=result.exit_code)
 
 
+# How many agents tick concurrently in `wake`. The collective shares one
+# vLLM instance; capping concurrency keeps it saturated without queue thrash.
+# Raise toward saturation, lower for more headroom.
+WAKE_CONCURRENCY = 2
+
+
 @app.command()
 def wake(
     config_path: str = typer.Option(None, "--config"),
 ):
-    """Fire a `tick` at every live agent in parallel.
+    """Fire a `tick` at every live agent, a few at a time.
 
     Driven by the `slop-wake.timer` systemd user unit on the admin box.
-    Each agent gets its own thread, runs `sprite exec ... slop-tick "tick"`,
-    and contributes one status line. Exits non-zero if any agent failed,
-    so systemd records a red run.
+    Ticks run `sprite exec ... slop-tick "tick"`; concurrency is capped at
+    WAKE_CONCURRENCY so the shared vLLM is saturated but not thrashed.
+    Exits non-zero if any agent failed, so systemd records a red run.
     """
     config = _config(config_path)
     live = [a for a in config.agents.values() if a.live and a.sprite_id]
@@ -226,7 +232,7 @@ def wake(
         return agent, result, time.monotonic() - start
 
     failed = 0
-    with ThreadPoolExecutor(max_workers=len(live)) as pool:
+    with ThreadPoolExecutor(max_workers=min(WAKE_CONCURRENCY, len(live))) as pool:
         for agent, result, elapsed in pool.map(_tick, live):
             status = "ok" if result.exit_code == 0 else f"fail({result.exit_code})"
             typer.echo(f"{agent.name:12s}  {status:12s}  {elapsed:6.1f}s")

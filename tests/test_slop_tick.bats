@@ -26,12 +26,19 @@ EOF
     REAL_GIT="$(command -v git)"
     cat > "$STUB_DIR/git" <<EOF
 #!/usr/bin/env bash
-if [[ "\$1" == "push" ]]; then
+if [[ "\$1" == "push" || "\$1" == "pull" ]]; then
     exit 0
 fi
 exec "$REAL_GIT" "\$@"
 EOF
     chmod +x "$STUB_DIR/git"
+
+    # Stub pgrep so slop-tick's tailscaled-ensure check no-ops in the test.
+    cat > "$STUB_DIR/pgrep" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+    chmod +x "$STUB_DIR/pgrep"
 
     export PATH="$STUB_DIR:$PATH"
     export HOME="$TEST_HOME"

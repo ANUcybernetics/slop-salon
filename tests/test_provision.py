@@ -178,6 +178,18 @@ def test_write_env_file_cmd_encodes_safely_and_chmods_600():
     assert "'quote'" in decoded or "quote" in decoded
 
 
+def test_tailscale_join_cmd_installs_and_joins():
+    from slop_salon.provision import _build_tailscale_join_cmd
+
+    cmd = _build_tailscale_join_cmd("lou")
+    assert "pkgs.tailscale.com" in cmd
+    assert "tailscaled" in cmd
+    assert 'tailscale up --authkey="$TAILSCALE_AUTHKEY"' in cmd
+    assert "--hostname=slop-lou" in cmd
+    # The auth key is read from ~/.slop-env, not embedded in the command.
+    assert "source ~/.slop-env" in cmd
+
+
 def test_build_template_files_interpolates_placeholders(tmp_path):
     from slop_salon.provision import _build_template_files
 

@@ -27,6 +27,14 @@ if [[ $# -lt 1 ]]; then
   exit 1
 fi
 
+# No systemd in the sprite: make sure tailscaled is up before the tick (the
+# tailnet join is done once at provision; node state in /var/lib persists).
+if ! pgrep -x tailscaled >/dev/null 2>&1; then
+  sudo install -d -m 755 /var/run/tailscale /var/lib/tailscale
+  sudo bash -c 'setsid tailscaled --state=/var/lib/tailscale/tailscaled.state --socket=/var/run/tailscale/tailscaled.sock >/var/log/tailscaled.log 2>&1 </dev/null &'
+  sleep 5
+fi
+
 cd "$HOME/slop-salon-$AGENT_NAME"
 
 # Pick up any admin-side edits to the repo (CLAUDE.md, SOUL.md, etc).
@@ -34,7 +42,8 @@ cd "$HOME/slop-salon-$AGENT_NAME"
 # the tick loudly; the admin can intervene per "When things go wrong".
 git pull --rebase --autostash
 
-claude --model sonnet --print "$1"
+# Model and API endpoint come from the ANTHROPIC_* vars in ~/.slop-env.
+claude --print "$1"
 
 if ! git diff --quiet HEAD || [[ -n "$(git ls-files --others --exclude-standard)" ]]; then
   git add -A

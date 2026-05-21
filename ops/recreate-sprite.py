@@ -29,6 +29,7 @@ from slop_salon.provision import (  # noqa: E402
     _build_clone_and_symlink_cmd,
     _build_git_config_cmd,
     _build_pre_commit_install_cmd,
+    _build_tailscale_join_cmd,
     _build_uv_and_slop_install_cmd,
     _build_write_env_file_cmd,
     resolve_secrets,
@@ -43,7 +44,9 @@ def recreate(name: str, config_path: str = "slop_salon.toml") -> None:
     agent = config.agents[name]
 
     env = resolve_secrets(name, list(config.agents.keys()))
-    missing = [k for k in ("GH_TOKEN", "ANTHROPIC_API_KEY") if not env.get(k)]
+    missing = [
+        k for k in ("GH_TOKEN", "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN") if not env.get(k)
+    ]
     if missing:
         raise SystemExit(
             f"missing {missing} in resolved env; check "
@@ -54,10 +57,10 @@ def recreate(name: str, config_path: str = "slop_salon.toml") -> None:
 
     sprites = SpritesClient()
 
-    print(f"[1/8] Destroying old sprite {name!r}")
+    print(f"[1/9] Destroying old sprite {name!r}")
     subprocess.run(["sprite", "destroy", "-s", name, "--force"], check=True)
 
-    print(f"[2/8] Creating fresh sprite {name!r}")
+    print(f"[2/9] Creating fresh sprite {name!r}")
     sprites.create_sprite(name=name)
     # sprites.dev sometimes 404s the first exec immediately after create.
     time.sleep(3)
@@ -72,23 +75,26 @@ def recreate(name: str, config_path: str = "slop_salon.toml") -> None:
                 f"STDERR: {result.stderr[-2000:]}"
             )
 
-    print("[3/8] Writing ~/.slop-env (secrets + AGENT_NAME)")
+    print("[3/9] Writing ~/.slop-env (secrets + AGENT_NAME)")
     _exec("write env", _build_write_env_file_cmd({"AGENT_NAME": name, **env}))
 
-    print("[4/8] Apt install (imagemagick, ffmpeg, sox)")
+    print("[4/9] Installing Tailscale and joining the tailnet")
+    _exec("tailscale", _build_tailscale_join_cmd(name))
+
+    print("[5/9] Apt install (imagemagick, ffmpeg, sox)")
     _exec("apt", _build_apt_install_cmd())
 
-    print("[5/8] uv tool install slop-salon")
+    print("[6/9] uv tool install slop-salon")
     _exec("uv install", _build_uv_and_slop_install_cmd())
 
-    print("[6/8] Cloning agent repo from GH (preserves drift)")
+    print("[7/9] Cloning agent repo from GH (preserves drift)")
     repo_url = f"https://{gh_token}@github.com/{agent.github_repo}.git"
     _exec("clone", _build_clone_and_symlink_cmd(name, repo_url))
 
-    print("[7/8] pre-commit install")
+    print("[8/9] pre-commit install")
     _exec("pre-commit", _build_pre_commit_install_cmd(name))
 
-    print("[8/8] git config")
+    print("[9/9] git config")
     _exec("git config", _build_git_config_cmd(name, gh_token))
 
     print(f"\nDone --- {name} ready. Smoke-test with:")
