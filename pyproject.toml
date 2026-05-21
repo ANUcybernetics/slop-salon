@@ -19,6 +19,7 @@ slop = "slop_salon.cli:app"
 # Agent-side tools (installed in each sprite)
 bsky = "slop_salon.tools.bsky:app"
 replicate = "slop_salon.tools.replicate_run:app"
+slop-usage = "slop_salon.tools.usage:app"
 
 [dependency-groups]
 dev = [

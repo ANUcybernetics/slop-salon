@@ -8,6 +8,7 @@ Subcommands:
     drift          template vs. live-repo divergence per agent
     talk           one-shot stateless prompt to an agent
     wake           fire a tick at every live agent in parallel
+    usage          per-tick token and cost tally across live agents
     new            provision a new agent (see provision.py)
     sync-siblings  backfill missing sibling entries in live SIBLINGS.md
 """
@@ -15,6 +16,7 @@ Subcommands:
 from __future__ import annotations
 
 import difflib
+import json
 import os
 import re
 import shlex
@@ -23,6 +25,7 @@ import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from statistics import mean, median
 
 import httpx
 import typer
@@ -236,6 +239,162 @@ def wake(
         raise typer.Exit(code=1)
 
 
+SINCE_UNITS = {
+    "min": 60,
+    "mins": 60,
+    "minute": 60,
+    "minutes": 60,
+    "hour": 3600,
+    "hours": 3600,
+    "day": 86400,
+    "days": 86400,
+    "week": 604800,
+    "weeks": 604800,
+}
+
+
+def _parse_since(s: str | None) -> float | None:
+    """`6.hours` / `1.day` → unix-timestamp cutoff. None or empty → no filter."""
+    if not s:
+        return None
+    if "." not in s:
+        raise typer.BadParameter(f"--since must be <number>.<unit>, got {s!r}")
+    num_str, unit = s.split(".", 1)
+    try:
+        n = float(num_str)
+    except ValueError as e:
+        raise typer.BadParameter(f"--since: not a number: {num_str!r}") from e
+    if unit not in SINCE_UNITS:
+        raise typer.BadParameter(f"--since: unknown unit {unit!r} (try hours, days)")
+    return time.time() - n * SINCE_UNITS[unit]
+
+
+@app.command()
+def usage(
+    name: str = typer.Argument(None, help="Agent name (omit for all live)"),
+    since: str = typer.Option(None, "--since", help="Window e.g. '6.hours', '1.day', '7.days'"),
+    per_tick: bool = typer.Option(False, "--per-tick", help="One row per session, no aggregation"),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON instead of a table"),
+    config_path: str = typer.Option(None, "--config"),
+):
+    """Per-tick token usage and approximate cost across live agents.
+
+    Fans out to each live sprite, runs `slop-usage tally <name>` in-sprite to
+    read its Claude Code session transcripts, and aggregates the results.
+    Costs are approximate Sonnet pricing as of 2026-05; see
+    `slop_salon.tools.usage` for the constants.
+    """
+    config = _config(config_path)
+    if name:
+        if name not in config.agents:
+            typer.echo(f"error: unknown agent {name!r}", err=True)
+            raise typer.Exit(code=1)
+        targets = [config.agents[name]]
+    else:
+        targets = [a for a in config.agents.values() if a.live and a.sprite_id]
+    if not targets:
+        typer.echo("no live agents", err=True)
+        raise typer.Exit(code=1)
+
+    cutoff = _parse_since(since)
+    sprites = SpritesClient()
+
+    def _fetch(agent):
+        cmd = f"slop-usage tally {shlex.quote(agent.name)}"
+        result = sprites.exec(agent.sprite_id, ["bash", "-lc", cmd])
+        if result.exit_code != 0:
+            return agent, [], (result.stderr or result.stdout or "").strip()
+        rows = []
+        for line in result.stdout.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rows.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+        if cutoff is not None:
+            rows = [r for r in rows if r.get("mtime", 0) >= cutoff]
+        return agent, rows, None
+
+    with ThreadPoolExecutor(max_workers=len(targets)) as pool:
+        results = list(pool.map(_fetch, targets))
+
+    if per_tick:
+        for agent, rows, err in results:
+            if err:
+                typer.echo(f"{agent.name}: ERROR {err[:80]}", err=True)
+                continue
+            for r in rows:
+                if json_out:
+                    typer.echo(json.dumps(r))
+                else:
+                    typer.echo(
+                        f"{agent.name:<8} {r['session']:<10} turns={r['turns']:<3} "
+                        f"in_new={r['in_new']:>6} cache_cr={r['cache_create']:>7} "
+                        f"cache_rd={r['cache_read']:>8} out={r['output']:>6} "
+                        f"${r['cost_usd']:.3f}"
+                    )
+        return
+
+    if json_out:
+        out = []
+        for agent, rows, err in results:
+            non_empty = [r for r in rows if r["turns"] > 0]
+            entry = {
+                "agent": agent.name,
+                "ticks": len(non_empty),
+                "empty": len(rows) - len(non_empty),
+            }
+            if err:
+                entry["error"] = err
+            elif non_empty:
+                costs = sorted(r["cost_usd"] for r in non_empty)
+                entry.update(
+                    {
+                        "median_cost_usd": round(median(costs), 4),
+                        "mean_cost_usd": round(mean(costs), 4),
+                        "max_cost_usd": round(max(costs), 4),
+                        "total_cost_usd": round(sum(costs), 2),
+                        "median_turns": int(median(r["turns"] for r in non_empty)),
+                        "median_output_tokens": int(median(r["output"] for r in non_empty)),
+                    }
+                )
+            out.append(entry)
+        typer.echo(json.dumps(out, indent=2))
+        return
+
+    typer.echo(
+        f"{'agent':<8}{'ticks':>6}{'empty':>6}  {'turns':>5}  {'output':>8}  "
+        f"{'med $/tick':>12}  {'p95 $/tick':>12}  {'total $':>10}"
+    )
+    typer.echo("-" * 76)
+    grand_total = 0.0
+    for agent, rows, err in results:
+        if err:
+            typer.echo(f"{agent.name:<8}  ERROR: {err[:60]}")
+            continue
+        non_empty = [r for r in rows if r["turns"] > 0]
+        empty = len(rows) - len(non_empty)
+        if not non_empty:
+            typer.echo(f"{agent.name:<8}{0:>6}{empty:>6}  (no ticks in window)")
+            continue
+        costs = sorted(r["cost_usd"] for r in non_empty)
+        med = costs[len(costs) // 2]
+        p95 = costs[int(0.95 * (len(costs) - 1))]
+        total = sum(costs)
+        grand_total += total
+        med_turns = sorted(r["turns"] for r in non_empty)[len(non_empty) // 2]
+        med_out = sorted(r["output"] for r in non_empty)[len(non_empty) // 2]
+        typer.echo(
+            f"{agent.name:<8}{len(non_empty):>6}{empty:>6}  {med_turns:>5}  "
+            f"{med_out:>8}  ${med:>10.3f}  ${p95:>10.3f}  ${total:>8.2f}"
+        )
+    typer.echo(
+        f"{'total':<8}{'':>6}{'':>6}  {'':>5}  {'':>8}  {'':>12}  {'':>12}  ${grand_total:>8.2f}"
+    )
+
+
 DRIFT_DEFAULT_FILES = ("SOUL.md", "CLAUDE.md", "ABOUT.md", "slop-tick")
 
 
@@ -282,9 +441,7 @@ def drift(
     for i, agent in enumerate(targets):
         if i:
             typer.echo("")
-        siblings = [
-            (s, config.agents[s].handle) for s in agent.siblings if s in config.agents
-        ]
+        siblings = [(s, config.agents[s].handle) for s in agent.siblings if s in config.agents]
         expected = _build_template_files(
             Path(templates_dir),
             Path(soul_path),
@@ -381,9 +538,7 @@ def sync_siblings(
     push_env = {**os.environ, "GH_TOKEN": gh_token}
 
     for agent in targets:
-        sibling_handles = {
-            s: config.agents[s].handle for s in agent.siblings if s in config.agents
-        }
+        sibling_handles = {s: config.agents[s].handle for s in agent.siblings if s in config.agents}
         with tempfile.TemporaryDirectory() as tmp:
             clone_dir = Path(tmp) / "repo"
             subprocess.run(
@@ -401,18 +556,14 @@ def sync_siblings(
                 typer.echo(f"{agent.name:12s}  clean")
                 continue
 
-            new_blocks = "\n\n".join(
-                _render_sibling_block(s, sibling_handles[s]) for s in missing
-            )
+            new_blocks = "\n\n".join(_render_sibling_block(s, sibling_handles[s]) for s in missing)
             if current.strip():
                 new_content = current.rstrip() + "\n\n" + new_blocks + "\n"
             else:
                 new_content = (
                     "# Siblings\n\n"
                     "The other artists in the Slop Salon. "
-                    "Your accumulated observations go below.\n\n"
-                    + new_blocks
-                    + "\n"
+                    "Your accumulated observations go below.\n\n" + new_blocks + "\n"
                 )
 
             if dry_run:

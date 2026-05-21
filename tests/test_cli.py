@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -81,16 +82,12 @@ def test_diff_runs_git_in_sprite(fake_config):
 def test_feed_all_agents(fake_config, httpx_mock):
     httpx_mock.add_response(
         json={
-            "feed": [
-                {"post": {"record": {"text": "lou post", "createdAt": "2026-04-30T10:00Z"}}}
-            ]
+            "feed": [{"post": {"record": {"text": "lou post", "createdAt": "2026-04-30T10:00Z"}}}]
         }
     )
     httpx_mock.add_response(
         json={
-            "feed": [
-                {"post": {"record": {"text": "other post", "createdAt": "2026-04-30T11:00Z"}}}
-            ]
+            "feed": [{"post": {"record": {"text": "other post", "createdAt": "2026-04-30T11:00Z"}}}]
         }
     )
 
@@ -110,9 +107,7 @@ def test_feed_all_agents(fake_config, httpx_mock):
 def test_feed_single_agent(fake_config, httpx_mock):
     httpx_mock.add_response(
         json={
-            "feed": [
-                {"post": {"record": {"text": "lou's post", "createdAt": "2026-04-30T10:00Z"}}}
-            ]
+            "feed": [{"post": {"record": {"text": "lou's post", "createdAt": "2026-04-30T10:00Z"}}}]
         }
     )
 
@@ -235,6 +230,217 @@ def test_drift_handles_missing_repo_gracefully(fake_config, tmp_path):
         # other should still get processed after lou fails
         assert "other" in result.output
         assert "clean" in result.output
+
+
+@pytest.fixture
+def fake_config_live(tmp_path, monkeypatch):
+    cfg = tmp_path / "slop_salon.toml"
+    cfg.write_text(
+        """
+[agents.lou]
+handle = "lou.slopsalon.art"
+github_repo = "ANUcybernetics/slop-salon-lou"
+sprite_id = "spr_lou"
+siblings = ["mina"]
+live = true
+
+[agents.mina]
+handle = "mina.slopsalon.art"
+github_repo = "ANUcybernetics/slop-salon-mina"
+sprite_id = "spr_mina"
+siblings = ["lou"]
+live = true
+"""
+    )
+    monkeypatch.chdir(tmp_path)
+    return cfg
+
+
+def _usage_line(agent: str, session: str, mtime: int, **kwargs) -> str:
+    """Build one fake `slop-usage tally` JSONL line for the sprite-exec stub."""
+    base = {
+        "agent": agent,
+        "session": session,
+        "mtime": mtime,
+        "in_new": 50,
+        "cache_create": 90_000,
+        "cache_read": 900_000,
+        "output": 9_000,
+        "turns": 30,
+        "cost_usd": 0.78,
+    }
+    base.update(kwargs)
+    return json.dumps(base)
+
+
+def test_usage_aggregates_across_live_agents(fake_config_live):
+    import json as _json
+    import time as _time
+
+    now = int(_time.time())
+    sprite_outputs = {
+        "spr_lou": "\n".join(
+            [
+                _usage_line("lou", "aaaa0001", now - 7200, cost_usd=0.80),
+                _usage_line("lou", "aaaa0002", now - 3600, cost_usd=0.85),
+                _usage_line("lou", "aaaa0003", now - 600, cost_usd=0.90),
+            ]
+        ),
+        "spr_mina": "\n".join(
+            [
+                _usage_line("mina", "bbbb0001", now - 7200, cost_usd=0.70),
+                _usage_line("mina", "bbbb0002", now - 600, cost_usd=0.75),
+            ]
+        ),
+    }
+
+    def fake_exec(sprite_id, _cmd):
+        return MagicMock(stdout=sprite_outputs[sprite_id], stderr="", exit_code=0)
+
+    with patch("slop_salon.cli.SpritesClient") as mock_class:
+        instance = MagicMock()
+        instance.exec.side_effect = fake_exec
+        mock_class.return_value = instance
+
+        from slop_salon.cli import app as _app  # local import to ensure json import side-effects
+
+        result = runner.invoke(_app, ["usage"])
+
+        assert result.exit_code == 0, result.output
+        # Header + per-agent rows + total
+        assert "agent" in result.output
+        assert "lou" in result.output
+        assert "mina" in result.output
+        # Per-agent totals: lou 0.80+0.85+0.90 = 2.55, mina 0.70+0.75 = 1.45, grand 4.00
+        assert "$    2.55" in result.output
+        assert "$    1.45" in result.output
+        assert "total" in result.output
+        assert "$    4.00" in result.output
+        _ = _json  # silence unused
+
+
+def test_usage_single_agent(fake_config_live):
+    with patch("slop_salon.cli.SpritesClient") as mock_class:
+        instance = MagicMock()
+        instance.exec.return_value = MagicMock(
+            stdout=_usage_line("lou", "abcd0001", 1_700_000_000, cost_usd=0.50),
+            stderr="",
+            exit_code=0,
+        )
+        mock_class.return_value = instance
+
+        result = runner.invoke(app, ["usage", "lou"])
+
+        assert result.exit_code == 0, result.output
+        assert "lou" in result.output
+        assert "mina" not in result.output
+        # Only one sprite-exec call (the named agent)
+        assert instance.exec.call_count == 1
+        assert instance.exec.call_args[0][0] == "spr_lou"
+
+
+def test_usage_since_filters_by_mtime(fake_config_live):
+    import time as _time
+
+    now = int(_time.time())
+    # Three sessions: 3 hours ago, 30 min ago, 5 min ago
+    stdout = "\n".join(
+        [
+            _usage_line("lou", "old00001", now - 10800),
+            _usage_line("lou", "mid00001", now - 1800),
+            _usage_line("lou", "new00001", now - 300),
+        ]
+    )
+
+    with patch("slop_salon.cli.SpritesClient") as mock_class:
+        instance = MagicMock()
+        instance.exec.return_value = MagicMock(stdout=stdout, stderr="", exit_code=0)
+        mock_class.return_value = instance
+
+        result = runner.invoke(app, ["usage", "lou", "--since", "1.hour", "--per-tick"])
+
+        assert result.exit_code == 0, result.output
+        # Old session should be filtered out by --since 1.hour
+        assert "old00001" not in result.output
+        assert "mid00001" in result.output
+        assert "new00001" in result.output
+
+
+def test_usage_per_tick_shows_each_session(fake_config_live):
+    stdout = "\n".join(
+        [
+            _usage_line("lou", "sess0001", 1_700_000_000, turns=10, output=500),
+            _usage_line("lou", "sess0002", 1_700_000_100, turns=20, output=1000),
+        ]
+    )
+
+    with patch("slop_salon.cli.SpritesClient") as mock_class:
+        instance = MagicMock()
+        instance.exec.return_value = MagicMock(stdout=stdout, stderr="", exit_code=0)
+        mock_class.return_value = instance
+
+        result = runner.invoke(app, ["usage", "lou", "--per-tick"])
+
+        assert result.exit_code == 0, result.output
+        assert "sess0001" in result.output
+        assert "sess0002" in result.output
+        assert "turns=10" in result.output
+        assert "turns=20" in result.output
+
+
+def test_usage_json_output(fake_config_live):
+    stdout = "\n".join(
+        [
+            _usage_line("lou", "sess0001", 1_700_000_000, cost_usd=0.5),
+            _usage_line("lou", "sess0002", 1_700_000_100, cost_usd=1.0),
+        ]
+    )
+
+    with patch("slop_salon.cli.SpritesClient") as mock_class:
+        instance = MagicMock()
+        instance.exec.return_value = MagicMock(stdout=stdout, stderr="", exit_code=0)
+        mock_class.return_value = instance
+
+        result = runner.invoke(app, ["usage", "lou", "--json"])
+
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        assert isinstance(data, list)
+        assert len(data) == 1
+        entry = data[0]
+        assert entry["agent"] == "lou"
+        assert entry["ticks"] == 2
+        assert entry["total_cost_usd"] == 1.5
+        assert entry["max_cost_usd"] == 1.0
+        # statistics.median of 2 values averages them
+        assert entry["median_cost_usd"] == 0.75
+
+
+def test_usage_reports_sprite_errors(fake_config_live):
+    with patch("slop_salon.cli.SpritesClient") as mock_class:
+        instance = MagicMock()
+        instance.exec.return_value = MagicMock(
+            stdout="", stderr="slop-usage: command not found", exit_code=127
+        )
+        mock_class.return_value = instance
+
+        result = runner.invoke(app, ["usage", "lou"])
+
+        assert result.exit_code == 0, result.output
+        assert "ERROR" in result.output
+        assert "command not found" in result.output
+
+
+def test_usage_rejects_unknown_agent(fake_config_live):
+    result = runner.invoke(app, ["usage", "ghost"])
+    assert result.exit_code != 0
+    assert "ghost" in result.output
+
+
+def test_usage_rejects_malformed_since(fake_config_live):
+    with patch("slop_salon.cli.SpritesClient"):
+        result = runner.invoke(app, ["usage", "lou", "--since", "yesterday"])
+        assert result.exit_code != 0
 
 
 def test_new_invokes_provisioning(fake_config):
