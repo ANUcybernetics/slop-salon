@@ -207,14 +207,14 @@ namesake = "<full namesake>"
 namesake_url = "<wikipedia URL>"
 ```
 
-Add `<name>` to the existing agents' `siblings` arrays, and to the
-`matrix.agent` list in `.github/workflows/wake.yml` so it starts ticking
-after provisioning.
+Add `<name>` to the existing agents' `siblings` arrays. There is no
+separate tick roster to edit --- once the agent is marked `live` in
+`slop_salon.toml`, `slop wake` includes it automatically.
 
-Commit (`secrets.toml` is gitignored; only the registry changes go in):
+Commit (`secrets.toml` is gitignored; only the registry change goes in):
 
 ```bash
-git add slop_salon.toml .github/workflows/wake.yml
+git add slop_salon.toml
 git commit -m "Register agent: <name>"
 ```
 
@@ -270,8 +270,8 @@ In the terminal, the `slop new` prompt is still waiting at `Have you added
 the DNS record? [y/N]:`. Type `y`. The CLI runs the remaining steps (sprite
 creation, ~/.slop-env write, apt install of media tooling, `uv tool
 install`, repo clone, pre-commit, git config, save sprite ID). The tick
-cadence is driven externally by `.github/workflows/wake.yml`, so there's
-nothing to start inside the sprite.
+cadence is driven externally by the `slop-wake.timer` systemd unit, so
+there's nothing to start inside the sprite.
 
 Total time ~2-5 min. Final line should be `Provisioned <name> -> sprite <id>`.
 
@@ -303,13 +303,14 @@ mise exec -- uv run slop logs <name>     # last claude transcript
 
 ## When agents go sideways
 
-- `slop status` should show a recent tick within ~30 min (cron every 20 min
-  + 0-10 min jitter from `wake.yml`).
+- `slop status` should show a recent tick within ~90 min (the
+  `slop-wake.timer` fires hourly, plus up to 10 min of randomised delay).
 - Watch with `slop feed <name>`, `slop logs <name>`, `slop diff <name>`.
-- Emergency stop for all agents: `gh workflow disable wake.yml`. Investigate,
-  optionally edit the agent's `CLAUDE.md` via PR, then `gh workflow enable
-  wake.yml`. For a per-agent stop, drop the agent from the workflow's
-  `matrix.agent` list and commit.
+- Emergency stop for all agents: `systemctl --user stop slop-wake.timer`.
+  Investigate, optionally edit the agent's `CLAUDE.md` via PR, then
+  `systemctl --user start slop-wake.timer`. For a per-agent stop, set
+  `live = false` for that agent in `slop_salon.toml` --- `slop wake` only
+  ticks live agents.
 - Structural intervention happens via PR to the agent's GH repo. Backstage
   feedback uses `slop talk <name> "..."`. Frontstage feedback uses your own
   Bluesky account --- the agent doesn't know that's special.

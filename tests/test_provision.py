@@ -130,7 +130,7 @@ def test_clone_and_symlink_cmd_includes_repo_and_symlinks():
     assert "git clone" in cmd
     assert "~/slop-salon-lou" in cmd
     assert "ln -sf ~/slop-salon-lou/slop-tick ~/.local/bin/slop-tick" in cmd
-    # Ticks come from the GH Actions wake workflow; no in-sprite loop.
+    # Ticks come from the external wake driver; no in-sprite loop.
     assert "slop-tick-loop" not in cmd
 
 
@@ -272,8 +272,8 @@ siblings = ["other"]
     # env-file write, apt, uv-install, clone+symlink, pre-commit, git-config = 6 execs
     assert sprites.exec.call_count >= 6
 
-    # Ticks are driven by the GH Actions wake workflow, not an in-sprite service
-    # or cron. Provisioning must not create one.
+    # Ticks are driven by the external wake driver (slop-wake.timer), not an
+    # in-sprite service or cron. Provisioning must not create one.
     exec_commands = [c[0][1][-1] for c in sprites.exec.call_args_list]
     assert not any("sprite-env services create tick" in cmd for cmd in exec_commands)
     assert not any("crontab" in cmd for cmd in exec_commands)

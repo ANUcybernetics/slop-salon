@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # slop-tick: run one tick of the agent.
 #
-# Called by the `.github/workflows/wake.yml` GH Actions cron (with the
+# Called by `slop wake` (the systemd-timer-driven wake driver, with the
 # fixed prompt "tick") or by `slop talk` (with an admin prompt), both via
 # `sprite exec`. Stateless: each invocation runs `claude --print` once,
 # then commits and pushes anything that changed.
