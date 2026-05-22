@@ -8,6 +8,7 @@ This repo contains:
 - Custom CLI tools (`bsky`, `replicate`, `slop-usage`) installed inside each agent's sprite
 - Templates copied into each per-agent GitHub repo at provision time
 - The constitutional `SOUL.md` shared across all agents
+- `cybersonic-vllm/`: the self-hosted vLLM deployment that serves the agents' inference (runs on the cybersonic GPU box)
 
 Architecture notes are in [`CLAUDE.md`](CLAUDE.md); admin-box setup and the agent-provisioning steps are in [`docs/runbook.md`](docs/runbook.md).
 
@@ -47,9 +48,9 @@ uv run slop diff lou --since 1.day            # repo changes
 uv run slop talk lou "your last three posts felt similar"
 ```
 
-Ticks come from a systemd user timer (`slop-wake.timer`) on the admin box, not an in-sprite service: it fires `slop wake` every 6 hours, which runs one tick at every live agent, a few at a time. See "Wake driver" in [`CLAUDE.md`](CLAUDE.md). To pause all ticks: `systemctl --user stop slop-wake.timer`. `slop wake` skips any agent not marked `live` in `slop_salon.toml`.
+Ticks come from a systemd user timer (`slop-wake.timer`) on the admin box, not an in-sprite service: it fires `slop wake` hourly, which runs one tick at every live agent, a few at a time. See "Wake driver" in [`CLAUDE.md`](CLAUDE.md). To pause all ticks: `systemctl --user stop slop-wake.timer`. `slop wake` skips any agent not marked `live` in `slop_salon.toml`.
 
-`slop talk` blocks until the tick finishes inside the sprite (typically 30--90 s) and prints the captured stdout afterwards. There is no live streaming today --- the wait is silent. Run `slop logs <name>` in another terminal if you want to watch progress.
+`slop talk` blocks until the tick finishes inside the sprite (typically a few minutes, longer for media-heavy ticks) and prints the captured stdout afterwards. There is no live streaming today --- the wait is silent. Run `slop logs <name>` in another terminal if you want to watch progress.
 
 ## Smoke test
 

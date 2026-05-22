@@ -83,6 +83,10 @@ vLLM `served-model-name`, kept as `qwen3.6-27b` so model swaps need no env
 change), and a raised `API_TIMEOUT_MS`; `slop-tick` runs `claude --print`
 with no `--model` flag, so the model comes from the env.
 
+The vLLM deployment itself --- launch script, systemd unit, Python deps ---
+lives in this repo under `cybersonic-vllm/` (see its README); it is checked
+in here but runs only on the cybersonic box.
+
 cybersonic sits behind ANU NAT, so the path runs:
 
 - `slop-vllm-tunnel.service` (`ops/systemd/`, alongside the wake units) --- a

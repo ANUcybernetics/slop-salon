@@ -1,0 +1,36 @@
+[Unit]
+Description=vLLM serving Qwen3.6-27B (TP=4 BF16 on cybersonic GPUs 0-3)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/users/u2548636/projects/cybersonic-vllm
+
+# mise shims provide `uv`; HF_HOME / UV_CACHE_DIR pin caches to /data,
+# matching the values mise exports interactively.
+Environment="PATH=/home/users/u2548636/.local/share/mise/shims:/home/users/u2548636/.local/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="HF_HOME=/data/u2548636/cache/huggingface"
+Environment="UV_CACHE_DIR=/data/u2548636/cache/uv"
+# vLLM workers occasionally rely on these.
+Environment="HOME=/home/users/u2548636"
+Environment="XDG_CACHE_HOME=/data/u2548636/cache"
+EnvironmentFile=-/home/users/u2548636/projects/cybersonic-vllm/.env
+
+ExecStart=/home/users/u2548636/projects/cybersonic-vllm/scripts/launch_vllm.sh
+
+# vLLM cold-start with a 27B BF16 download can take a while the first time.
+TimeoutStartSec=1800
+Restart=on-failure
+RestartSec=15s
+
+# SIGTERM lets vLLM drain in-flight requests; SIGKILL after the timeout.
+KillSignal=SIGTERM
+KillMode=mixed
+TimeoutStopSec=120
+
+StandardOutput=append:/home/users/u2548636/projects/cybersonic-vllm/logs/service.log
+StandardError=append:/home/users/u2548636/projects/cybersonic-vllm/logs/service.log
+
+[Install]
+WantedBy=default.target

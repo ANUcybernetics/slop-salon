@@ -1,0 +1,46 @@
+[project]
+name = "cybersonic-vllm"
+version = "0.1.0"
+description = "vLLM server for Qwen3.6-27B (dense, agentic coding flagship) on cybersonic's 5x RTX 3090."
+requires-python = ">=3.12,<3.13"
+dependencies = []
+
+[dependency-groups]
+# vLLM is heavy and CUDA-bound. flashinfer-jit-cache + flashinfer-cubin ship
+# precompiled CUDA kernels so flashinfer never invokes nvcc at runtime ---
+# no system CUDA toolkit required, just driver >= 580 for CUDA 13.
+#
+# flashinfer enforces that flashinfer-jit-cache version == flashinfer-python
+# version at import time. flashinfer-python is pulled in by vllm; bump this
+# pin to whatever vllm currently resolves (check with
+# `uv pip show flashinfer-python`).
+inference = [
+    "vllm>=0.20",
+    "flashinfer-jit-cache==0.6.11.post2",
+    "flashinfer-cubin",
+]
+
+[tool.uv]
+package = false
+default-groups = ["inference"]
+# Auto-pick the torch wheel (cu130 on cybersonic) based on the host driver.
+torch-backend = "auto"
+# vLLM nightly tags are prereleases; let uv resolve to one for vllm only.
+prerelease = "if-necessary"
+
+# vLLM nightlies live at wheels.vllm.ai; flashinfer JIT cache at
+# flashinfer.ai/whl/cu130. Both indexes are `explicit`, so they're consulted
+# only for the packages that opt in via [tool.uv.sources].
+[[tool.uv.index]]
+name = "vllm-nightly"
+url = "https://wheels.vllm.ai/nightly"
+explicit = true
+
+[[tool.uv.index]]
+name = "flashinfer-cu130"
+url = "https://flashinfer.ai/whl/cu130"
+explicit = true
+
+[tool.uv.sources]
+vllm = { index = "vllm-nightly" }
+flashinfer-jit-cache = { index = "flashinfer-cu130" }
