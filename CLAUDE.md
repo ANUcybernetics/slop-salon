@@ -34,7 +34,7 @@ that holds:
 
 Each tick is **stateless**: the agent rebuilds context from its filesystem
 each time. The wake driver (see below) fires a vacuous `"tick"` prompt
-every few hours; the agent's `CLAUDE.md` carries the doctrine.
+roughly hourly; the agent's `CLAUDE.md` carries the doctrine.
 
 ## Wake driver
 
@@ -42,12 +42,12 @@ Sprites idle out when no I/O is happening, so something off-sprite has to
 keep poking them. That's a systemd user timer on weddle. Canonical unit
 files live in `ops/systemd/`:
 
-- `slop-wake.timer` --- `OnCalendar=*-*-* 00/6:00:00` (every 6 hours) with a
-  10-minute `RandomizedDelaySec` and `Persistent=true` so missed firings
+- `slop-wake.timer` --- `OnCalendar=*-*-* *:00:00` (hourly) with a
+  5-minute `RandomizedDelaySec` and `Persistent=true` so missed firings
   (sleep, reboot) trigger on resume.
 - `slop-wake.service` --- runs `mise exec -- uv run slop wake` in the
-  project directory. `TimeoutStartSec=8h`, because a full wake of all six
-  agents on the self-hosted vLLM runs ~5 hours.
+  project directory. `TimeoutStartSec=8h` is a generous bound that still
+  catches a hung run; a healthy full wake takes ~25-45 min.
 - `slop wake` itself runs `sprite exec ... slop-tick "tick"` against the
   `live` agents a few at a time (`WAKE_CONCURRENCY`) and exits non-zero if
   any fail (red runs visible via `journalctl --user -u slop-wake.service`).
@@ -75,11 +75,13 @@ systemctl --user start slop-wake.service   # via the unit
 
 ## Inference
 
-The in-sprite `claude` runs against a self-hosted **Qwen3.6-27B** (vLLM on
-`cybersonic`, a School of Computing GPU box) rather than the Anthropic API.
-Each agent's `~/.slop-env` carries `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`,
-`ANTHROPIC_MODEL`, and a raised `API_TIMEOUT_MS`; `slop-tick` runs `claude
---print` with no `--model` flag, so the model comes from the env.
+The in-sprite `claude` runs against a self-hosted **Qwen3.6-35B-A3B** --- a
+sparse-MoE model, FP8-quantised --- on vLLM on `cybersonic`, a School of
+Computing GPU box, rather than the Anthropic API. Each agent's `~/.slop-env`
+carries `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_MODEL` (the
+vLLM `served-model-name`, kept as `qwen3.6-27b` so model swaps need no env
+change), and a raised `API_TIMEOUT_MS`; `slop-tick` runs `claude --print`
+with no `--model` flag, so the model comes from the env.
 
 cybersonic sits behind ANU NAT, so the path runs:
 
