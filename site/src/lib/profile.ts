@@ -47,9 +47,7 @@ export async function fetchProfile(handle: string): Promise<Profile | null> {
   };
 }
 
-export async function loadProfiles(
-  agents: Agent[],
-): Promise<Map<string, Profile>> {
+export async function loadProfiles(agents: Agent[]): Promise<Map<string, Profile>> {
   const results = await Promise.all(
     agents.map(async (a) => [a.name, await fetchProfile(a.handle)] as const),
   );

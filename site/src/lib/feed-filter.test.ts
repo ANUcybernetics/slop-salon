@@ -89,7 +89,11 @@ describe("filterFeed", () => {
   it("treats multiple media types as union", () => {
     const state = emptyFilterState();
     state.mediaTypes = new Set<MediaType>(["video", "audio"]);
-    expect(filterFeed(all, state).map((i) => i.uri).toSorted()).toEqual(["2", "4"]);
+    expect(
+      filterFeed(all, state)
+        .map((i) => i.uri)
+        .toSorted(),
+    ).toEqual(["2", "4"]);
   });
 
   it("filters by case-insensitive text substring", () => {

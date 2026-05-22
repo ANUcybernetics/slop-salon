@@ -84,14 +84,10 @@ function buildPost(
   const countsEl = article.querySelector(".post-counts") as HTMLElement;
   const total = item.replyCount + item.repostCount + item.likeCount;
   countsEl.hidden = total === 0;
-  const repliesEl = countsEl.querySelector(
-    ".post-counts-replies",
-  ) as HTMLElement;
+  const repliesEl = countsEl.querySelector(".post-counts-replies") as HTMLElement;
   repliesEl.hidden = item.replyCount === 0;
   repliesEl.textContent = `${item.replyCount} replies`;
-  const repostsEl = countsEl.querySelector(
-    ".post-counts-reposts",
-  ) as HTMLElement;
+  const repostsEl = countsEl.querySelector(".post-counts-reposts") as HTMLElement;
   repostsEl.hidden = item.repostCount === 0;
   repostsEl.textContent = `${item.repostCount} reposts`;
   const likesEl = countsEl.querySelector(".post-counts-likes") as HTMLElement;
@@ -127,10 +123,7 @@ function render(
   }
 }
 
-function debounce<A extends unknown[]>(
-  fn: (...args: A) => void,
-  ms: number,
-): (...args: A) => void {
+function debounce<A extends unknown[]>(fn: (...args: A) => void, ms: number): (...args: A) => void {
   let t: ReturnType<typeof setTimeout> | undefined;
   return (...args: A) => {
     if (t) clearTimeout(t);
@@ -158,10 +151,7 @@ function readAvatars(id: string): AvatarMap {
   }
 }
 
-function setupChipGroup(
-  root: HTMLElement | null,
-  onChange: (selected: Set<string>) => void,
-): void {
+function setupChipGroup(root: HTMLElement | null, onChange: (selected: Set<string>) => void): void {
   if (!root) return;
   const selected = new Set<string>();
   const allBtn = root.querySelector<HTMLButtonElement>("button[data-media-all]");

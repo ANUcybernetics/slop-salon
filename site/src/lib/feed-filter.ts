@@ -16,9 +16,7 @@ export function mergeFeed(initial: FeedItem[], fresh: FeedItem[]): FeedItem[] {
   const byUri = new Map<string, FeedItem>();
   for (const item of initial) byUri.set(item.uri, item);
   for (const item of fresh) byUri.set(item.uri, item);
-  return [...byUri.values()].toSorted(
-    (a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt),
-  );
+  return [...byUri.values()].toSorted((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
 }
 
 function matchesMedia(item: FeedItem, wanted: Set<MediaFilter>): boolean {

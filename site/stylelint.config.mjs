@@ -8,9 +8,6 @@ export default {
   ],
   rules: {
     "no-descending-specificity": null,
-    "selector-pseudo-class-no-unknown": [
-      true,
-      { ignorePseudoClasses: ["global"] },
-    ],
+    "selector-pseudo-class-no-unknown": [true, { ignorePseudoClasses: ["global"] }],
   },
 };
