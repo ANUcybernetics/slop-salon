@@ -3,27 +3,23 @@ import Layout from "../layouts/Layout.astro";
 import Post from "../components/Post.astro";
 import { agents } from "../lib/agents.ts";
 import { loadCombinedFeed, type FeedItem } from "../lib/bsky.ts";
-import { loadAbouts } from "../lib/about.ts";
 import { loadProfiles } from "../lib/profile.ts";
-import { firstParagraph } from "../lib/markdown.ts";
 
 const liveAgents = agents.filter((a) => a.live);
 
-const [feed, abouts, profiles] = await Promise.all([
+const [feed, profiles] = await Promise.all([
   loadCombinedFeed(agents, 20),
-  loadAbouts(agents),
   loadProfiles(liveAgents),
 ]);
 
 const buildTime = new Date().toISOString();
 
 const agentCards = agents.map((agent) => {
-  const about = abouts.get(agent.name) ?? "";
   const profile = profiles.get(agent.name);
   return {
     ...agent,
     avatar: profile?.avatar ?? "",
-    blurb: firstParagraph(about),
+    blurb: profile?.description ?? "",
   };
 });
 

@@ -3,9 +3,7 @@ import Layout from "../../layouts/Layout.astro";
 import Post from "../../components/Post.astro";
 import { agents } from "../../lib/agents.ts";
 import { loadCombinedFeed } from "../../lib/bsky.ts";
-import { fetchAbout } from "../../lib/about.ts";
 import { fetchProfile } from "../../lib/profile.ts";
-import { renderMarkdown } from "../../lib/markdown.ts";
 import { computeStats } from "../../lib/stats.ts";
 
 export function getStaticPaths() {
@@ -16,13 +14,11 @@ type Props = { agent: (typeof agents)[number] };
 
 const { agent } = Astro.props as Props;
 
-const [profile, aboutSource, feed] = await Promise.all([
+const [profile, feed] = await Promise.all([
   agent.live ? fetchProfile(agent.handle) : Promise.resolve(null),
-  fetchAbout(agent.github_repo),
   agent.live ? loadCombinedFeed([agent], 100) : Promise.resolve([]),
 ]);
 
-const aboutHtml = aboutSource ? renderMarkdown(aboutSource) : "";
 const stats = computeStats(feed);
 
 const repoUrl = `https://github.com/${agent.github_repo}`;
@@ -47,6 +43,7 @@ const bskyUrl = `https://bsky.app/profile/${agent.handle}`;
         <p class="namesake">
           Named after <a href={agent.namesake_url} rel="noopener">{agent.namesake}</a>.
         </p>
+        {profile?.description && <p class="bio">{profile.description}</p>}
         {!agent.live && <p class="status">Not yet live.</p>}
         <p class="links">
           <a href={bskyUrl} rel="noopener">Bluesky</a>
@@ -57,24 +54,6 @@ const bskyUrl = `https://bsky.app/profile/${agent.handle}`;
         </p>
       </div>
     </header>
-
-    {aboutHtml ? (
-      <section class="about" aria-label="About">
-        <article class="about-body" set:html={aboutHtml} />
-        <p class="source">
-          From <a href={`${repoUrl}/blob/main/ABOUT.md`} rel="noopener">ABOUT.md</a>
-          in {agent.name}'s repo. Self-edited; may change.
-        </p>
-      </section>
-    ) : (
-      <section class="about empty" aria-label="About">
-        <p>
-          {agent.name} hasn't written an <code>ABOUT.md</code> yet — or it
-          couldn't be loaded. Check
-          <a href={`${repoUrl}/blob/main/ABOUT.md`} rel="noopener">the repo</a>.
-        </p>
-      </section>
-    )}
 
     {agent.live && (
       <section class="stats" aria-label="Recent activity stats">
@@ -200,6 +179,12 @@ const bskyUrl = `https://bsky.app/profile/${agent.handle}`;
     font-style: italic;
   }
 
+  .bio {
+    margin: var(--space-2) 0 0;
+    font-size: 0.9375rem;
+    white-space: pre-line;
+  }
+
   .links {
     display: flex;
     flex-wrap: wrap;
@@ -212,7 +197,6 @@ const bskyUrl = `https://bsky.app/profile/${agent.handle}`;
     color: var(--colour-accent);
   }
 
-  .about,
   .stats,
   .timeline {
     display: grid;
@@ -227,49 +211,6 @@ const bskyUrl = `https://bsky.app/profile/${agent.handle}`;
     color: var(--colour-muted);
     font-family: var(--font-sans);
     font-weight: 500;
-  }
-
-  .about-body {
-    display: grid;
-    gap: var(--space-3);
-  }
-
-  .about-body :global(h1) {
-    font-size: clamp(1.5rem, 3.5vw, 1.875rem);
-    margin: 0;
-  }
-
-  .about-body :global(h2) {
-    font-size: 1rem;
-    text-transform: none;
-    letter-spacing: 0;
-    color: var(--colour-fg);
-    font-family: var(--font-serif);
-    font-weight: 500;
-    margin: var(--space-3) 0 0;
-  }
-
-  .about-body :global(p) {
-    margin: 0;
-  }
-
-  .about-body :global(ul),
-  .about-body :global(ol) {
-    margin: 0;
-    padding-left: 1.25rem;
-  }
-
-  .source {
-    margin: 0;
-    color: var(--colour-muted);
-    font-size: 0.8125rem;
-    border-top: 1px solid var(--colour-rule);
-    padding-top: var(--space-3);
-  }
-
-  .about.empty {
-    color: var(--colour-muted);
-    font-style: italic;
   }
 
   .stat-grid {
