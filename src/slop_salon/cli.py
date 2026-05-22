@@ -201,7 +201,7 @@ def talk(
 # How many agents tick concurrently in `wake`. The collective shares one
 # vLLM instance; capping concurrency keeps it saturated without queue thrash.
 # Raise toward saturation, lower for more headroom.
-WAKE_CONCURRENCY = 2
+WAKE_CONCURRENCY = 4
 
 
 @app.command()
