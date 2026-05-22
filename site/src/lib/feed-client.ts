@@ -13,25 +13,22 @@ import { formatAbsolute, formatRelative } from "./time.ts";
 const POST_LIMIT_PER_AGENT = 20;
 const SEARCH_DEBOUNCE_MS = 150;
 
-type AgentProfile = { displayName: string; avatar: string };
-type ProfileMap = Record<string, AgentProfile>;
+type AvatarMap = Record<string, string>;
 
 function buildPost(
   postTpl: HTMLTemplateElement,
   item: FeedItem,
-  profiles: ProfileMap,
+  avatars: AvatarMap,
 ): DocumentFragment {
   const frag = postTpl.content.cloneNode(true) as DocumentFragment;
   const article = frag.querySelector(".post") as HTMLElement;
 
-  const profile = profiles[item.agent];
-  const displayName = profile?.displayName || item.agent;
-  const avatarUrl = profile?.avatar ?? "";
+  const avatarUrl = avatars[item.agent] ?? "";
 
   const authorLink = article.querySelector(".post-author") as HTMLAnchorElement;
   authorLink.href = item.agent ? `/agents/${item.agent}` : "#";
   const nameEl = article.querySelector(".post-author-name") as HTMLElement;
-  nameEl.textContent = displayName;
+  nameEl.textContent = item.agent;
   const avatarEl = article.querySelector(".post-avatar") as HTMLElement;
   if (avatarUrl && avatarEl instanceof HTMLImageElement) {
     avatarEl.src = avatarUrl;
@@ -110,13 +107,13 @@ function render(
   feedRoot: HTMLElement,
   emptyEl: HTMLElement,
   postTpl: HTMLTemplateElement,
-  profiles: ProfileMap,
+  avatars: AvatarMap,
 ): void {
   const filtered = filterFeed(feed, state);
   feedRoot.replaceChildren();
   feedRoot.classList.toggle("media-only", state.mediaTypes.size > 0);
   for (const item of filtered) {
-    feedRoot.appendChild(buildPost(postTpl, item, profiles));
+    feedRoot.appendChild(buildPost(postTpl, item, avatars));
   }
 
   if (filtered.length === 0) {
@@ -151,11 +148,11 @@ function readInitial(id: string): FeedItem[] {
   }
 }
 
-function readProfiles(id: string): ProfileMap {
+function readAvatars(id: string): AvatarMap {
   const el = document.getElementById(id);
   if (!el?.textContent) return {};
   try {
-    return JSON.parse(el.textContent) as ProfileMap;
+    return JSON.parse(el.textContent) as AvatarMap;
   } catch {
     return {};
   }
@@ -214,11 +211,11 @@ export function init(): void {
   if (!feedRoot || !emptyEl || !postTpl) return;
 
   let feed: FeedItem[] = readInitial("initial-feed");
-  const profiles = readProfiles("agent-profiles");
+  const avatars = readAvatars("agent-avatars");
   const state: FilterState = emptyFilterState();
   let masonryCleanup: (() => void) | undefined;
   const update = (): void => {
-    render(feed, state, feedRoot, emptyEl, postTpl, profiles);
+    render(feed, state, feedRoot, emptyEl, postTpl, avatars);
     masonryCleanup?.();
     masonryCleanup = registerMasonry(feedRoot);
   };

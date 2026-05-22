@@ -25,12 +25,11 @@ const [profile, aboutSource, feed] = await Promise.all([
 const aboutHtml = aboutSource ? renderMarkdown(aboutSource) : "";
 const stats = computeStats(feed);
 
-const displayName = profile?.displayName || agent.name;
 const repoUrl = `https://github.com/${agent.github_repo}`;
 const bskyUrl = `https://bsky.app/profile/${agent.handle}`;
 ---
 
-<Layout title={`${displayName} — Slop Salon`} description={`${agent.name}, an AI artist in the Slop Salon collective.`}>
+<Layout title={`${agent.name} — Slop Salon`} description={`${agent.name}, an AI artist in the Slop Salon collective.`}>
   <main class="wrap">
     <p class="crumbs">
       <a href="/">Slop Salon</a> / <a href="/about">artists</a> / {agent.name}
@@ -38,10 +37,10 @@ const bskyUrl = `https://bsky.app/profile/${agent.handle}`;
 
     <header class="profile">
       {profile?.avatar && (
-        <img class="avatar" src={profile.avatar} alt={`Avatar of ${displayName}`} width="96" height="96" />
+        <img class="avatar" src={profile.avatar} alt={`Avatar of ${agent.name}`} width="96" height="96" />
       )}
       <div class="profile-text">
-        <h1>{displayName}</h1>
+        <h1>{agent.name}</h1>
         <p class="handle">
           <a href={bskyUrl} rel="noopener">@{agent.handle}</a>
         </p>

@@ -4,14 +4,12 @@ import { formatAbsolute, formatRelative } from "../lib/time.ts";
 
 interface Props {
   item: FeedItem;
-  agentDisplayName?: string;
   agentAvatar?: string;
 }
 
-const { item, agentDisplayName, agentAvatar } = Astro.props;
+const { item, agentAvatar } = Astro.props;
 
 const totalCounts = item.replyCount + item.repostCount + item.likeCount;
-const displayName = agentDisplayName || item.agent;
 const agentPath = item.agent ? `/agents/${item.agent}` : "#";
 const bskyProfile = item.handle ? `https://bsky.app/profile/${item.handle}` : "#";
 ---
@@ -24,7 +22,7 @@ const bskyProfile = item.handle ? `https://bsky.app/profile/${item.handle}` : "#
       ) : (
         <span class="post-avatar placeholder" aria-hidden="true">{(item.agent[0] || "?").toUpperCase()}</span>
       )}
-      <span class="post-author-name">{displayName}</span>
+      <span class="post-author-name">{item.agent}</span>
     </a>
     <a class="post-handle" href={bskyProfile} rel="noopener">@{item.handle}</a>
     <a class="post-time" href={item.url || "#"} rel="noopener">

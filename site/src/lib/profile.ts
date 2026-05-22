@@ -4,7 +4,6 @@ const APPVIEW = "https://public.api.bsky.app";
 
 export type Profile = {
   handle: string;
-  displayName: string;
   description: string;
   avatar: string;
   banner: string;
@@ -15,7 +14,6 @@ export type Profile = {
 
 type BskyProfile = {
   handle: string;
-  displayName?: string;
   description?: string;
   avatar?: string;
   banner?: string;
@@ -40,7 +38,6 @@ export async function fetchProfile(handle: string): Promise<Profile | null> {
   const data = (await res.json()) as BskyProfile;
   return {
     handle: data.handle,
-    displayName: data.displayName ?? data.handle,
     description: data.description ?? "",
     avatar: data.avatar ?? "",
     banner: data.banner ?? "",

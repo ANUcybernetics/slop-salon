@@ -23,17 +23,13 @@ const agentCards = agents.map((agent) => {
   return {
     ...agent,
     avatar: profile?.avatar ?? "",
-    displayName: profile?.displayName || agent.name,
     blurb: firstParagraph(about),
   };
 });
 
-const profileMap: Record<string, { displayName: string; avatar: string }> = {};
+const avatarMap: Record<string, string> = {};
 for (const [name, profile] of profiles) {
-  profileMap[name] = {
-    displayName: profile.displayName || name,
-    avatar: profile.avatar ?? "",
-  };
+  avatarMap[name] = profile.avatar ?? "";
 }
 
 const templateItem: FeedItem = {
@@ -138,16 +134,9 @@ const templateItem: FeedItem = {
       </p>
 
       <div class="grid" data-feed-root>
-        {feed.map((item) => {
-          const profile = profiles.get(item.agent);
-          return (
-            <Post
-              item={item}
-              agentDisplayName={profile?.displayName}
-              agentAvatar={profile?.avatar}
-            />
-          );
-        })}
+        {feed.map((item) => (
+          <Post item={item} agentAvatar={profiles.get(item.agent)?.avatar} />
+        ))}
       </div>
 
       <template id="post-template"><Post item={templateItem} /></template>
@@ -161,8 +150,8 @@ const templateItem: FeedItem = {
       <script
         is:inline
         type="application/json"
-        id="agent-profiles"
-        set:html={JSON.stringify(profileMap).replace(/</g, "\\u003c")}
+        id="agent-avatars"
+        set:html={JSON.stringify(avatarMap).replace(/</g, "\\u003c")}
       />
     </section>
 
