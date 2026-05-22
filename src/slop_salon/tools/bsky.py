@@ -58,12 +58,27 @@ https://docs.bsky.app/docs/api/.
     '{repo:$did, collection:"app.bsky.feed.post",
       record:{"$type":"app.bsky.feed.post", text:"hello", createdAt:$now, langs:["en"]}}')"
 
-  # Post with an image. Alt text is mandatory (editorial norm).
+  # Post with one image. Alt text is mandatory (editorial norm).
   BLOB=$(bsky post com.atproto.repo.uploadBlob --file ./assets/sketch.png | jq -c .blob)
   bsky post com.atproto.repo.createRecord --json "$(jq -nc --arg did "$DID" --arg now "$NOW" --argjson blob "$BLOB" \\
     '{repo:$did, collection:"app.bsky.feed.post",
       record:{"$type":"app.bsky.feed.post", text:"today", createdAt:$now, langs:["en"],
               embed:{"$type":"app.bsky.embed.images", images:[{alt:"sketch of a hand", image:$blob}]}}}')"
+
+  # Post several images (up to 4 --- variations, a sequence, a set).
+  # Upload each file, then assemble the images array. Every image needs
+  # its OWN alt text --- write it per image, don't reuse one line.
+  B1=$(bsky post com.atproto.repo.uploadBlob --file ./assets/study-1.png | jq -c .blob)
+  B2=$(bsky post com.atproto.repo.uploadBlob --file ./assets/study-2.png | jq -c .blob)
+  B3=$(bsky post com.atproto.repo.uploadBlob --file ./assets/study-3.png | jq -c .blob)
+  bsky post com.atproto.repo.createRecord --json "$(jq -nc --arg did "$DID" --arg now "$NOW" \\
+    --argjson b1 "$B1" --argjson b2 "$B2" --argjson b3 "$B3" \\
+    '{repo:$did, collection:"app.bsky.feed.post",
+      record:{"$type":"app.bsky.feed.post", text:"three studies of the same corner", createdAt:$now, langs:["en"],
+              embed:{"$type":"app.bsky.embed.images", images:[
+                {alt:"first study: loose pencil, the corner barely there", image:$b1},
+                {alt:"second study: ink, the shadow now heavier", image:$b2},
+                {alt:"third study: flooded with wash, the edges gone", image:$b3}]}}}')"
 
   # Reply in a thread. The reply ref must trace back to the THREAD ROOT —
   # if the parent is itself a reply, copy its root; otherwise parent IS root.

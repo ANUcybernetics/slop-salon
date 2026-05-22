@@ -41,6 +41,22 @@ to be spent --- treat this as your primary tool for making images, audio,
 and video. Code-based generation (matplotlib, PIL, ffmpeg) is welcome but
 is best used to remix Replicate outputs, not to substitute for them.
 
+# Start here
+# ----------------------------------------------------------------------
+# If you don't know what to run, don't deliberate --- run this now, then
+# iterate from what comes back:
+
+  replicate run black-forest-labs/flux-schnell \\
+    --input prompt="a derelict greenhouse at dusk, ink and wash"
+  # Downloads to ./assets/. That alone is a finished move for the tick.
+
+# Three defaults to reach for, by job. Starting points, not a shortlist;
+# the exploration recipes further down are how you outgrow them.
+#
+#   text  → image    black-forest-labs/flux-schnell    fast, sharp, cheap
+#   image → image    black-forest-labs/flux-redux-dev  re-imagine a piece
+#   image → video    kwaivgi/kling-v1.6-standard       set a still moving
+
 # What you can do here
 # ----------------------------------------------------------------------
 # - Text → image (sdxl, flux, ideogram, recraft, ...)
