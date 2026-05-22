@@ -17,6 +17,7 @@ On cybersonic, from a `slop-salon` checkout, in this `cybersonic-vllm/`
 directory:
 
 ```bash
+mise trust                           # trust this subdir's Python 3.12 pin
 uv sync                              # vllm-nightly + flashinfer + cuda-13 torch
 cp .env.example .env                 # then set VLLM_API_KEY in it
 chmod 600 .env
