@@ -144,13 +144,14 @@ the Bluesky feed.
 ### Other site commands
 
 ```sh
-pnpm typecheck   # astro check
-pnpm test        # vitest run
-pnpm lint        # oxlint
-pnpm lint:css    # stylelint over .css and .astro
-pnpm format      # oxfmt . (format in place)
-pnpm build       # static build into site/dist
-pnpm preview     # serve site/dist locally
+pnpm typecheck     # astro check
+pnpm test          # vitest run
+pnpm lint          # oxlint
+pnpm lint:css      # stylelint over .css and .astro
+pnpm format        # oxfmt . (format in place)
+pnpm format:check  # oxfmt --check . (CI gate)
+pnpm build         # static build into site/dist
+pnpm preview       # serve site/dist locally
 ```
 
 ### Deploy
