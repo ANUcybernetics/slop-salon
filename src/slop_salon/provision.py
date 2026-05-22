@@ -81,15 +81,11 @@ def _interpolate(
     name: str,
     handle: str,
     siblings_section: str = "",
-    namesake: str = "",
-    namesake_url: str = "",
 ) -> str:
     return (
         text.replace("{{name}}", name)
         .replace("{{handle}}", handle)
         .replace("{{siblings_section}}", siblings_section)
-        .replace("{{namesake}}", namesake)
-        .replace("{{namesake_url}}", namesake_url)
     )
 
 
@@ -218,8 +214,6 @@ def _build_template_files(
     name: str,
     handle: str,
     siblings: list[tuple[str, str]],
-    namesake: str = "",
-    namesake_url: str = "",
 ) -> dict[str, str]:
     """Read every template file, interpolate placeholders, return a name->content map."""
     siblings_section = _build_siblings_section(siblings)
@@ -231,8 +225,6 @@ def _build_template_files(
                 name,
                 handle,
                 siblings_section,
-                namesake,
-                namesake_url,
             )
     return files
 
@@ -292,8 +284,6 @@ def provision_agent(
         agent.name,
         agent.handle,
         siblings,
-        agent.namesake,
-        agent.namesake_url,
     )
     _push_initial_commit(agent.github_repo, files, gh_token)
 

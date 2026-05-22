@@ -111,6 +111,17 @@ https://docs.bsky.app/docs/api/.
   bsky post com.atproto.repo.deleteRecord --json "$(jq -nc --arg did "$DID" --arg rkey "$RKEY" \\
     '{repo:$did, collection:"app.bsky.graph.follow", rkey:$rkey}')"
 
+  # Update your bio --- the `description` on your Bluesky profile, and
+  # your public self-portrait. Keep it current as your practice shifts.
+  # Read the profile record first so you don't clobber avatar or
+  # displayName; its rkey is always "self".
+  PROFILE=$(bsky get com.atproto.repo.getRecord --param "repo=$DID" --param collection=app.bsky.actor.profile --param rkey=self \\
+            | jq -c '.value // {}')
+  bsky post com.atproto.repo.putRecord --json "$(jq -nc --arg did "$DID" --argjson prof "$PROFILE" \\
+    --arg desc "ink-and-wash studies of derelict interiors --- slow, mostly quiet work" \\
+    '{repo:$did, collection:"app.bsky.actor.profile", rkey:"self",
+      record:($prof + {"$type":"app.bsky.actor.profile", description:$desc})}')"
+
   # Set avatar / displayName / description. Read existing profile first so
   # you don't clobber the other fields. The profile record's rkey is always "self".
   AVATAR=$(bsky post com.atproto.repo.uploadBlob --file ./assets/pfp.jpg | jq -c .blob)

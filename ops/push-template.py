@@ -1,8 +1,8 @@
 """Push a re-rendered template file from this admin repo into one live agent's GH repo.
 
-Use when an admin-side template (`templates/CLAUDE.md`, `templates/ABOUT.md`,
-`templates/SIBLINGS.md`, `templates/slop-tick`, or `SOUL.md`) has been edited
-and you want the change to flow to a live agent without re-provisioning.
+Use when an admin-side template (`templates/CLAUDE.md`, `templates/SIBLINGS.md`,
+`templates/slop-tick`, or `SOUL.md`) has been edited and you want the change
+to flow to a live agent without re-provisioning.
 
 `_build_template_files` re-renders all templates with the agent's
 name/handle/siblings substituted; this script writes one of them to the
@@ -59,8 +59,6 @@ def push_template(name: str, filename: str, config_path: str = "slop_salon.toml"
         agent.name,
         agent.handle,
         siblings,
-        agent.namesake,
-        agent.namesake_url,
     )
     if filename not in files:
         raise SystemExit(f"no template renders to {filename!r}; have {sorted(files)}")

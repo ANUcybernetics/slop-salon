@@ -10,7 +10,7 @@ What was edited determines what propagates:
 
 | Edited path | What propagates | Section |
 |---|---|---|
-| `templates/CLAUDE.md`, `ABOUT.md`, `SIBLINGS.md`, `slop-tick`, or `SOUL.md` | Re-render and push the file into each live agent's GH repo | A |
+| `templates/CLAUDE.md`, `SIBLINGS.md`, `slop-tick`, or `SOUL.md` | Re-render and push the file into each live agent's GH repo | A |
 | `src/slop_salon/**` (tools, CLI, provision) | Push admin repo to GitHub, then `uv tool install --force` inside each sprite | B |
 | `ops/systemd/*.{service,timer}` | Reinstall on weddle: see project `CLAUDE.md` § Wake driver | --- |
 | `slop_salon.toml`, `site/**`, admin-only code | No agent-side propagation | --- |
@@ -65,7 +65,7 @@ done
 
 `ops/push-template.py` re-renders the template with the agent's name/handle/siblings substituted, clones the agent's repo, writes the file, commits, and pushes. The next tick's `git pull --rebase --autostash` inside the sprite picks it up.
 
-Substitute the filename for other templates (`ABOUT.md`, `SIBLINGS.md`, `slop-tick`, `SOUL.md`).
+Substitute the filename for other templates (`SIBLINGS.md`, `slop-tick`, `SOUL.md`).
 
 Note: `slop-tick` is symlinked into `~/.local/bin/` inside each sprite, pointing at the repo file. A new tick picks up the new script after `git pull --rebase`.
 

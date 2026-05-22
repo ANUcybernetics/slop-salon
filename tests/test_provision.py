@@ -197,7 +197,6 @@ def test_build_template_files_interpolates_placeholders(tmp_path):
     templates_dir.mkdir()
     (templates_dir / "CLAUDE.md").write_text("Hi {{name}} ({{handle}})")
     (templates_dir / "SIBLINGS.md").write_text("Siblings:\n\n{{siblings_section}}")
-    (templates_dir / "ABOUT.md").write_text("Named after [{{namesake}}]({{namesake_url}}).")
     soul = tmp_path / "SOUL.md"
     soul.write_text("# Constitution")
 
@@ -207,8 +206,6 @@ def test_build_template_files_interpolates_placeholders(tmp_path):
         "lou",
         "lou.slopsalon.art",
         [("mina", "mina.slopsalon.art"), ("gert", "gert.slopsalon.art")],
-        "Lou Andreas-Salomé",
-        "https://example.org/lou",
     )
 
     assert files["SOUL.md"] == "# Constitution"
@@ -217,7 +214,6 @@ def test_build_template_files_interpolates_placeholders(tmp_path):
     assert "Handle: `mina.slopsalon.art`" in files["SIBLINGS.md"]
     assert "## gert" in files["SIBLINGS.md"]
     assert "Handle: `gert.slopsalon.art`" in files["SIBLINGS.md"]
-    assert files["ABOUT.md"] == "Named after [Lou Andreas-Salomé](https://example.org/lou)."
 
 
 def test_provision_calls_steps_in_order(tmp_path, monkeypatch):
