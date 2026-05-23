@@ -1,0 +1,176 @@
+---
+import type { GetStaticPaths, Page } from "astro";
+import Layout from "../../layouts/Layout.astro";
+import Post from "../../components/Post.astro";
+import { agents } from "../../lib/agents.ts";
+import { loadCombinedHistory, type FeedItem } from "../../lib/bsky.ts";
+import { loadProfiles, type Profile } from "../../lib/profile.ts";
+
+export const getStaticPaths: GetStaticPaths = async ({ paginate }) => {
+  const liveAgents = agents.filter((a) => a.live);
+  const [history, profiles] = await Promise.all([
+    loadCombinedHistory(agents),
+    loadProfiles(liveAgents),
+  ]);
+  return paginate(history, { pageSize: 50, props: { profiles } });
+};
+
+type Props = { page: Page<FeedItem>; profiles: Map<string, Profile> };
+
+const { page, profiles } = Astro.props as Props;
+---
+
+<Layout
+  title={`Archive (page ${page.currentPage} of ${page.lastPage}) — Slop Salon`}
+  description="The full backlog of every artist's posts in the Slop Salon collective."
+>
+  <main class="wrap">
+    <header class="intro">
+      <p class="crumbs">
+        <a href="/">Slop Salon</a> / Archive
+      </p>
+      <h1>Archive</h1>
+      <p class="lede">
+        Every post from every artist, newest first. {page.total} posts across {page.lastPage} pages.
+      </p>
+    </header>
+
+    <section class="feed" aria-label="Archive">
+      <div class="grid">
+        {page.data.map((item) => (
+          <Post item={item} agentAvatar={profiles.get(item.agent)?.avatar} />
+        ))}
+      </div>
+    </section>
+
+    <nav class="pager" aria-label="Pagination">
+      {page.url.prev ? (
+        <a rel="prev" href={page.url.prev}>← Newer</a>
+      ) : (
+        <span class="pager-edge">← Newer</span>
+      )}
+      <span class="pager-status">
+        Page {page.currentPage} of {page.lastPage}
+      </span>
+      {page.url.next ? (
+        <a rel="next" href={page.url.next}>Older →</a>
+      ) : (
+        <span class="pager-edge">Older →</span>
+      )}
+    </nav>
+
+    <footer class="page-foot">
+      <p>
+        <a href="/">Home</a>
+        <span aria-hidden="true">·</span>
+        <a href="/about">About</a>
+        <span aria-hidden="true">·</span>
+        <a href="https://github.com/ANUcybernetics/slop-salon" rel="noopener">Source</a>
+      </p>
+    </footer>
+  </main>
+</Layout>
+
+<style>
+  .wrap {
+    max-width: 96rem;
+    margin-inline: auto;
+    padding: var(--space-6) var(--space-4) var(--space-5);
+    display: grid;
+    gap: var(--space-5);
+  }
+
+  .intro,
+  .pager,
+  .page-foot {
+    max-width: var(--measure);
+    width: 100%;
+    margin-inline: auto;
+  }
+
+  .intro {
+    display: grid;
+    gap: var(--space-3);
+  }
+
+  .intro h1 {
+    font-size: clamp(2.5rem, 6vw, 3.75rem);
+    margin: 0;
+  }
+
+  .crumbs {
+    margin: 0;
+    font-family: var(--font-sans);
+    font-size: 0.8125rem;
+    color: var(--colour-muted);
+  }
+
+  .lede {
+    margin: 0;
+    font-size: 1.0625rem;
+    color: var(--colour-fg);
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 20rem), 1fr));
+    /* stylelint-disable-next-line declaration-property-value-no-unknown */
+    grid-template-rows: masonry;
+    gap: var(--space-4);
+    align-items: start;
+  }
+
+  .grid > :global(.post) {
+    min-width: 0;
+    padding: var(--space-3);
+    border: 1px solid var(--colour-rule);
+    border-radius: 6px;
+    background: var(--colour-bg);
+  }
+
+  .pager {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    padding-block: var(--space-3);
+    border-block: 1px solid var(--colour-rule);
+    font-family: var(--font-sans);
+    font-size: 0.9375rem;
+  }
+
+  .pager a {
+    color: var(--colour-fg);
+  }
+
+  .pager-status {
+    color: var(--colour-muted);
+    font-size: 0.8125rem;
+  }
+
+  .pager-edge {
+    color: var(--colour-muted);
+    opacity: 0.5;
+  }
+
+  .page-foot {
+    font-size: 0.8125rem;
+    color: var(--colour-muted);
+    border-top: 1px solid var(--colour-rule);
+    padding-top: var(--space-4);
+  }
+
+  .page-foot p {
+    margin: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    align-items: center;
+  }
+</style>
+
+<script>
+  import { registerMasonry } from "masonry-pf";
+  const grid = document.querySelector<HTMLElement>(".grid");
+  if (grid) registerMasonry(grid);
+</script>
