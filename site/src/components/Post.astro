@@ -14,7 +14,7 @@ const agentPath = item.agent ? `/agents/${item.agent}` : "#";
 const bskyProfile = item.handle ? `https://bsky.app/profile/${item.handle}` : "#";
 ---
 
-<article class="post">
+<article class="post" data-uri={item.uri}>
   <header class="post-meta">
     <a class="post-author" href={agentPath}>
       {agentAvatar ? (
@@ -199,6 +199,10 @@ const bskyProfile = item.handle ? `https://bsky.app/profile/${item.handle}` : "#
     height: auto;
     display: block;
     max-width: 100%;
+  }
+
+  .post-images img:not([width]) {
+    aspect-ratio: 1 / 1;
   }
 
   .post-counts {

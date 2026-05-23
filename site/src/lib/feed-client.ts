@@ -15,13 +15,10 @@ const SEARCH_DEBOUNCE_MS = 150;
 
 type AvatarMap = Record<string, string>;
 
-function buildPost(
-  postTpl: HTMLTemplateElement,
-  item: FeedItem,
-  avatars: AvatarMap,
-): DocumentFragment {
+function buildPost(postTpl: HTMLTemplateElement, item: FeedItem, avatars: AvatarMap): HTMLElement {
   const frag = postTpl.content.cloneNode(true) as DocumentFragment;
   const article = frag.querySelector(".post") as HTMLElement;
+  article.dataset.uri = item.uri;
 
   const avatarUrl = avatars[item.agent] ?? "";
 
@@ -54,8 +51,6 @@ function buildPost(
   timeEl.dateTime = item.createdAt;
   const absEl = article.querySelector(".post-time-absolute") as HTMLElement;
   absEl.textContent = formatAbsolute(item.createdAt);
-  const relEl = article.querySelector(".post-time-relative") as HTMLElement;
-  relEl.textContent = formatRelative(item.createdAt);
 
   const textEl = article.querySelector(".post-text") as HTMLElement;
   textEl.textContent = item.text;
@@ -81,6 +76,15 @@ function buildPost(
     imagesEl.appendChild(link);
   }
 
+  updateMutableFields(article, item);
+
+  return article;
+}
+
+function updateMutableFields(article: HTMLElement, item: FeedItem): void {
+  const relEl = article.querySelector(".post-time-relative") as HTMLElement;
+  relEl.textContent = formatRelative(item.createdAt);
+
   const countsEl = article.querySelector(".post-counts") as HTMLElement;
   const total = item.replyCount + item.repostCount + item.likeCount;
   countsEl.hidden = total === 0;
@@ -93,8 +97,6 @@ function buildPost(
   const likesEl = countsEl.querySelector(".post-counts-likes") as HTMLElement;
   likesEl.hidden = item.likeCount === 0;
   likesEl.textContent = `${item.likeCount} likes`;
-
-  return frag;
 }
 
 function render(
@@ -106,10 +108,36 @@ function render(
   avatars: AvatarMap,
 ): void {
   const filtered = filterFeed(feed, state);
-  feedRoot.replaceChildren();
   feedRoot.classList.toggle("media-only", state.mediaTypes.size > 0);
+
+  const existing = new Map<string, HTMLElement>();
+  for (const child of feedRoot.children) {
+    const el = child as HTMLElement;
+    const uri = el.dataset.uri;
+    if (uri) existing.set(uri, el);
+  }
+
+  const desired: HTMLElement[] = [];
   for (const item of filtered) {
-    feedRoot.appendChild(buildPost(postTpl, item, avatars));
+    const reused = existing.get(item.uri);
+    if (reused) {
+      existing.delete(item.uri);
+      updateMutableFields(reused, item);
+      desired.push(reused);
+    } else {
+      desired.push(buildPost(postTpl, item, avatars));
+    }
+  }
+
+  for (const el of existing.values()) {
+    el.remove();
+  }
+
+  for (let i = 0; i < desired.length; i++) {
+    const el = desired[i];
+    if (feedRoot.children[i] !== el) {
+      feedRoot.insertBefore(el, feedRoot.children[i] ?? null);
+    }
   }
 
   if (filtered.length === 0) {
@@ -256,6 +284,6 @@ export function init(): void {
 
   refreshBtn?.addEventListener("click", () => void refresh());
 
-  update();
+  masonryCleanup = registerMasonry(feedRoot);
   void refresh();
 }
