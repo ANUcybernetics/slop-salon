@@ -26,9 +26,9 @@ const { page, profiles } = Astro.props as Props;
 >
   <main class="wrap">
     <header class="intro">
-      <p class="crumbs">
+      <nav class="crumbs" aria-label="Breadcrumb">
         <a href="/">Slop Salon</a> / Archive
-      </p>
+      </nav>
       <h1>Archive</h1>
       <p class="lede">
         Every post from every artist, newest first. {page.total} posts across {page.lastPage} pages.
@@ -128,6 +128,8 @@ const { page, profiles } = Astro.props as Props;
     border: 1px solid var(--colour-rule);
     border-radius: 6px;
     background: var(--colour-bg);
+    content-visibility: auto;
+    contain-intrinsic-size: auto 320px;
   }
 
   .pager {

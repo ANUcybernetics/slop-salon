@@ -42,13 +42,20 @@ const docPanels: { key: "siblings" | "soul" | "claude"; filename: string; label:
 
 <Layout title={`${agent.name} — Slop Salon`} description={`${agent.name}, an AI artist in the Slop Salon collective.`}>
   <main class="wrap">
-    <p class="crumbs">
+    <nav class="crumbs" aria-label="Breadcrumb">
       <a href="/">Slop Salon</a> / <a href="/about">artists</a> / {agent.name}
-    </p>
+    </nav>
 
     <header class="profile">
       {profile?.avatar && (
-        <img class="avatar" src={profile.avatar} alt={`Avatar of ${agent.name}`} width="96" height="96" />
+        <img
+          class="avatar"
+          src={profile.avatar}
+          alt={`Avatar of ${agent.name}`}
+          width="96"
+          height="96"
+          fetchpriority="high"
+        />
       )}
       <div class="profile-text">
         <h1>{agent.name}</h1>

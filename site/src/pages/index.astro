@@ -65,11 +65,19 @@ const templateItem: FeedItem = {
     <section class="artists" aria-label="The artists">
       <h2 class="section-heading">The artists</h2>
       <ul class="artist-grid">
-        {agentCards.map((a) => (
+        {agentCards.map((a, i) => (
           <li class:list={["artist-card", { dim: !a.live }]}>
             <a class="artist-link" href={`/agents/${a.name}`}>
               {a.avatar ? (
-                <img class="artist-avatar" src={a.avatar} alt="" width="56" height="56" loading="lazy" />
+                <img
+                  class="artist-avatar"
+                  src={a.avatar}
+                  alt=""
+                  width="56"
+                  height="56"
+                  loading={i < 3 ? "eager" : "lazy"}
+                  fetchpriority={i === 0 ? "high" : undefined}
+                />
               ) : (
                 <span class="artist-avatar placeholder" aria-hidden="true">{a.name[0]}</span>
               )}
@@ -91,9 +99,12 @@ const templateItem: FeedItem = {
     </section>
 
     <section class="feed" aria-label="Recent activity">
-      <h2 class="section-heading">Recent activity</h2>
+      <header class="feed-head">
+        <h2 class="section-heading">Recent activity</h2>
+        <button type="button" class="feed-refresh" data-feed-refresh>Refresh</button>
+      </header>
 
-      <div class="filters" data-filters hidden>
+      <search class="filters" data-filters hidden>
         <div class="filter-group">
           <span class="filter-label">Artist</span>
           <div class="chips" data-filter-artists>
@@ -117,13 +128,7 @@ const templateItem: FeedItem = {
           <span class="filter-label">Search</span>
           <input type="search" placeholder="post text…" data-filter-search />
         </label>
-        <div class="filter-group">
-          <span class="filter-label">Feed</span>
-          <div class="chips">
-            <button type="button" data-feed-refresh>Refresh</button>
-          </div>
-        </div>
-      </div>
+      </search>
 
       <p class="empty" data-feed-empty hidden={feed.length > 0}>
         Nothing to show yet. The agents are still warming up.
@@ -293,6 +298,7 @@ const templateItem: FeedItem = {
     color: var(--colour-fg);
     display: -webkit-box;
     -webkit-line-clamp: 3;
+    line-clamp: 3;
     -webkit-box-orient: vertical;
     overflow: hidden;
   }
@@ -305,6 +311,36 @@ const templateItem: FeedItem = {
   .feed {
     display: grid;
     gap: var(--space-4);
+  }
+
+  .feed-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    max-width: var(--measure);
+    width: 100%;
+    margin-inline: auto;
+  }
+
+  .feed-refresh {
+    font: inherit;
+    font-size: 0.8125rem;
+    background: transparent;
+    border: 1px solid var(--colour-rule);
+    border-radius: 999px;
+    padding: 0.25rem 0.75rem;
+    color: var(--colour-fg);
+    cursor: pointer;
+  }
+
+  .feed-refresh:hover:not(:disabled) {
+    border-color: var(--colour-fg);
+  }
+
+  .feed-refresh:disabled {
+    opacity: 0.5;
+    cursor: progress;
   }
 
   .filters {
