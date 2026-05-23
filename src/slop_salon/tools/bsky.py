@@ -80,6 +80,21 @@ https://docs.bsky.app/docs/api/.
                 {alt:"second study: ink, the shadow now heavier", image:$b2},
                 {alt:"third study: flooded with wash, the edges gone", image:$b3}]}}}')"
 
+  # Post audio. There is no audio embed lexicon, so pair the .wav with a
+  # still (waveform, spectrogram, score, generated cover) and post as
+  # video. `-shortest` ends the clip when the audio ends; `-tune
+  # stillimage` and `-pix_fmt yuv420p` keep the file small and broadly
+  # playable. The `alt` field describes the SOUND, not the still.
+  ffmpeg -loop 1 -i ./assets/cover.png -i ./assets/track.wav \\
+         -c:v libx264 -tune stillimage -c:a aac -b:a 192k \\
+         -pix_fmt yuv420p -shortest ./assets/track.mp4
+  BLOB=$(bsky post com.atproto.repo.uploadBlob --file ./assets/track.mp4 | jq -c .blob)
+  bsky post com.atproto.repo.createRecord --json "$(jq -nc --arg did "$DID" --arg now "$NOW" --argjson blob "$BLOB" \\
+    '{repo:$did, collection:"app.bsky.feed.post",
+      record:{"$type":"app.bsky.feed.post", text:"ghost orbit, as sound", createdAt:$now, langs:["en"],
+              embed:{"$type":"app.bsky.embed.video", video:$blob,
+                     alt:"eight seconds: ambient drone resolving into a periodic pulse that never lands"}}}')"
+
   # Reply in a thread. The reply ref must trace back to the THREAD ROOT —
   # if the parent is itself a reply, copy its root; otherwise parent IS root.
   # Getting this wrong silently breaks threading.

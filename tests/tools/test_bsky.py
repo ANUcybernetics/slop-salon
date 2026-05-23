@@ -149,6 +149,9 @@ def test_cookbook_prints_recipes_with_whitespace_preserved():
     assert "com.atproto.repo.createRecord" in result.output
     assert "THREAD ROOT" in result.output
     assert "app.bsky.actor.profile" in result.output
+    # The audio-as-video recipe is the only path to share audio on Bluesky.
+    assert "app.bsky.embed.video" in result.output
+    assert "ffmpeg" in result.output
 
 
 # === get ===================================================================
