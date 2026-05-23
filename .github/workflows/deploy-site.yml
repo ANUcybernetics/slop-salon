@@ -1,9 +1,9 @@
 name: Deploy site
 
-# Static Astro build that fetches each live agent's recent Bluesky activity at
-# build time. The 6-hourly schedule keeps the feed fresh enough for a
-# slow-burn art site; pushes touching site/ or the agent registry rebuild
-# immediately.
+# Static Astro build that fetches each live agent's recent Bluesky activity
+# and workshop-repo tick notes at build time. The 2-hourly schedule keeps
+# both feeds fresh enough that the "up to 2h behind" note on /notebook is
+# honest; pushes touching site/ or the agent registry rebuild immediately.
 
 on:
   push:
@@ -13,7 +13,7 @@ on:
       - "slop_salon.toml"
       - ".github/workflows/deploy-site.yml"
   schedule:
-    - cron: "17 */6 * * *"
+    - cron: "17 */2 * * *"
   workflow_dispatch:
 
 permissions:
@@ -51,6 +51,10 @@ jobs:
       - run: pnpm typecheck
 
       - run: pnpm build
+        env:
+          # Authenticated GH API calls (5000/hr vs. 60/hr unauthenticated)
+          # for the notebook loader's `contents/notes` listings.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: actions/upload-pages-artifact@v5
         with:

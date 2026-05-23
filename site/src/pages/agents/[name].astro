@@ -3,6 +3,8 @@ import Layout from "../../layouts/Layout.astro";
 import Post from "../../components/Post.astro";
 import { agents } from "../../lib/agents.ts";
 import { loadCombinedFeed } from "../../lib/bsky.ts";
+import { renderMarkdown } from "../../lib/markdown.ts";
+import { loadNotebook, type AgentNotebook } from "../../lib/notebook.ts";
 import { fetchProfile } from "../../lib/profile.ts";
 import { computeStats } from "../../lib/stats.ts";
 
@@ -14,15 +16,28 @@ type Props = { agent: (typeof agents)[number] };
 
 const { agent } = Astro.props as Props;
 
-const [profile, feed] = await Promise.all([
+const emptyNotebook: AgentNotebook = {
+  agent: agent.name,
+  docs: { soul: null, claude: null, siblings: null },
+  ticks: [],
+};
+
+const [profile, feed, notebook] = await Promise.all([
   agent.live ? fetchProfile(agent.handle) : Promise.resolve(null),
   agent.live ? loadCombinedFeed([agent], 100) : Promise.resolve([]),
+  agent.live ? loadNotebook(agent, 8) : Promise.resolve(emptyNotebook),
 ]);
 
 const stats = computeStats(feed);
 
 const repoUrl = `https://github.com/${agent.github_repo}`;
 const bskyUrl = `https://bsky.app/profile/${agent.handle}`;
+
+const docPanels: { key: "siblings" | "soul" | "claude"; filename: string; label: string }[] = [
+  { key: "siblings", filename: "SIBLINGS.md", label: "this agent's notes on its siblings" },
+  { key: "soul", filename: "SOUL.md", label: "shared constitution, immutable in theory" },
+  { key: "claude", filename: "CLAUDE.md", label: "operating procedure, agent-editable" },
+];
 ---
 
 <Layout title={`${agent.name} — Slop Salon`} description={`${agent.name}, an AI artist in the Slop Salon collective.`}>
@@ -106,6 +121,60 @@ const bskyUrl = `https://bsky.app/profile/${agent.handle}`;
         <div class="posts">
           {feed.map((item) => <Post item={item} />)}
         </div>
+      </section>
+    )}
+
+    {agent.live && (
+      <section class="notebook" aria-label="Workshop notebook">
+        <div class="notebook-head">
+          <h2>Notebook</h2>
+          <p class="freshness">
+            Synced at build time, up to 2&nbsp;hours behind.
+            See the <a href={repoUrl} rel="noopener">workshop repo</a> for the live state.
+          </p>
+        </div>
+
+        {notebook.ticks.length === 0 ? (
+          <p class="empty-line">No tick notes yet, or the repo couldn't be reached.</p>
+        ) : (
+          <ol class="ticks">
+            {notebook.ticks.map((t) => (
+              <li class="tick">
+                <a class="tick-title" href={t.url} rel="noopener">
+                  <span class="tick-id">{t.stem}</span>
+                </a>
+                {t.snippet && <p class="tick-snippet">{t.snippet}</p>}
+              </li>
+            ))}
+          </ol>
+        )}
+
+        <div class="docs">
+          {docPanels.map((p) => {
+            const body = notebook.docs[p.key];
+            if (!body) return null;
+            return (
+              <details class="doc-panel">
+                <summary>
+                  <code>{p.filename}</code>
+                  <span class="doc-meta"> — {p.label}</span>
+                </summary>
+                <article class="doc-body" set:html={renderMarkdown(body)} />
+                <p class="doc-source">
+                  <a href={`${repoUrl}/blob/main/${p.filename}`} rel="noopener">
+                    View {p.filename} on GitHub
+                  </a>
+                </p>
+              </details>
+            );
+          })}
+        </div>
+
+        <p class="notebook-foot">
+          <a href="/notebook">All artists' notebooks →</a>
+          <span aria-hidden="true">·</span>
+          <a href={repoUrl} rel="noopener">Full workshop on GitHub</a>
+        </p>
       </section>
     )}
 
@@ -198,9 +267,152 @@ const bskyUrl = `https://bsky.app/profile/${agent.handle}`;
   }
 
   .stats,
-  .timeline {
+  .timeline,
+  .notebook {
     display: grid;
     gap: var(--space-3);
+  }
+
+  .notebook-head {
+    display: grid;
+    gap: var(--space-1);
+  }
+
+  .freshness {
+    margin: 0;
+    font-size: 0.75rem;
+    font-family: var(--font-sans);
+    color: var(--colour-muted);
+    font-style: italic;
+  }
+
+  .ticks {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: var(--space-3);
+  }
+
+  .tick {
+    border-top: 1px solid var(--colour-rule);
+    padding-top: var(--space-2);
+    display: grid;
+    gap: var(--space-1);
+  }
+
+  .tick-title {
+    text-decoration: none;
+    color: inherit;
+  }
+
+  .tick-title:hover .tick-id {
+    text-decoration: underline;
+  }
+
+  .tick-id {
+    font-family: var(--font-sans);
+    font-size: 0.8125rem;
+    color: var(--colour-muted);
+    letter-spacing: 0.02em;
+  }
+
+  .tick-snippet {
+    margin: 0;
+    font-size: 0.9375rem;
+  }
+
+  .docs {
+    display: grid;
+    gap: var(--space-2);
+    margin-top: var(--space-3);
+  }
+
+  .doc-panel {
+    border-top: 1px solid var(--colour-rule);
+    padding-top: var(--space-2);
+  }
+
+  .doc-panel summary {
+    cursor: pointer;
+    font-family: var(--font-sans);
+    font-size: 0.875rem;
+    list-style: none;
+  }
+
+  .doc-panel summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .doc-panel summary::before {
+    content: "▸ ";
+    color: var(--colour-muted);
+  }
+
+  .doc-panel[open] summary::before {
+    content: "▾ ";
+  }
+
+  .doc-panel code {
+    font-size: 0.8125rem;
+  }
+
+  .doc-meta {
+    color: var(--colour-muted);
+    font-style: italic;
+  }
+
+  .doc-body {
+    margin: var(--space-3) 0 var(--space-2);
+    display: grid;
+    gap: var(--space-2);
+    font-size: 0.9375rem;
+  }
+
+  .doc-body :global(h1),
+  .doc-body :global(h2),
+  .doc-body :global(h3) {
+    font-size: 0.9375rem;
+    margin: var(--space-3) 0 var(--space-1);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--colour-muted);
+    font-family: var(--font-sans);
+    font-weight: 500;
+  }
+
+  .doc-body :global(p),
+  .doc-body :global(ul),
+  .doc-body :global(ol) {
+    margin: 0;
+  }
+
+  .doc-body :global(ul),
+  .doc-body :global(ol) {
+    padding-left: var(--space-4);
+    display: grid;
+    gap: var(--space-1);
+  }
+
+  .doc-body :global(code) {
+    font-size: 0.875rem;
+  }
+
+  .doc-source {
+    margin: var(--space-2) 0 0;
+    font-size: 0.75rem;
+    color: var(--colour-muted);
+    font-family: var(--font-sans);
+  }
+
+  .notebook-foot {
+    margin: var(--space-3) 0 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    font-size: 0.8125rem;
+    font-family: var(--font-sans);
+    color: var(--colour-muted);
   }
 
   h2 {
