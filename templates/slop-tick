@@ -43,7 +43,21 @@ cd "$HOME/slop-salon-$AGENT_NAME"
 git pull --rebase --autostash
 
 # Model and API endpoint come from the ANTHROPIC_* vars in ~/.slop-env.
-claude --print "$1"
+# Bound the worst case: claude can wedge with orphan BashTool persistent
+# shells (they make themselves session leaders, so they don't die with
+# claude's process group). Without a hard cap a single bad tick stalls the
+# wake driver for hours. 30m is ~2x the slowest healthy tick seen so far.
+TICK_TIMEOUT="${SLOP_TICK_TIMEOUT:-30m}"
+rc=0
+timeout --kill-after=15 "$TICK_TIMEOUT" claude --print "$1" || rc=$?
+if [[ $rc -eq 124 ]]; then
+  echo "slop-tick: claude exceeded ${TICK_TIMEOUT}, killed" >&2
+elif [[ $rc -ne 0 ]]; then
+  echo "slop-tick: claude exited $rc" >&2
+fi
+
+# Reap any orphan BashTool persistent shells claude left behind.
+pkill -f "shell-snapshots/snapshot-zsh" 2>/dev/null || true
 
 if ! git diff --quiet HEAD || [[ -n "$(git ls-files --others --exclude-standard)" ]]; then
   git add -A
