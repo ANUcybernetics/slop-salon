@@ -144,6 +144,63 @@ def _build_write_env_file_cmd(env: dict[str, str]) -> str:
     return f"umask 077 && echo {encoded} | base64 -d > ~/.slop-env && chmod 600 ~/.slop-env"
 
 
+AMBIENT_HOOK_SCRIPT = """#!/bin/bash
+# Ambient-memory recall hook (PostToolUse).
+#
+# Pipes the most recent tool's input through `slop-recall`, which scans the
+# agent's notes/ for token-overlap matches and prints the top few as short
+# snippets. Whatever it prints is wrapped as `hookSpecificOutput
+# .additionalContext`, which Claude Code surfaces to the model alongside
+# the next turn's tool result. Net effect: prior notebook lines surface
+# without the agent having to grep.
+#
+# Fails open. Any error here (missing jq, missing slop-recall, malformed
+# input) just means no injection --- the tick proceeds unchanged.
+#
+# Pattern: Tim Kellogg, "Ambient Associative Memory" (2026-05-17).
+set -eu
+input=$(cat)
+query=$(printf '%s' "$input" | jq -r '.tool_input | tostring' 2>/dev/null || true)
+[ -z "$query" ] && exit 0
+snippets=$(printf '%s' "$query" | slop-recall 2>/dev/null || true)
+[ -z "$snippets" ] && exit 0
+jq -n --arg ctx "Past notes from your workshop:
+$snippets" '{hookSpecificOutput: {hookEventName: "PostToolUse", additionalContext: $ctx}}'
+"""
+
+# Fires PostToolUse on the agent's "looking at the world" tools, where
+# surfacing past notes is most useful. Skips Edit/Write (the agent's
+# *output* moments --- injecting then would be more disruptive than useful).
+AMBIENT_HOOK_SETTINGS = {
+    "hooks": {
+        "PostToolUse": [
+            {
+                "matcher": "Read|Grep|Glob|Bash",
+                "hooks": [{"type": "command", "command": "~/.claude/hooks/ambient-recall.sh"}],
+            }
+        ]
+    }
+}
+
+
+def _build_install_ambient_hook_cmd() -> str:
+    """Install the ambient-recall hook and Claude Code settings in the sprite.
+
+    Idempotent: rewrites both files each run. Safe to invoke on an
+    already-provisioned sprite to retrofit the hook.
+    """
+    import json
+
+    script_b64 = base64.b64encode(AMBIENT_HOOK_SCRIPT.encode()).decode()
+    settings_b64 = base64.b64encode(json.dumps(AMBIENT_HOOK_SETTINGS, indent=2).encode()).decode()
+    return (
+        "mkdir -p ~/.claude/hooks && "
+        f"echo {script_b64} | base64 -d > ~/.claude/hooks/ambient-recall.sh && "
+        "chmod +x ~/.claude/hooks/ambient-recall.sh && "
+        f"echo {settings_b64} | base64 -d > ~/.claude/settings.json"
+    )
+
+
 def _build_tailscale_join_cmd(name: str) -> str:
     """Install Tailscale and join the tailnet.
 
@@ -314,20 +371,23 @@ def provision_agent(
     typer.echo("[7/12] Apt install (imagemagick, ffmpeg, sox)")
     _exec(_build_apt_install_cmd())
 
-    typer.echo("[8/12] uv tool install slop-salon")
+    typer.echo("[8/13] uv tool install slop-salon")
     _exec(_build_uv_and_slop_install_cmd())
 
-    typer.echo("[9/12] Cloning agent repo + symlinking slop-tick into ~/.local/bin")
+    typer.echo("[9/13] Installing ambient-recall hook + Claude Code settings")
+    _exec(_build_install_ambient_hook_cmd())
+
+    typer.echo("[10/13] Cloning agent repo + symlinking slop-tick into ~/.local/bin")
     repo_url = f"https://{gh_token}@github.com/{agent.github_repo}.git"
     _exec(_build_clone_and_symlink_cmd(name, repo_url))
 
-    typer.echo("[10/12] pre-commit install")
+    typer.echo("[11/13] pre-commit install")
     _exec(_build_pre_commit_install_cmd(name))
 
-    typer.echo("[11/12] Configuring git in sprite")
+    typer.echo("[12/13] Configuring git in sprite")
     _exec(_build_git_config_cmd(name, gh_token))
 
-    typer.echo(f"[12/12] Saving sprite_id to {config.path}")
+    typer.echo(f"[13/13] Saving sprite_id to {config.path}")
     save_sprite_id(config, name, sprite_id)
 
     typer.echo(f"\nProvisioned {name} → sprite {sprite_id}")

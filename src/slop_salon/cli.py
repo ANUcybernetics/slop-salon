@@ -32,6 +32,8 @@ import typer
 
 from slop_salon.config import load_config
 from slop_salon.provision import (
+    SLOP_SALON_REPO,
+    _build_install_ambient_hook_cmd,
     _build_template_files,
     _render_sibling_block,
     provision_agent,
@@ -488,6 +490,52 @@ def drift(
             typer.echo(f"  {f:14s}  drift (+{added}/-{removed})")
             for line in diff_lines:
                 typer.echo(f"    {line.rstrip()}")
+
+
+@app.command(name="install-hooks")
+def install_hooks(
+    name: str = typer.Argument(..., help="Agent name (use 'all' for every live agent)"),
+    config_path: str = typer.Option(None, "--config"),
+):
+    """Push the ambient-recall hook + Claude Code settings to a live sprite.
+
+    Idempotent retrofit for sprites provisioned before the hook existed.
+    Also runs `uv tool upgrade slop-salon` so `slop-recall` is on PATH.
+    `provision_agent` runs the same install step for new agents.
+    """
+    config = _config(config_path)
+    if name == "all":
+        targets = [a for a in config.agents.values() if a.live and a.sprite_id]
+        if not targets:
+            typer.echo("no live agents", err=True)
+            raise typer.Exit(code=1)
+    else:
+        _require_sprite_id(config, name)
+        targets = [config.agents[name]]
+
+    sprites = SpritesClient()
+    # --reinstall pulls the latest commit on git+https sources without
+    # caring about the package version, which we don't bump per-change.
+    upgrade_cmd = f"~/.local/bin/uv tool install --reinstall {SLOP_SALON_REPO}"
+    hook_cmd = _build_install_ambient_hook_cmd()
+
+    failed = 0
+    for agent in targets:
+        typer.echo(f"{agent.name:12s}  reinstalling slop-salon...")
+        result = sprites.exec(agent.sprite_id, ["bash", "-lc", upgrade_cmd])
+        if result.exit_code != 0:
+            typer.echo(f"  upgrade failed: {result.stderr or result.stdout}", err=True)
+            failed += 1
+            continue
+        typer.echo(f"{agent.name:12s}  installing hook...")
+        result = sprites.exec(agent.sprite_id, ["bash", "-lc", hook_cmd])
+        if result.exit_code != 0:
+            typer.echo(f"  hook install failed: {result.stderr or result.stdout}", err=True)
+            failed += 1
+            continue
+        typer.echo(f"{agent.name:12s}  ok")
+    if failed:
+        raise typer.Exit(code=1)
 
 
 @app.command()
