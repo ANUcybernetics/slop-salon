@@ -160,8 +160,11 @@ AMBIENT_HOOK_SCRIPT = """#!/bin/bash
 # Pattern: Tim Kellogg, "Ambient Associative Memory" (2026-05-17).
 set -eu
 input=$(cat)
-# Debug trace: line per invocation, capped at last 2000 lines via logrotate-on-the-fly.
-{ printf '%s %s\\n' "$(date -Iseconds)" "$(printf '%s' "$input" | jq -r '.tool_name // "?"' 2>/dev/null)"; } >> /tmp/ambient-hook.log 2>/dev/null || true
+# Debug trace: line per invocation (timestamp + tool name). Capped at the
+# sprite's /tmp lifetime; harmless to leave on while we shake the canary out.
+_ts=$(date -Iseconds)
+_name=$(printf '%s' "$input" | jq -r '.tool_name // "?"' 2>/dev/null || echo "?")
+{ printf '%s %s\\n' "$_ts" "$_name"; } >> /tmp/ambient-hook.log 2>/dev/null || true
 query=$(printf '%s' "$input" | jq -r '.tool_input | tostring' 2>/dev/null || true)
 [ -z "$query" ] && exit 0
 snippets=$(printf '%s' "$query" | slop-recall 2>/dev/null || true)
@@ -170,40 +173,56 @@ jq -n --arg ctx "Past notes from your workshop:
 $snippets" '{hookSpecificOutput: {hookEventName: "PostToolUse", additionalContext: $ctx}}'
 """
 
-# Fires PostToolUse on the agent's "looking at the world" tools, where
-# surfacing past notes is most useful. Skips Edit/Write (the agent's
-# *output* moments --- injecting then would be more disruptive than useful).
-# Use $HOME rather than ~ --- Claude Code does shell-style env expansion on
-# the command string but tilde expansion is unreliable.
-AMBIENT_HOOK_SETTINGS = {
-    "hooks": {
-        "PostToolUse": [
-            {
-                "matcher": "Read|Grep|Glob|Bash",
-                "hooks": [
-                    {"type": "command", "command": "$HOME/.claude/hooks/ambient-recall.sh"}
-                ],
-            }
-        ]
-    }
+# Python script that *merges* our PostToolUse hook into the sprite's
+# existing ~/.claude/settings.json rather than overwriting it. The sprite
+# image ships a settings.json with `defaultMode: bypassPermissions` plus
+# `sprite-env-check.sh` hooks and an MCP-deny rule --- replacing that file
+# (an earlier bug) broke bsky access for the agent. Merging preserves
+# whatever else is there.
+#
+# Idempotent: any prior entry whose command ends in `ambient-recall.sh`
+# is dropped before we re-append, regardless of how the path was written
+# (~/, $HOME/, absolute).
+SETTINGS_MERGE_SCRIPT = """
+import json
+from pathlib import Path
+
+OUR_ENTRY = {
+    "matcher": "Read|Grep|Glob|Bash",
+    "hooks": [{"type": "command", "command": "$HOME/.claude/hooks/ambient-recall.sh"}],
 }
+
+p = Path.home() / ".claude" / "settings.json"
+existing = json.loads(p.read_text()) if p.exists() else {}
+
+hooks = existing.setdefault("hooks", {})
+post = hooks.setdefault("PostToolUse", [])
+post = [
+    e for e in post
+    if not any("ambient-recall.sh" in h.get("command", "") for h in e.get("hooks", []))
+]
+post.append(OUR_ENTRY)
+hooks["PostToolUse"] = post
+
+p.parent.mkdir(parents=True, exist_ok=True)
+p.write_text(json.dumps(existing, indent=2))
+"""
 
 
 def _build_install_ambient_hook_cmd() -> str:
-    """Install the ambient-recall hook and Claude Code settings in the sprite.
+    """Install the ambient-recall hook and merge its settings entry on the sprite.
 
-    Idempotent: rewrites both files each run. Safe to invoke on an
-    already-provisioned sprite to retrofit the hook.
+    Idempotent: re-running reinstalls the hook script and re-merges its
+    settings entry (without duplicating it) into whatever else is already
+    in ~/.claude/settings.json.
     """
-    import json
-
     script_b64 = base64.b64encode(AMBIENT_HOOK_SCRIPT.encode()).decode()
-    settings_b64 = base64.b64encode(json.dumps(AMBIENT_HOOK_SETTINGS, indent=2).encode()).decode()
+    merge_b64 = base64.b64encode(SETTINGS_MERGE_SCRIPT.encode()).decode()
     return (
         "mkdir -p ~/.claude/hooks && "
         f"echo {script_b64} | base64 -d > ~/.claude/hooks/ambient-recall.sh && "
         "chmod +x ~/.claude/hooks/ambient-recall.sh && "
-        f"echo {settings_b64} | base64 -d > ~/.claude/settings.json"
+        f"echo {merge_b64} | base64 -d | python3"
     )
 
 

@@ -300,3 +300,114 @@ siblings = ["other"]
 
     reloaded = load_config(cfg)
     assert reloaded.agents["lou"].sprite_id == "lou"
+
+
+def _run_merge_script(home_dir):
+    """Exec SETTINGS_MERGE_SCRIPT against a Path.home() set to home_dir."""
+    import os
+
+    from slop_salon.provision import SETTINGS_MERGE_SCRIPT
+
+    old_home = os.environ.get("HOME")
+    os.environ["HOME"] = str(home_dir)
+    try:
+        exec(SETTINGS_MERGE_SCRIPT, {"__name__": "__main__"})
+    finally:
+        if old_home is None:
+            del os.environ["HOME"]
+        else:
+            os.environ["HOME"] = old_home
+
+
+def test_settings_merge_preserves_existing_permissions_and_hooks(tmp_path):
+    import json
+
+    (tmp_path / ".claude").mkdir()
+    initial = {
+        "permissions": {"defaultMode": "bypassPermissions"},
+        "hooks": {
+            "PreToolUse": [
+                {"matcher": "^mcp__", "hooks": [{"type": "command", "command": "deny"}]}
+            ],
+            "PostToolUse": [
+                {"matcher": "Bash", "hooks": [{"type": "command", "command": "sprite-env-check"}]}
+            ],
+            "UserPromptSubmit": [
+                {"hooks": [{"type": "command", "command": "sprite-env-check"}]}
+            ],
+        },
+    }
+    (tmp_path / ".claude" / "settings.json").write_text(json.dumps(initial))
+
+    _run_merge_script(tmp_path)
+
+    result = json.loads((tmp_path / ".claude" / "settings.json").read_text())
+
+    assert result["permissions"] == {"defaultMode": "bypassPermissions"}
+    assert result["hooks"]["PreToolUse"] == initial["hooks"]["PreToolUse"]
+    assert result["hooks"]["UserPromptSubmit"] == initial["hooks"]["UserPromptSubmit"]
+    post = result["hooks"]["PostToolUse"]
+    assert any(e["matcher"] == "Bash" for e in post), "sprite-env-check entry must survive"
+    assert any(
+        any("ambient-recall.sh" in h.get("command", "") for h in e.get("hooks", []))
+        for e in post
+    ), "ambient-recall entry must be present"
+
+
+def test_settings_merge_is_idempotent(tmp_path):
+    import json
+
+    (tmp_path / ".claude").mkdir()
+    initial = {"hooks": {"PostToolUse": []}}
+    (tmp_path / ".claude" / "settings.json").write_text(json.dumps(initial))
+
+    _run_merge_script(tmp_path)
+    after_first = json.loads((tmp_path / ".claude" / "settings.json").read_text())
+
+    _run_merge_script(tmp_path)
+    after_second = json.loads((tmp_path / ".claude" / "settings.json").read_text())
+
+    assert after_first == after_second
+    ambient_count = sum(
+        1
+        for e in after_second["hooks"]["PostToolUse"]
+        if any("ambient-recall.sh" in h.get("command", "") for h in e.get("hooks", []))
+    )
+    assert ambient_count == 1, "should not duplicate on reinstall"
+
+
+def test_settings_merge_replaces_stale_path_variant(tmp_path):
+    """A pre-existing entry that uses ~/ instead of $HOME/ should be replaced."""
+    import json
+
+    (tmp_path / ".claude").mkdir()
+    initial = {
+        "hooks": {
+            "PostToolUse": [
+                {
+                    "matcher": "Read|Bash",
+                    "hooks": [{"type": "command", "command": "~/.claude/hooks/ambient-recall.sh"}],
+                }
+            ]
+        }
+    }
+    (tmp_path / ".claude" / "settings.json").write_text(json.dumps(initial))
+
+    _run_merge_script(tmp_path)
+
+    post = json.loads((tmp_path / ".claude" / "settings.json").read_text())["hooks"]["PostToolUse"]
+    assert len(post) == 1
+    assert post[0]["hooks"][0]["command"] == "$HOME/.claude/hooks/ambient-recall.sh"
+
+
+def test_settings_merge_handles_missing_file(tmp_path):
+    import json
+
+    _run_merge_script(tmp_path)
+
+    settings = json.loads((tmp_path / ".claude" / "settings.json").read_text())
+    assert "PostToolUse" in settings["hooks"]
+    assert any(
+        any("ambient-recall.sh" in h.get("command", "") for h in e.get("hooks", []))
+        for e in settings["hooks"]["PostToolUse"]
+    )
