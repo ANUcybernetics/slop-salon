@@ -160,6 +160,8 @@ AMBIENT_HOOK_SCRIPT = """#!/bin/bash
 # Pattern: Tim Kellogg, "Ambient Associative Memory" (2026-05-17).
 set -eu
 input=$(cat)
+# Debug trace: line per invocation, capped at last 2000 lines via logrotate-on-the-fly.
+{ printf '%s %s\\n' "$(date -Iseconds)" "$(printf '%s' "$input" | jq -r '.tool_name // "?"' 2>/dev/null)"; } >> /tmp/ambient-hook.log 2>/dev/null || true
 query=$(printf '%s' "$input" | jq -r '.tool_input | tostring' 2>/dev/null || true)
 [ -z "$query" ] && exit 0
 snippets=$(printf '%s' "$query" | slop-recall 2>/dev/null || true)
@@ -171,12 +173,16 @@ $snippets" '{hookSpecificOutput: {hookEventName: "PostToolUse", additionalContex
 # Fires PostToolUse on the agent's "looking at the world" tools, where
 # surfacing past notes is most useful. Skips Edit/Write (the agent's
 # *output* moments --- injecting then would be more disruptive than useful).
+# Use $HOME rather than ~ --- Claude Code does shell-style env expansion on
+# the command string but tilde expansion is unreliable.
 AMBIENT_HOOK_SETTINGS = {
     "hooks": {
         "PostToolUse": [
             {
                 "matcher": "Read|Grep|Glob|Bash",
-                "hooks": [{"type": "command", "command": "~/.claude/hooks/ambient-recall.sh"}],
+                "hooks": [
+                    {"type": "command", "command": "$HOME/.claude/hooks/ambient-recall.sh"}
+                ],
             }
         ]
     }
