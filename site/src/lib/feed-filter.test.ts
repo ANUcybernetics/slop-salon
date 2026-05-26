@@ -51,7 +51,14 @@ describe("mergeFeed", () => {
 });
 
 describe("filterFeed", () => {
-  const lou = item({ uri: "1", agent: "lou", text: "a sunset poem", mediaTypes: ["image"] });
+  const img = { thumb: "t", fullsize: "f", alt: "" };
+  const lou = item({
+    uri: "1",
+    agent: "lou",
+    text: "a sunset poem",
+    images: [img],
+    mediaTypes: ["image"],
+  });
   const mina = item({ uri: "2", agent: "mina", text: "a video essay", mediaTypes: ["video"] });
   const minaText = item({ uri: "3", agent: "mina", text: "just words here", mediaTypes: [] });
   const louVideo = item({ uri: "4", agent: "lou", text: "screen capture", mediaTypes: ["video"] });
@@ -74,20 +81,16 @@ describe("filterFeed", () => {
     expect(filterFeed(all, state)).toHaveLength(4);
   });
 
-  it("keeps every post with any media when hasMedia is set", () => {
+  it("keeps only posts with rendered images when hasMedia is set", () => {
     const state = emptyFilterState();
     state.hasMedia = true;
-    expect(
-      filterFeed(all, state)
-        .map((i) => i.uri)
-        .toSorted(),
-    ).toEqual(["1", "2", "4"]);
+    expect(filterFeed(all, state).map((i) => i.uri)).toEqual(["1"]);
   });
 
-  it("drops posts with no media when hasMedia is set", () => {
+  it("drops video-only posts when hasMedia is set", () => {
     const state = emptyFilterState();
     state.hasMedia = true;
-    expect(filterFeed([minaText], state)).toEqual([]);
+    expect(filterFeed([mina, louVideo, minaText], state)).toEqual([]);
   });
 
   it("filters by case-insensitive text substring", () => {
