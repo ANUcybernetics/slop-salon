@@ -160,11 +160,6 @@ AMBIENT_HOOK_SCRIPT = """#!/bin/bash
 # Pattern: Tim Kellogg, "Ambient Associative Memory" (2026-05-17).
 set -eu
 input=$(cat)
-# Debug trace: line per invocation (timestamp + tool name). Capped at the
-# sprite's /tmp lifetime; harmless to leave on while we shake the canary out.
-_ts=$(date -Iseconds)
-_name=$(printf '%s' "$input" | jq -r '.tool_name // "?"' 2>/dev/null || echo "?")
-{ printf '%s %s\\n' "$_ts" "$_name"; } >> /tmp/ambient-hook.log 2>/dev/null || true
 query=$(printf '%s' "$input" | jq -r '.tool_input | tostring' 2>/dev/null || true)
 [ -z "$query" ] && exit 0
 snippets=$(printf '%s' "$query" | slop-recall 2>/dev/null || true)
