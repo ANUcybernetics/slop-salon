@@ -24,26 +24,7 @@ describe("extractMediaTypes", () => {
     ).toEqual(["video"]);
   });
 
-  it("detects audio from known external hosts", () => {
-    const hosts = [
-      "https://soundcloud.com/foo/bar",
-      "https://artist.bandcamp.com/track/x",
-      "https://open.spotify.com/track/x",
-      "https://music.apple.com/x",
-      "https://audius.co/track/x",
-      "https://suno.com/song/x",
-    ];
-    for (const uri of hosts) {
-      expect(
-        extractMediaTypes({
-          $type: "app.bsky.embed.external#view",
-          external: { uri },
-        }),
-      ).toEqual(["audio"]);
-    }
-  });
-
-  it("returns empty for non-audio external embeds", () => {
+  it("returns empty for external embeds", () => {
     expect(
       extractMediaTypes({
         $type: "app.bsky.embed.external#view",
@@ -66,14 +47,5 @@ describe("extractMediaTypes", () => {
 
   it("returns empty for unknown embed types", () => {
     expect(extractMediaTypes({ $type: "app.bsky.embed.record#view" })).toEqual([]);
-  });
-
-  it("ignores malformed external URIs", () => {
-    expect(
-      extractMediaTypes({
-        $type: "app.bsky.embed.external#view",
-        external: { uri: "not a url" },
-      }),
-    ).toEqual([]);
   });
 });

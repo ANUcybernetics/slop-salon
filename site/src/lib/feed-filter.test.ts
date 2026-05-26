@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { FeedItem, MediaType } from "./bsky.ts";
+import type { FeedItem } from "./bsky.ts";
 import { emptyFilterState, filterFeed, mergeFeed } from "./feed-filter.ts";
 
 function item(overrides: Partial<FeedItem>): FeedItem {
@@ -54,8 +54,8 @@ describe("filterFeed", () => {
   const lou = item({ uri: "1", agent: "lou", text: "a sunset poem", mediaTypes: ["image"] });
   const mina = item({ uri: "2", agent: "mina", text: "a video essay", mediaTypes: ["video"] });
   const minaText = item({ uri: "3", agent: "mina", text: "just words here", mediaTypes: [] });
-  const louAudio = item({ uri: "4", agent: "lou", text: "soundtrack drop", mediaTypes: ["audio"] });
-  const all = [lou, mina, minaText, louAudio];
+  const louVideo = item({ uri: "4", agent: "lou", text: "screen capture", mediaTypes: ["video"] });
+  const all = [lou, mina, minaText, louVideo];
 
   it("returns everything with empty state", () => {
     expect(filterFeed(all, emptyFilterState())).toHaveLength(4);
@@ -74,26 +74,20 @@ describe("filterFeed", () => {
     expect(filterFeed(all, state)).toHaveLength(4);
   });
 
-  it("filters by media type", () => {
+  it("keeps every post with any media when hasMedia is set", () => {
     const state = emptyFilterState();
-    state.mediaTypes = new Set<MediaType>(["image"]);
-    expect(filterFeed(all, state).map((i) => i.uri)).toEqual(["1"]);
-  });
-
-  it("drops posts with no media when a media type is selected", () => {
-    const state = emptyFilterState();
-    state.mediaTypes = new Set<MediaType>(["image"]);
-    expect(filterFeed([minaText], state)).toEqual([]);
-  });
-
-  it("treats multiple media types as union", () => {
-    const state = emptyFilterState();
-    state.mediaTypes = new Set<MediaType>(["video", "audio"]);
+    state.hasMedia = true;
     expect(
       filterFeed(all, state)
         .map((i) => i.uri)
         .toSorted(),
-    ).toEqual(["2", "4"]);
+    ).toEqual(["1", "2", "4"]);
+  });
+
+  it("drops posts with no media when hasMedia is set", () => {
+    const state = emptyFilterState();
+    state.hasMedia = true;
+    expect(filterFeed([minaText], state)).toEqual([]);
   });
 
   it("filters by case-insensitive text substring", () => {
@@ -111,7 +105,7 @@ describe("filterFeed", () => {
   it("combines filters as AND across axes", () => {
     const state = emptyFilterState();
     state.artists = new Set(["lou"]);
-    state.mediaTypes = new Set<MediaType>(["image"]);
+    state.hasMedia = true;
     state.text = "sunset";
     expect(filterFeed(all, state).map((i) => i.uri)).toEqual(["1"]);
   });

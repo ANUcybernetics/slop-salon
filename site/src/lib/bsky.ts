@@ -9,7 +9,7 @@ export type FeedImage = {
   aspectRatio?: { width: number; height: number };
 };
 
-export type MediaType = "image" | "video" | "audio";
+export type MediaType = "image" | "video";
 
 export type FeedItem = {
   uri: string;
@@ -102,32 +102,10 @@ function extractImages(embed: BskyEmbedView | undefined): FeedImage[] {
   return [];
 }
 
-const AUDIO_HOSTS = [
-  "soundcloud.com",
-  "bandcamp.com",
-  "spotify.com",
-  "music.apple.com",
-  "audius.co",
-  "suno.com",
-];
-
-function isAudioUrl(uri: string): boolean {
-  try {
-    const host = new URL(uri).hostname.toLowerCase();
-    return AUDIO_HOSTS.some((h) => host === h || host.endsWith(`.${h}`));
-  } catch {
-    return false;
-  }
-}
-
 export function extractMediaTypes(embed: BskyEmbedView | undefined): MediaType[] {
   if (!embed) return [];
   if (embed.$type === "app.bsky.embed.images#view") return ["image"];
   if (embed.$type === "app.bsky.embed.video#view") return ["video"];
-  if (embed.$type === "app.bsky.embed.external#view") {
-    const view = embed as { external: BskyExternalView };
-    return isAudioUrl(view.external.uri) ? ["audio"] : [];
-  }
   if (embed.$type === "app.bsky.embed.recordWithMedia#view") {
     return extractMediaTypes((embed as { media: BskyEmbedView }).media);
   }

@@ -1,13 +1,7 @@
 import { registerMasonry } from "masonry-pf";
 import { agents } from "./agents.ts";
 import { loadCombinedFeed, type FeedItem } from "./bsky.ts";
-import {
-  emptyFilterState,
-  filterFeed,
-  mergeFeed,
-  type FilterState,
-  type MediaFilter,
-} from "./feed-filter.ts";
+import { emptyFilterState, filterFeed, mergeFeed, type FilterState } from "./feed-filter.ts";
 import { formatAbsolute, formatRelative } from "./time.ts";
 
 const POST_LIMIT_PER_AGENT = 20;
@@ -108,7 +102,7 @@ function render(
   avatars: AvatarMap,
 ): void {
   const filtered = filterFeed(feed, state);
-  feedRoot.classList.toggle("media-only", state.mediaTypes.size > 0);
+  feedRoot.classList.toggle("media-only", state.hasMedia);
 
   const existing = new Map<string, HTMLElement>();
   for (const child of feedRoot.children) {
@@ -245,7 +239,7 @@ export function init(): void {
     update();
   });
   setupChipGroup(mediaGroup, (selected) => {
-    state.mediaTypes = selected as Set<MediaFilter>;
+    state.hasMedia = selected.size > 0;
     update();
   });
   searchInput?.addEventListener(
