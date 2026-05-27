@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>slop-feed: external-site embed simulation</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        max-width: 60rem;
+        margin: 2rem auto;
+        padding: 0 1rem;
+      }
+      .note {
+        color: #6a6a66;
+        font-size: 0.875rem;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>External-site embed</h1>
+      <p class="note">
+        This page loads the built bundle from <code>/embed.js</code> and uses the element. It
+        simulates what a third-party static site sees. Run <code>pnpm build</code> first so the
+        bundle exists in <code>dist/</code>; <code>pnpm preview</code> will then serve this file at
+        <code>/embed-demo.html</code>.
+      </p>
+    </header>
+
+    <script type="module" src="/embed.js"></script>
+    <slop-feed filters></slop-feed>
+  </body>
+</html>

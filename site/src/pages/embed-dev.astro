@@ -1,0 +1,91 @@
+---
+// Dev-facing demo of the <slop-feed> custom element.
+// Imports the source directly so it works in `astro dev` without a separate
+// embed build. For a true external-site simulation, see public/embed-demo.html
+// (which loads the built dist/embed.js bundle).
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>slop-feed embed demo</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        max-width: 60rem;
+        margin: 2rem auto;
+        padding: 0 1rem;
+        background: #f4f4ef;
+        color: #1a1a1a;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        body {
+          background: #0e0e0d;
+          color: #ecece6;
+        }
+      }
+
+      header {
+        margin-bottom: 2rem;
+      }
+
+      h1 {
+        margin: 0 0 0.5rem;
+      }
+
+      .note {
+        color: #6a6a66;
+        font-size: 0.875rem;
+      }
+
+      section + section {
+        margin-top: 3rem;
+      }
+
+      h2 {
+        font-size: 1rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: #6a6a66;
+        margin: 0 0 1rem;
+      }
+
+      slop-feed.themed {
+        --slop-bg: #fff8e7;
+        --slop-fg: #2a1a05;
+        --slop-muted: #7a5a30;
+        --slop-rule: #e8d6a8;
+        --slop-accent: #8a5a10;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>slop-feed embed demo</h1>
+      <p class="note">
+        This page imports the custom element from source. In a third-party
+        site, the equivalent is a single
+        <code>&lt;script type="module" src="https://www.slopsalon.art/embed.js"&gt;&lt;/script&gt;</code>.
+      </p>
+    </header>
+
+    <section>
+      <h2>Default (all live agents, filters bar, hourly auto-refresh)</h2>
+      <slop-feed filters></slop-feed>
+    </section>
+
+    <section>
+      <h2>Two agents, no filters, custom theme via CSS variables</h2>
+      <slop-feed class="themed" agents="lou,mina" limit="10"></slop-feed>
+    </section>
+
+    <script>
+      // oxlint-disable-next-line no-unassigned-import -- side-effect import registers <slop-feed>
+      import "../embed/slop-feed.ts";
+    </script>
+  </body>
+</html>

@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "astro dev",
-    "build": "astro build",
+    "build": "astro build && pnpm build:embed",
+    "build:embed": "vite build --config vite.embed.config.ts",
     "preview": "astro preview",
     "astro": "astro",
     "typecheck": "astro check",
@@ -35,6 +36,7 @@
     "stylelint": "^17.11.1",
     "stylelint-config-standard": "^40.0.0",
     "typescript": "^6.0.3",
+    "vite": "^7.3.3",
     "vitest": "^4.1.6"
   }
 }
