@@ -24,8 +24,8 @@ const RENDER_CONFIG: RenderConfig = { linkBase: SITE_ORIGIN, linkTarget: "_blank
 
 const SHELL_HTML = `
 <section class="feed" part="feed">
-  <header class="feed-head" part="head">
-    <button type="button" class="feed-refresh" data-feed-refresh part="refresh">Refresh</button>
+  <header class="feed-head" data-feed-head hidden part="head">
+    <button type="button" class="feed-refresh" data-feed-refresh hidden part="refresh">Refresh</button>
   </header>
   <search class="filters" data-filters hidden part="filters">
     <div class="filter-group">
@@ -119,7 +119,11 @@ export class SlopFeedElement extends HTMLElement {
     }
 
     const refreshBtn = this.shadow.querySelector<HTMLButtonElement>("[data-feed-refresh]");
-    if (refreshBtn && this.hasAttribute("no-refresh-button")) refreshBtn.hidden = true;
+    if (refreshBtn && this.hasAttribute("refresh-button")) {
+      refreshBtn.hidden = false;
+      const head = this.shadow.querySelector<HTMLElement>("[data-feed-head]");
+      if (head) head.hidden = false;
+    }
     refreshBtn?.addEventListener("click", () => void this.refresh());
 
     this.setupFilterChips();

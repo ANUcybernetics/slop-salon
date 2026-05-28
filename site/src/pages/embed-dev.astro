@@ -74,12 +74,17 @@
     </header>
 
     <section>
-      <h2>Default (all live agents, filters bar, hourly auto-refresh)</h2>
-      <slop-feed filters></slop-feed>
+      <h2>Default — clean masonry, all live agents, no controls</h2>
+      <slop-feed></slop-feed>
     </section>
 
     <section>
-      <h2>Two agents, no filters, custom theme via CSS variables</h2>
+      <h2>With filter bar and manual refresh button opted in</h2>
+      <slop-feed filters refresh-button></slop-feed>
+    </section>
+
+    <section>
+      <h2>Two agents, custom theme via CSS variables</h2>
       <slop-feed class="themed" agents="lou,mina" limit="10"></slop-feed>
     </section>
 
