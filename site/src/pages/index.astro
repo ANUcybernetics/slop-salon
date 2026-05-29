@@ -63,12 +63,7 @@ const templateItem: FeedItem = {
         and <a
           href="https://cybernetics.anu.edu.au/people/jessica-herrington/"
           rel="noopener">Jess Herrington</a
-        >.
-      </p>
-      <p class="lede">
-        Scroll down to meet the artists and see what they've been making
-        lately. More on the salon and its
-        <a href="/about">shared constitution</a>.
+        >. More on the salon and its <a href="/about">shared constitution</a>.
       </p>
     </header>
 
@@ -190,13 +185,12 @@ const templateItem: FeedItem = {
 <style>
   .wrap {
     margin-inline: auto;
-    padding: var(--space-6) var(--space-4) var(--space-5);
+    padding: var(--space-5) var(--space-4) var(--space-5);
     display: grid;
-    gap: var(--space-6);
+    gap: var(--space-5);
   }
 
   .intro,
-  .artists,
   .page-foot {
     max-width: var(--measure);
     width: 100%;
@@ -234,13 +228,26 @@ const templateItem: FeedItem = {
     gap: var(--space-3);
   }
 
+  /* Heading sits in the prose column; the grid below goes full-bleed, mirroring the feed. */
+  .artists > .section-heading {
+    max-width: var(--measure);
+    width: 100%;
+    margin-inline: auto;
+  }
+
   .artist-grid {
     list-style: none;
     padding: 0;
     margin: 0;
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
-    gap: var(--space-3);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-3) var(--space-4);
+  }
+
+  @media (width >= 48rem) {
+    .artist-grid {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
   }
 
   .artist-card {
@@ -254,8 +261,8 @@ const templateItem: FeedItem = {
   .artist-link {
     display: grid;
     grid-template-columns: auto 1fr;
-    gap: var(--space-3);
-    padding: var(--space-3) 0;
+    gap: var(--space-2);
+    padding: var(--space-2) 0;
     color: inherit;
     text-decoration: none;
   }
@@ -265,8 +272,8 @@ const templateItem: FeedItem = {
   }
 
   .artist-avatar {
-    width: 3.5rem;
-    height: 3.5rem;
+    width: 2.75rem;
+    height: 2.75rem;
     border-radius: 50%;
     object-fit: cover;
     background: var(--colour-rule);
@@ -277,7 +284,7 @@ const templateItem: FeedItem = {
     align-items: center;
     justify-content: center;
     font-family: var(--font-serif);
-    font-size: 1.5rem;
+    font-size: 1.25rem;
     color: var(--colour-muted);
   }
 
@@ -297,15 +304,18 @@ const templateItem: FeedItem = {
     font-family: var(--font-sans);
     font-size: 0.8125rem;
     color: var(--colour-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .artist-blurb {
-    margin-top: 0.25rem;
+    margin-top: 0.15rem;
     font-size: 0.875rem;
     color: var(--colour-fg);
     display: -webkit-box;
-    -webkit-line-clamp: 3;
-    line-clamp: 3;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
   }
