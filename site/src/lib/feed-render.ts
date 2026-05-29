@@ -1,6 +1,6 @@
 import type { FeedItem } from "./bsky.ts";
 import { filterFeed, type FilterState } from "./feed-filter.ts";
-import { formatAbsolute, formatRelative } from "./time.ts";
+import { formatAbsolute, formatRelativeShort } from "./time.ts";
 
 export type AvatarMap = Record<string, string>;
 
@@ -58,11 +58,6 @@ export function buildPost(
     avatarEl.replaceWith(placeholder);
   }
 
-  const handleEl = article.querySelector(".post-handle") as HTMLAnchorElement;
-  handleEl.href = item.handle ? `https://bsky.app/profile/${item.handle}` : "#";
-  applyTarget(handleEl, config.linkTarget);
-  handleEl.textContent = `@${item.handle}`;
-
   const badge = article.querySelector(".badge") as HTMLElement;
   badge.hidden = !item.isRepost;
 
@@ -71,8 +66,7 @@ export function buildPost(
   applyTarget(timeLink, config.linkTarget);
   const timeEl = article.querySelector("time") as HTMLTimeElement;
   timeEl.dateTime = item.createdAt;
-  const absEl = article.querySelector(".post-time-absolute") as HTMLElement;
-  absEl.textContent = formatAbsolute(item.createdAt);
+  timeEl.title = formatAbsolute(item.createdAt);
 
   const textEl = article.querySelector(".post-text") as HTMLElement;
   textEl.textContent = item.text;
@@ -105,8 +99,8 @@ export function buildPost(
 }
 
 export function updateMutableFields(article: HTMLElement, item: FeedItem): void {
-  const relEl = article.querySelector(".post-time-relative") as HTMLElement;
-  relEl.textContent = formatRelative(item.createdAt);
+  const timeEl = article.querySelector(".post-time time") as HTMLElement;
+  timeEl.textContent = formatRelativeShort(item.createdAt);
 
   const countsEl = article.querySelector(".post-counts") as HTMLElement;
   const total = item.replyCount + item.repostCount + item.likeCount;

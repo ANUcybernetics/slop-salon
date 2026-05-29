@@ -56,13 +56,8 @@ const POST_TEMPLATE_HTML = `
       <img class="post-avatar" alt="" width="24" height="24" loading="lazy" />
       <span class="post-author-name"></span>
     </a>
-    <a class="post-handle" rel="noopener"></a>
     <a class="post-time" rel="noopener">
-      <time>
-        <span class="post-time-absolute"></span>
-        <span class="post-time-sep" aria-hidden="true">·</span>
-        <span class="post-time-relative"></span>
-      </time>
+      <time></time>
     </a>
     <span class="badge" hidden>reposted</span>
   </header>

@@ -228,35 +228,15 @@ a:hover {
   text-overflow: ellipsis;
 }
 
-.post-handle {
-  color: var(--slop-muted);
-  text-decoration: none;
-}
-
-.post-handle:hover {
-  color: var(--slop-fg);
-  text-decoration: underline;
-}
-
 .post-time {
   color: var(--slop-muted);
   text-decoration: none;
   margin-left: auto;
+  flex-shrink: 0;
 }
 
 .post-time:hover {
   color: var(--slop-fg);
-}
-
-.post-time time {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 0.45em;
-  align-items: baseline;
-}
-
-.post-time-sep {
-  opacity: 0.6;
 }
 
 .badge {

@@ -1,6 +1,6 @@
 ---
 import type { FeedItem } from "../lib/bsky.ts";
-import { formatAbsolute, formatRelative } from "../lib/time.ts";
+import { formatAbsolute, formatRelativeShort } from "../lib/time.ts";
 
 interface Props {
   item: FeedItem;
@@ -11,7 +11,6 @@ const { item, agentAvatar } = Astro.props;
 
 const totalCounts = item.replyCount + item.repostCount + item.likeCount;
 const agentPath = item.agent ? `/agents/${item.agent}` : "#";
-const bskyProfile = item.handle ? `https://bsky.app/profile/${item.handle}` : "#";
 ---
 
 <article class="post" data-uri={item.uri}>
@@ -24,12 +23,9 @@ const bskyProfile = item.handle ? `https://bsky.app/profile/${item.handle}` : "#
       )}
       <span class="post-author-name">{item.agent}</span>
     </a>
-    <a class="post-handle" href={bskyProfile} rel="noopener">@{item.handle}</a>
     <a class="post-time" href={item.url || "#"} rel="noopener">
-      <time datetime={item.createdAt}>
-        <span class="post-time-absolute">{formatAbsolute(item.createdAt)}</span>
-        <span class="post-time-sep" aria-hidden="true">·</span>
-        <span class="post-time-relative">{formatRelative(item.createdAt)}</span>
+      <time datetime={item.createdAt} title={formatAbsolute(item.createdAt)}>
+        {formatRelativeShort(item.createdAt)}
       </time>
     </a>
     <span class="badge" hidden={!item.isRepost}>reposted</span>
@@ -125,35 +121,15 @@ const bskyProfile = item.handle ? `https://bsky.app/profile/${item.handle}` : "#
     text-overflow: ellipsis;
   }
 
-  .post-handle {
-    color: var(--colour-muted);
-    text-decoration: none;
-  }
-
-  .post-handle:hover {
-    color: var(--colour-fg);
-    text-decoration: underline;
-  }
-
   .post-time {
     color: var(--colour-muted);
     text-decoration: none;
     margin-left: auto;
+    flex-shrink: 0;
   }
 
   .post-time:hover {
     color: var(--colour-fg);
-  }
-
-  .post-time time {
-    display: inline-flex;
-    flex-wrap: wrap;
-    gap: 0.45em;
-    align-items: baseline;
-  }
-
-  .post-time-sep {
-    opacity: 0.6;
   }
 
   .badge {
