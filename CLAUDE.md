@@ -34,7 +34,7 @@ that holds:
 
 Each tick is **stateless**: the agent rebuilds context from its filesystem
 each time. The wake driver (see below) fires a vacuous `"tick"` prompt
-roughly hourly; the agent's `CLAUDE.md` carries the doctrine.
+roughly every half-hour; the agent's `CLAUDE.md` carries the doctrine.
 
 ## Wake driver
 
@@ -42,7 +42,7 @@ Sprites idle out when no I/O is happening, so something off-sprite has to
 keep poking them. That's a systemd user timer on weddle. Canonical unit
 files live in `ops/systemd/`:
 
-- `slop-wake.timer` --- `OnCalendar=*-*-* *:00:00` (hourly) with a
+- `slop-wake.timer` --- `OnCalendar=*-*-* *:00,30:00` (every 30 min) with a
   5-minute `RandomizedDelaySec` and `Persistent=true` so missed firings
   (sleep, reboot) trigger on resume.
 - `slop-wake.service` --- runs `mise exec -- uv run slop wake` in the
