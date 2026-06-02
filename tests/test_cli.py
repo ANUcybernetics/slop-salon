@@ -49,20 +49,105 @@ def test_status_lists_agents(fake_config):
         assert "running" in result.output
 
 
-def test_logs_runs_command_in_sprite(fake_config):
+def _transcript_stream() -> str:
+    """A delimited two-turn session as `slop logs` streams it back from a sprite."""
+    return "\n".join(
+        [
+            "<<<SLOPLOG abcd1234-0000.jsonl 2026-06-02T10:07:10Z>>>",
+            json.dumps(
+                {
+                    "type": "user",
+                    "timestamp": "2026-06-02T10:02:03Z",
+                    "message": {"role": "user", "content": "tick"},
+                }
+            ),
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "timestamp": "2026-06-02T10:02:30Z",
+                    "message": {
+                        "role": "assistant",
+                        "content": [
+                            {"type": "thinking", "thinking": "Let me follow the tick procedure."},
+                            {"type": "tool_use", "name": "Bash", "input": {"command": "bsky feed"}},
+                            {"type": "text", "text": "posted a piece about eigenvectors"},
+                        ],
+                    },
+                }
+            ),
+            json.dumps(
+                {
+                    "type": "user",
+                    "timestamp": "2026-06-02T10:02:40Z",
+                    "message": {
+                        "role": "user",
+                        "content": [{"type": "tool_result", "content": "3 new notifications"}],
+                    },
+                }
+            ),
+        ]
+    )
+
+
+def test_logs_renders_transcript_from_sprite(fake_config):
     with patch("slop_salon.cli.SpritesClient") as mock_class:
         instance = MagicMock()
-        instance.exec.return_value = MagicMock(stdout="(transcript)", stderr="", exit_code=0)
+        instance.exec.return_value = MagicMock(stdout=_transcript_stream(), stderr="", exit_code=0)
         mock_class.return_value = instance
 
         result = runner.invoke(app, ["logs", "lou"])
 
         assert result.exit_code == 0, result.output
-        assert "transcript" in result.output
-        # Should have exec'd against the right sprite
+        # Exec'd against the right sprite, reading the real transcript dir
         instance.exec.assert_called_once()
         sprite_id, command = instance.exec.call_args[0]
         assert sprite_id == "spr_abc"
+        remote = " ".join(command)
+        assert ".claude/projects" in remote
+        assert "slop-salon-lou" in remote
+        # Rendered as readable turns, not raw JSON
+        assert "abcd1234" in result.output  # session id in the header
+        assert "tick" in result.output
+        assert "posted a piece about eigenvectors" in result.output
+        assert "Bash" in result.output
+        assert "3 new notifications" in result.output
+        assert "10:02:30" in result.output
+        assert '"type"' not in result.output  # JSON was parsed, not dumped
+
+
+def test_logs_reports_no_transcripts(fake_config):
+    with patch("slop_salon.cli.SpritesClient") as mock_class:
+        instance = MagicMock()
+        instance.exec.return_value = MagicMock(stdout="", stderr="", exit_code=0)
+        mock_class.return_value = instance
+
+        result = runner.invoke(app, ["logs", "lou"])
+
+        assert result.exit_code == 0, result.output
+        assert "no transcripts" in result.output.lower()
+
+
+def test_logs_sessions_option_sets_head_count(fake_config):
+    with patch("slop_salon.cli.SpritesClient") as mock_class:
+        instance = MagicMock()
+        instance.exec.return_value = MagicMock(stdout="", stderr="", exit_code=0)
+        mock_class.return_value = instance
+
+        runner.invoke(app, ["logs", "lou", "-n", "3"])
+
+        remote = " ".join(instance.exec.call_args[0][1])
+        assert "head -3" in remote
+
+
+def test_render_transcripts_is_pure():
+    from slop_salon.cli import _render_transcripts
+
+    out = _render_transcripts(_transcript_stream())
+    assert "-- tick abcd1234" in out
+    assert "posted a piece about eigenvectors" in out
+    assert "10:02:30" in out
+    # No delimiter -> no sessions
+    assert _render_transcripts("just some noise\nwithout a header") == ""
 
 
 def test_diff_runs_git_in_sprite(fake_config):

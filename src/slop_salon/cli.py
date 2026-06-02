@@ -85,29 +85,155 @@ def _require_sprite_id(config, agent_name: str) -> str:
 @app.command()
 def logs(
     name: str = typer.Argument(..., help="Agent name"),
+    sessions: int = typer.Option(
+        1, "--sessions", "-n", help="How many recent tick sessions to show (newest first)"
+    ),
     config_path: str = typer.Option(None, "--config"),
 ):
-    """Print recent claude transcripts from the agent's sprite."""
+    """Print recent claude tick transcripts from the agent's sprite, rendered as turns."""
     config = _config(config_path)
     sprite_id = _require_sprite_id(config, name)
     sprites = SpritesClient()
-    # `.claude/` holds session transcripts; tail the most recent.
-    # Substitute the agent name client-side rather than relying on
-    # AGENT_NAME being in the sprite's interactive-shell env.
+    # Claude Code writes one JSONL transcript per session under
+    # ~/.claude/projects/<munged-cwd>/. Ticks run in ~/slop-salon-<name>, so the
+    # session dir ends in `slop-salon-<name>`. Stream the newest N files, each
+    # preceded by a delimiter line carrying its basename and mtime, then render
+    # the raw JSONL into readable turns client-side.
     quoted_name = shlex.quote(name)
-    result = sprites.exec(
-        sprite_id,
-        [
-            "bash",
-            "-lc",
-            f"ls -t ~/slop-salon-{quoted_name}/.claude/ 2>/dev/null | head -5 | "
-            'while read f; do echo "=== $f ==="; '
-            f'cat ~/slop-salon-{quoted_name}/.claude/"$f"; done',
-        ],
+    count = max(1, sessions)
+    remote = (
+        f"ls -t ~/.claude/projects/*slop-salon-{quoted_name}/*.jsonl 2>/dev/null "
+        f"| head -{count} | while read -r f; do "
+        f'echo "{_SLOPLOG_DELIM}$(basename "$f") '
+        '$(date -u -r "$f" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)>>>"; '
+        'cat "$f"; done'
     )
-    typer.echo(result.stdout)
-    if result.stderr:
+    result = sprites.exec(sprite_id, ["bash", "-lc", remote])
+    if result.stderr.strip():
         typer.echo(result.stderr, err=True)
+    rendered = _render_transcripts(result.stdout)
+    typer.echo(rendered if rendered.strip() else "(no transcripts found)")
+
+
+# Sentinel that `slop logs` prepends to each streamed transcript so the client
+# can split a multi-session dump back into per-session blocks.
+_SLOPLOG_DELIM = "<<<SLOPLOG "
+
+
+def _render_transcripts(stream: str) -> str:
+    """Render the delimited JSONL stream emitted by `slop logs` into readable turns.
+
+    The stream is a run of sessions, each introduced by a
+    ``<<<SLOPLOG <basename> <mtime>>>>`` line and followed by that session's raw
+    JSONL transcript. Returns an empty string when no sessions are present.
+    """
+    sessions: list[tuple[str, list[str]]] = []
+    header: str | None = None
+    body: list[str] = []
+    for line in stream.splitlines():
+        if line.startswith(_SLOPLOG_DELIM):
+            if header is not None:
+                sessions.append((header, body))
+            header = line[len(_SLOPLOG_DELIM) :].rstrip(">").strip()
+            body = []
+        elif header is not None:
+            body.append(line)
+    if header is not None:
+        sessions.append((header, body))
+    return "\n\n".join(_render_session(h, b) for h, b in sessions)
+
+
+def _render_session(header: str, raw_lines: list[str]) -> str:
+    """Render one session: a header line plus the rendered turns."""
+    parts = header.split()
+    session_id = parts[0].removesuffix(".jsonl")[:8] if parts else "?"
+    mtime = parts[1] if len(parts) > 1 else ""
+    rows: list[str] = []
+    for raw in raw_lines:
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            obj = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        rows.extend(_render_entry(obj))
+    title = f"-- tick {session_id}" + (f" · {mtime}" if mtime else "") + " --"
+    return "\n".join([title, *rows]) if rows else title
+
+
+def _render_entry(obj: dict) -> list[str]:
+    """Render one transcript JSONL object as zero or more display lines."""
+    typ = obj.get("type")
+    ts = _short_ts(obj.get("timestamp", ""))
+    content = (obj.get("message") or {}).get("content")
+    if typ == "user":
+        if isinstance(content, str):
+            text = _oneline(content)
+            return [f"{ts}  user       {_truncate(text, 500)}"] if text else []
+        rows = []
+        for block in content if isinstance(content, list) else []:
+            if isinstance(block, dict) and block.get("type") == "tool_result":
+                rows.append(f"{ts}    <- {_truncate(_oneline(_block_text(block)), 300)}")
+        return rows
+    if typ == "assistant":
+        rows = []
+        for block in content if isinstance(content, list) else []:
+            if not isinstance(block, dict):
+                continue
+            bt = block.get("type")
+            if bt == "thinking":
+                think = _oneline(block.get("thinking", ""))
+                if think:
+                    rows.append(f"{ts}    ~  {_truncate(think, 240)}")
+            elif bt == "text":
+                text = block.get("text", "").strip()
+                if text:
+                    rows.append(f"{ts}  assistant  {_truncate(text, 800)}")
+            elif bt == "tool_use":
+                args = _oneline(_compact(block.get("input")))
+                rows.append(f"{ts}    -> {block.get('name', '?')}({_truncate(args, 200)})")
+        if not rows and isinstance(content, str) and content.strip():
+            rows.append(f"{ts}  assistant  {_truncate(content.strip(), 800)}")
+        return rows
+    return []
+
+
+def _block_text(block: dict) -> str:
+    """Pull text out of a tool_result block (content is a str or a list of parts)."""
+    content = block.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return " ".join(
+            part.get("text", "")
+            for part in content
+            if isinstance(part, dict) and part.get("type") == "text"
+        )
+    return ""
+
+
+def _compact(value) -> str:
+    if isinstance(value, str):
+        return value
+    try:
+        return json.dumps(value, separators=(",", ":"), ensure_ascii=False)
+    except TypeError, ValueError:
+        return str(value)
+
+
+def _oneline(text: str) -> str:
+    return " ".join(text.split())
+
+
+def _truncate(text: str, limit: int) -> str:
+    text = text.strip()
+    return text if len(text) <= limit else text[: limit - 3].rstrip() + "..."
+
+
+def _short_ts(iso: str) -> str:
+    """`2026-06-02T10:02:21.478Z` -> `10:02:21`; missing/garbage -> blanks."""
+    return iso.split("T", 1)[1][:8] if "T" in iso else " " * 8
 
 
 @app.command()
