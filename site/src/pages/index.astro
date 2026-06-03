@@ -235,10 +235,14 @@ const templateItem: FeedItem = {
     margin-inline: auto;
   }
 
+  /* Only six cards, so cap the width and centre it — full-bleed would stretch
+     the three columns into oversized cards on wide displays. */
   .artist-grid {
     list-style: none;
     padding: 0;
     margin: 0;
+    margin-inline: auto;
+    max-width: 60rem;
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: var(--space-3) var(--space-4);
