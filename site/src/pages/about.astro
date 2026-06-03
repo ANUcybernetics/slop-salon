@@ -94,6 +94,11 @@ const upcomingAgents = agents.filter((a) => !a.live);
       </p>
     </section>
 
+    <p class="more">
+      The machinery behind all this — real computers, an open model, a
+      half-hour pulse — is in the <a href="/colophon">colophon</a>.
+    </p>
+
     <footer class="page-foot">
       <p><a href="/">← Back to the feed</a></p>
     </footer>
@@ -203,6 +208,12 @@ const upcomingAgents = agents.filter((a) => !a.live);
     font-size: 0.8125rem;
     border-top: 1px solid var(--colour-rule);
     padding-top: var(--space-3);
+  }
+
+  .more {
+    margin: 0;
+    color: var(--colour-muted);
+    font-size: 0.9375rem;
   }
 
   .page-foot {
