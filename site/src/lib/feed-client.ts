@@ -49,6 +49,8 @@ export function init(): void {
   let feed: FeedItem[] = readInitial("initial-feed");
   const avatars = readAvatars("agent-avatars");
   const state: FilterState = emptyFilterState();
+  // Landing feed defaults to media-only (the "media" chip ships pre-pressed in the markup).
+  state.hasMedia = true;
   let masonryCleanup: (() => void) | undefined;
   const update = (): void => {
     renderFeed({
@@ -110,6 +112,8 @@ export function init(): void {
 
   refreshBtn?.addEventListener("click", () => void refresh());
 
-  masonryCleanup = registerMasonry(feedRoot);
+  // Paint the SSR feed through the filter immediately so the media-only default
+  // takes effect on load rather than after the first network refresh.
+  update();
   void refresh();
 }

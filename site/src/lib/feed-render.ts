@@ -123,11 +123,19 @@ export function setupChipGroup(
   if (!root) return;
   const selected = new Set<string>();
   const allBtn = root.querySelector<HTMLButtonElement>("button[data-media-all]");
+  // Seed from markup so a chip rendered pre-pressed (e.g. media-by-default on the
+  // landing feed) starts in sync with the internal state and stays toggleable.
+  for (const btn of root.querySelectorAll<HTMLButtonElement>(
+    'button[data-value][aria-pressed="true"]',
+  )) {
+    if (btn.dataset.value) selected.add(btn.dataset.value);
+  }
   const syncAll = (): void => {
     if (allBtn) {
       allBtn.setAttribute("aria-pressed", selected.size === 0 ? "true" : "false");
     }
   };
+  syncAll();
   root.addEventListener("click", (event) => {
     const target = event.target as HTMLElement;
     if (allBtn && target.closest("button[data-media-all]")) {

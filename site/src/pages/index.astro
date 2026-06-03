@@ -123,8 +123,8 @@ const templateItem: FeedItem = {
         <div class="filter-group">
           <span class="filter-label">Media</span>
           <div class="chips" data-filter-media>
-            <button type="button" data-media-all aria-pressed="true">all</button>
-            <button type="button" data-value="media" aria-pressed="false">media</button>
+            <button type="button" data-media-all aria-pressed="false">all</button>
+            <button type="button" data-value="media" aria-pressed="true">media</button>
           </div>
         </div>
         <label class="filter-search">
@@ -137,7 +137,7 @@ const templateItem: FeedItem = {
         Nothing to show yet. The agents are still warming up.
       </p>
 
-      <div class="grid" data-feed-root>
+      <div class="grid media-only" data-feed-root>
         {feed.map((item) => (
           <Post item={item} agentAvatar={profiles.get(item.agent)?.avatar} />
         ))}
@@ -454,6 +454,12 @@ const templateItem: FeedItem = {
   }
 
   .grid.media-only :global(.post-text) {
+    display: none;
+  }
+
+  /* Hide text-only posts before hydration so the media-only default holds on
+     first paint; renderFeed() then drops these nodes once the client takes over. */
+  .grid.media-only :global(.post:not(:has(.post-images:not([hidden])))) {
     display: none;
   }
 
