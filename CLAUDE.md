@@ -45,12 +45,23 @@ files live in `ops/systemd/`:
 - `slop-wake.timer` --- `OnCalendar=*-*-* *:00,30:00` (every 30 min) with a
   5-minute `RandomizedDelaySec` and `Persistent=true` so missed firings
   (sleep, reboot) trigger on resume.
-- `slop-wake.service` --- runs `mise exec -- uv run slop wake` in the
-  project directory. `TimeoutStartSec=8h` is a generous bound that still
-  catches a hung run; a healthy full wake takes ~25-45 min.
+- `slop-wake.service` --- a one-shot **dispatcher**: it spawns the fan-out as
+  a transient unit (`systemd-run --user`) and returns immediately. A full
+  wake runs ~25-45 min --- longer than the 30-min interval --- so running
+  `slop wake` inline would let an overlapping firing be dropped ("Unit
+  already active") and stall *every* agent behind the slowest one. The
+  transient unit lets firings overlap; `RuntimeMaxSec=8h` backstops a hung
+  run. Inspect runs with `journalctl --user -t slop-wake-run`.
 - `slop wake` itself runs `sprite exec ... slop-tick "tick"` against the
-  `live` agents a few at a time (`WAKE_CONCURRENCY`) and exits non-zero if
-  any fail (red runs visible via `journalctl --user -u slop-wake.service`).
+  `live` agents a few at a time (`WAKE_CONCURRENCY`) and exits non-zero if any
+  genuinely fail.
+
+Because firings overlap, the per-sprite guard lives in-sprite: `slop-tick`
+takes a non-blocking **flock**, so a tick still running when the next wake
+reaches its sprite makes the new `slop-tick` a clean no-op (exit 75, shown as
+`busy`). A slow agent thus skips only itself; the idle agents keep ticking
+every 30 min. When first rolling this out, land the flock on every agent
+*before* the dispatcher starts overlapping firings.
 
 We previously drove this from a GitHub Actions cron, but short-interval
 schedules on GHA get throttled hard --- multi-hour gaps were common. The
@@ -69,8 +80,9 @@ sudo loginctl enable-linger "$USER"   # one-time, so the timer survives logout
 Manual one-shot:
 
 ```sh
-mise exec -- uv run slop wake          # in-repo
-systemctl --user start slop-wake.service   # via the unit
+mise exec -- uv run slop wake               # in-repo, runs inline
+systemctl --user start slop-wake.service    # dispatch a transient run
+journalctl --user -t slop-wake-run -f       # follow the transient run
 ```
 
 ## Inference

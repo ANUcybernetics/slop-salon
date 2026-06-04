@@ -1,14 +1,26 @@
 [Unit]
-Description=Wake all live Slop Salon agents (one tick each)
+Description=Dispatch a Slop Salon wake (one tick per live agent)
 Documentation=file:///home/ben/projects/slop-salon/CLAUDE.md
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=oneshot
-WorkingDirectory=/home/ben/projects/slop-salon
-Environment=PATH=/home/ben/.local/bin:/usr/local/bin:/usr/bin:/bin
-ExecStart=/home/ben/.local/bin/mise exec -- uv run slop wake
-# A healthy full 6-agent wake runs ~25-45 min (ticks a few minutes each,
-# four concurrent); 8h is a generous bound that still catches a hung run.
-TimeoutStartSec=8h
+# A full 6-agent wake runs ~25-45 min --- often longer than the timer's 30-min
+# interval. If this service ran `slop wake` inline, an overlapping firing would
+# hit "Unit slop-wake.service is already active" and be dropped, stalling
+# *every* agent behind the slowest one. Instead we spawn the fan-out as a
+# transient unit and return immediately, so successive firings overlap. The
+# in-sprite slop-tick flock makes a still-busy agent a clean no-op (it exits
+# 75 -> rendered as `busy`), so each firing ticks only the idle agents.
+#
+# Inspect runs with: journalctl --user -t slop-wake-run
+# RuntimeMaxSec is the backstop for a hung run (a wedged `sprite exec` has no
+# timeout of its own); a healthy wake finishes well inside it.
+ExecStart=/usr/bin/systemd-run --user --collect \
+    --description="Slop Salon wake run" \
+    --property=SyslogIdentifier=slop-wake-run \
+    --property=WorkingDirectory=/home/ben/projects/slop-salon \
+    --property=Environment=PATH=/home/ben/.local/bin:/usr/local/bin:/usr/bin:/bin \
+    --property=RuntimeMaxSec=8h \
+    /home/ben/.local/bin/mise exec -- uv run slop wake

@@ -331,6 +331,11 @@ def talk(
 # Raise toward saturation, lower for more headroom.
 WAKE_CONCURRENCY = 4
 
+# Exit code `slop-tick` uses when another tick already holds the sprite's lock
+# (overlapping wake runs are expected; see templates/slop-tick). Treated as a
+# clean skip, not a failure.
+SKIP_BUSY_CODE = 75
+
 
 @app.command()
 def wake(
@@ -338,10 +343,13 @@ def wake(
 ):
     """Fire a `tick` at every live agent, a few at a time.
 
-    Driven by the `slop-wake.timer` systemd user unit on the admin box.
-    Ticks run `sprite exec ... slop-tick "tick"`; concurrency is capped at
-    WAKE_CONCURRENCY so the shared vLLM is saturated but not thrashed.
-    Exits non-zero if any agent failed, so systemd records a red run.
+    Driven by the `slop-wake.timer` systemd user unit on the admin box, which
+    spawns each wake as a transient unit so a slow run never blocks the next
+    firing. Ticks run `sprite exec ... slop-tick "tick"`; concurrency is
+    capped at WAKE_CONCURRENCY so the shared vLLM is saturated but not
+    thrashed. An agent still mid-tick from an overlapping run skips cleanly
+    (shown as `busy`, exit SKIP_BUSY_CODE), so only idle agents tick. Exits
+    non-zero if any agent genuinely failed, so systemd records a red run.
     """
     config = _config(config_path)
     live = [a for a in config.agents.values() if a.live and a.sprite_id]
@@ -362,9 +370,14 @@ def wake(
     failed = 0
     with ThreadPoolExecutor(max_workers=min(WAKE_CONCURRENCY, len(live))) as pool:
         for agent, result, elapsed in pool.map(_tick, live):
-            status = "ok" if result.exit_code == 0 else f"fail({result.exit_code})"
+            if result.exit_code == 0:
+                status = "ok"
+            elif result.exit_code == SKIP_BUSY_CODE:
+                status = "busy"
+            else:
+                status = f"fail({result.exit_code})"
             typer.echo(f"{agent.name:12s}  {status:12s}  {elapsed:6.1f}s")
-            if result.exit_code != 0:
+            if result.exit_code not in (0, SKIP_BUSY_CODE):
                 failed += 1
                 tail = (result.stderr or result.stdout).strip().splitlines()[-5:]
                 for line in tail:

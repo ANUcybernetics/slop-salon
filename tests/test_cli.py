@@ -236,6 +236,69 @@ def test_talk_runs_slop_tick_with_prompt(fake_config):
         assert "your last three posts felt similar" in joined
 
 
+@pytest.fixture
+def live_config(tmp_path, monkeypatch):
+    cfg = tmp_path / "slop_salon.toml"
+    cfg.write_text(
+        """
+[agents.lou]
+handle = "lou.slopsalon.art"
+github_repo = "ANUcybernetics/slop-salon-lou"
+sprite_id = "spr_lou"
+siblings = ["mina"]
+live = true
+
+[agents.mina]
+handle = "mina.slopsalon.art"
+github_repo = "ANUcybernetics/slop-salon-mina"
+sprite_id = "spr_mina"
+siblings = ["lou"]
+live = true
+"""
+    )
+    monkeypatch.chdir(tmp_path)
+    return cfg
+
+
+def _wake_with_outcomes(outcomes):
+    with patch("slop_salon.cli.SpritesClient") as mock_class:
+        instance = MagicMock()
+        instance.exec.side_effect = lambda sprite_id, cmd: outcomes[sprite_id]
+        mock_class.return_value = instance
+        return runner.invoke(app, ["wake"])
+
+
+def test_wake_busy_agent_is_skipped_not_failed(live_config):
+    # mina is mid-tick from an overlapping run: slop-tick exits 75.
+    result = _wake_with_outcomes(
+        {
+            "spr_lou": MagicMock(stdout="", stderr="", exit_code=0),
+            "spr_mina": MagicMock(
+                stdout="",
+                stderr="slop-tick: a tick is already running in this sprite, skipping",
+                exit_code=75,
+            ),
+        }
+    )
+
+    # Busy is a clean skip --- the run stays green and is not a failure.
+    assert result.exit_code == 0, result.output
+    assert "busy" in result.output
+    assert "fail" not in result.output
+
+
+def test_wake_genuine_failure_makes_run_red(live_config):
+    result = _wake_with_outcomes(
+        {
+            "spr_lou": MagicMock(stdout="", stderr="", exit_code=0),
+            "spr_mina": MagicMock(stdout="", stderr="boom", exit_code=1),
+        }
+    )
+
+    assert result.exit_code == 1, result.output
+    assert "fail(1)" in result.output
+
+
 def test_drift_reports_clean_and_drift(fake_config, tmp_path):
     # Create a templates dir + SOUL.md alongside the config
     templates = tmp_path / "templates"

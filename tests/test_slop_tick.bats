@@ -40,6 +40,15 @@ exit 0
 EOF
     chmod +x "$STUB_DIR/pgrep"
 
+    # Stub pkill so the orphan-shell reap is a hermetic no-op. The real
+    # `pkill -f "shell-snapshots/snapshot-zsh"` would match (and kill) the
+    # host's own shells when the suite runs inside an agent harness.
+    cat > "$STUB_DIR/pkill" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+    chmod +x "$STUB_DIR/pkill"
+
     export PATH="$STUB_DIR:$PATH"
     export HOME="$TEST_HOME"
     export AGENT_NAME
@@ -70,6 +79,26 @@ teardown() {
     cd "$AGENT_DIR"
     log_count=$(git log --oneline | wc -l)
     [ "$log_count" -ge 2 ]
+}
+
+@test "skips cleanly when another tick holds the sprite lock" {
+    cd "$AGENT_DIR"
+    initial_count=$(git log --oneline | wc -l)
+
+    # Hold the lock the way an in-flight tick would (fd 8 keeps the flock).
+    exec 8>"$TEST_HOME/.slop-tick.lock"
+    flock -n 8
+
+    run bash "$SCRIPT" "tick"
+
+    exec 8>&-
+
+    [ "$status" -eq 75 ]
+    [[ "$output" == *"already running"* ]]
+
+    # No tick ran: no new commit.
+    cd "$AGENT_DIR"
+    [ "$(git log --oneline | wc -l)" -eq "$initial_count" ]
 }
 
 @test "skips commit when nothing changed" {

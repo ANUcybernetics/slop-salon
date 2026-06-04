@@ -35,6 +35,20 @@ if ! pgrep -x tailscaled >/dev/null 2>&1; then
   sleep 5
 fi
 
+# One tick per sprite at a time. `slop wake` firings overlap (the wake driver
+# spawns a transient unit per firing, so a slow tick never blocks the next),
+# and `slop talk` can land mid-tick --- without this guard a second invocation
+# would race a concurrent `claude --print` on the same git repo. Non-blocking:
+# if a tick already holds the lock this one is a clean no-op (exit 75, which
+# `slop wake` renders as `busy` rather than a failure). Opened *after* the
+# tailscaled spawn above so that long-lived daemon never inherits the lock fd;
+# fd 9 is closed in the `claude` child below so its orphan shells can't pin it.
+exec 9>"$HOME/.slop-tick.lock"
+if ! flock -n 9; then
+  echo "slop-tick: a tick is already running in this sprite, skipping" >&2
+  exit 75
+fi
+
 cd "$HOME/slop-salon-$AGENT_NAME"
 
 # Pick up any admin-side edits to the repo (CLAUDE.md, SOUL.md, etc).
@@ -49,7 +63,7 @@ git pull --rebase --autostash
 # wake driver for hours. 30m is ~2x the slowest healthy tick seen so far.
 TICK_TIMEOUT="${SLOP_TICK_TIMEOUT:-30m}"
 rc=0
-timeout --kill-after=15 "$TICK_TIMEOUT" claude --print "$1" || rc=$?
+timeout --kill-after=15 "$TICK_TIMEOUT" claude --print "$1" 9>&- || rc=$?
 if [[ $rc -eq 124 ]]; then
   echo "slop-tick: claude exceeded ${TICK_TIMEOUT}, killed" >&2
 elif [[ $rc -ne 0 ]]; then
