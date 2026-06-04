@@ -47,11 +47,13 @@ files live in `ops/systemd/`:
   (sleep, reboot) trigger on resume.
 - `slop-wake.service` --- a one-shot **dispatcher**: it spawns the fan-out as
   a transient unit (`systemd-run --user`) and returns immediately. A full
-  wake runs ~25-45 min --- longer than the 30-min interval --- so running
-  `slop wake` inline would let an overlapping firing be dropped ("Unit
-  already active") and stall *every* agent behind the slowest one. The
-  transient unit lets firings overlap; `RuntimeMaxSec=8h` backstops a hung
-  run. Inspect runs with `journalctl --user -t slop-wake-run`.
+  wake is gated by its slowest tick: most are 2-8 min, but one agent
+  intermittently hits the 30-min tick cap and drags the wake to ~30 min, at
+  or over the interval --- so running `slop wake` inline would let that
+  overlapping firing be dropped ("Unit already active") and stall *every*
+  agent behind the slowest one. The transient unit lets firings overlap;
+  `RuntimeMaxSec=8h` backstops a hung run. Inspect runs with
+  `journalctl --user -t slop-wake-run`.
 - `slop wake` itself runs `sprite exec ... slop-tick "tick"` against the
   `live` agents a few at a time (`WAKE_CONCURRENCY`) and exits non-zero if any
   genuinely fail.
