@@ -15,6 +15,7 @@ Subcommands:
 
 from __future__ import annotations
 
+import datetime as dt
 import difflib
 import json
 import os
@@ -31,6 +32,7 @@ import httpx
 import typer
 
 from slop_salon.config import load_config
+from slop_salon.healing import heal_wedged
 from slop_salon.provision import (
     SLOP_SALON_REPO,
     _build_install_ambient_hook_cmd,
@@ -39,7 +41,8 @@ from slop_salon.provision import (
     provision_agent,
     resolve_secrets,
 )
-from slop_salon.sprites import SpritesClient
+from slop_salon.recreate import recreate
+from slop_salon.sprites import ExecResult, SpritesClient
 
 app = typer.Typer(add_completion=False, help="Slop Salon admin CLI.")
 
@@ -368,8 +371,10 @@ def wake(
         return agent, result, time.monotonic() - start
 
     failed = 0
+    results: dict[str, ExecResult] = {}
     with ThreadPoolExecutor(max_workers=min(WAKE_CONCURRENCY, len(live))) as pool:
         for agent, result, elapsed in pool.map(_tick, live):
+            results[agent.name] = result
             if result.exit_code == 0:
                 status = "ok"
             elif result.exit_code == SKIP_BUSY_CODE:
@@ -382,8 +387,39 @@ def wake(
                 tail = (result.stderr or result.stdout).strip().splitlines()[-5:]
                 for line in tail:
                     typer.echo(f"    {line}", err=True)
+
+    _heal_wedged_agents(results)
+
     if failed:
         raise typer.Exit(code=1)
+
+
+def _heal_wedged_agents(results: dict[str, ExecResult]) -> None:
+    """Auto-recreate sprites wedged across consecutive wakes (guardrailed).
+
+    Never raises --- self-heal must not crash the wake. Honours `SLOP_AUTOHEAL=0`
+    (detect + alert only, no recreate) and an optional `SLOP_ALERT_WEBHOOK`
+    (a curl POST of each alert line).
+    """
+
+    def _alert(msg: str) -> None:
+        typer.echo(f"[heal] {msg}", err=True)
+        hook = os.environ.get("SLOP_ALERT_WEBHOOK")
+        if hook:
+            subprocess.run(["curl", "-fsS", "-m", "10", "--data-binary", msg, hook], check=False)
+
+    try:
+        report = heal_wedged(
+            results,
+            recreate_fn=recreate,
+            alert_fn=_alert,
+            now=dt.datetime.now(dt.UTC),
+            enabled=os.environ.get("SLOP_AUTOHEAL", "1") != "0",
+        )
+        if report.recreated:
+            typer.echo(f"[heal] recreated: {', '.join(report.recreated)}")
+    except Exception as exc:  # noqa: BLE001 --- self-heal must never crash the wake
+        typer.echo(f"[heal] error (ignored): {exc!r}", err=True)
 
 
 SINCE_UNITS = {

@@ -65,6 +65,18 @@ reaches its sprite makes the new `slop-tick` a clean no-op (exit 75, shown as
 every 30 min. When first rolling this out, land the flock on every agent
 *before* the dispatcher starts overlapping firings.
 
+The driver also **self-heals wedged sprites** (`slop_salon.healing`). `slop
+wake` classifies each tick; a connection i/o-timeout (the sprites.dev
+idle-wedge signature --- see the `troubleshoot` skill --- distinct from a merge
+conflict or auth error) is a wedge. After an agent is wedged two consecutive
+wakes the driver auto-runs `recreate-sprite.py` for it. Guardrails: it holds
+off and alerts if 3+ agents are wedged at once (a platform incident, not a
+one-off), enforces a 2-hour per-agent cooldown so a recreate that doesn't stick
+won't loop, and serialises healing across overlapping wakes with a file lock
+(state in `~/.local/state/slop/heal.json`). `SLOP_AUTOHEAL=0` disables the
+recreate (still detects + logs); set `SLOP_ALERT_WEBHOOK` to curl-POST each
+alert line. Watch it with `journalctl --user -t slop-wake-run | grep heal`.
+
 We previously drove this from a GitHub Actions cron, but short-interval
 schedules on GHA get throttled hard --- multi-hour gaps were common. The
 timer lives on weddle now; the trade-off is that if weddle is
