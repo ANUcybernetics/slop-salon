@@ -21,6 +21,7 @@ bsky = "slop_salon.tools.bsky:app"
 replicate = "slop_salon.tools.replicate_run:app"
 slop-usage = "slop_salon.tools.usage:app"
 slop-recall = "slop_salon.tools.recall:app"
+slop-studio = "slop_salon.tools.studio:app"
 
 [dependency-groups]
 dev = [

@@ -56,6 +56,21 @@ cd "$HOME/slop-salon-$AGENT_NAME"
 # the tick loudly; the admin can intervene per "When things go wrong".
 git pull --rebase --autostash
 
+# Enrich the vacuous "tick" prompt with a short studio-state preamble: an
+# automated read of the agent's own recent practice (how long since it revised
+# CLAUDE.md or its avatar, whether recent output is all still images). Computed
+# in-sprite by `slop-studio` from the agent's own git history + public profile;
+# it stays silent unless something crosses a threshold, so a healthy tick is
+# unchanged. Only the scheduled "tick" is augmented --- an admin `slop talk`
+# prompt is left exactly as sent. Fail-open: any error leaves the prompt as-is.
+PROMPT="$1"
+if [[ "$PROMPT" == "tick" ]]; then
+  cue="$(timeout 15 slop-studio 2>/dev/null || true)"
+  if [[ -n "$cue" ]]; then
+    PROMPT="$cue"$'\n\n'"$1"
+  fi
+fi
+
 # Model and API endpoint come from the ANTHROPIC_* vars in ~/.slop-env.
 # Bound the worst case: claude can wedge with orphan BashTool persistent
 # shells (they make themselves session leaders, so they don't die with
@@ -63,7 +78,7 @@ git pull --rebase --autostash
 # wake driver for hours. 30m is ~2x the slowest healthy tick seen so far.
 TICK_TIMEOUT="${SLOP_TICK_TIMEOUT:-30m}"
 rc=0
-timeout --kill-after=15 "$TICK_TIMEOUT" claude --print "$1" 9>&- || rc=$?
+timeout --kill-after=15 "$TICK_TIMEOUT" claude --print "$PROMPT" 9>&- || rc=$?
 if [[ $rc -eq 124 ]]; then
   echo "slop-tick: claude exceeded ${TICK_TIMEOUT}, killed" >&2
 elif [[ $rc -ne 0 ]]; then

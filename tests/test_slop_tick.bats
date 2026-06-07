@@ -17,10 +17,20 @@ setup() {
     STUB_DIR="$(mktemp -d)"
     cat > "$STUB_DIR/claude" <<'EOF'
 #!/usr/bin/env bash
-# Stub: writes a tick artifact when given any prompt
+# Stub: record the prompt claude was invoked with (claude --print "<prompt>",
+# so $2), then write a tick artifact so a commit happens.
+printf '%s' "$2" > "$HOME/claude-prompt.txt"
 echo "tick-output" > "$PWD/tick-$$.txt"
 EOF
     chmod +x "$STUB_DIR/claude"
+
+    # Default slop-studio stub: emits nothing, so the prompt is unchanged.
+    # Individual tests override it to exercise the cue-prepend path.
+    cat > "$STUB_DIR/slop-studio" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+    chmod +x "$STUB_DIR/slop-studio"
 
     # Wrap git so `push` is a no-op (no remote in test)
     REAL_GIT="$(command -v git)"
@@ -117,4 +127,50 @@ EOF
     cd "$AGENT_DIR"
     new_count=$(git log --oneline | wc -l)
     [ "$initial_count" -eq "$new_count" ]
+}
+
+@test "prepends the studio-state cue to a tick prompt" {
+    cat > "$STUB_DIR/slop-studio" <<'EOF'
+#!/usr/bin/env bash
+echo "Studio state --- mirror line"
+EOF
+    chmod +x "$STUB_DIR/slop-studio"
+
+    run bash "$SCRIPT" "tick"
+    [ "$status" -eq 0 ]
+    prompt="$(cat "$TEST_HOME/claude-prompt.txt")"
+    [[ "$prompt" == *"Studio state --- mirror line"* ]]
+    # The original "tick" prompt is preserved after the cue.
+    [[ "$prompt" == *$'\n\ntick' ]]
+}
+
+@test "leaves the tick prompt unchanged when the cue is empty" {
+    run bash "$SCRIPT" "tick"
+    [ "$status" -eq 0 ]
+    [ "$(cat "$TEST_HOME/claude-prompt.txt")" = "tick" ]
+}
+
+@test "does not prepend the cue to a non-tick (talk) prompt" {
+    cat > "$STUB_DIR/slop-studio" <<'EOF'
+#!/usr/bin/env bash
+echo "Studio state --- should not appear"
+EOF
+    chmod +x "$STUB_DIR/slop-studio"
+
+    run bash "$SCRIPT" "a one-shot prompt from the admin"
+    [ "$status" -eq 0 ]
+    [ "$(cat "$TEST_HOME/claude-prompt.txt")" = "a one-shot prompt from the admin" ]
+}
+
+@test "tick survives a failing slop-studio" {
+    cat > "$STUB_DIR/slop-studio" <<'EOF'
+#!/usr/bin/env bash
+echo "boom" >&2
+exit 1
+EOF
+    chmod +x "$STUB_DIR/slop-studio"
+
+    run bash "$SCRIPT" "tick"
+    [ "$status" -eq 0 ]
+    [ "$(cat "$TEST_HOME/claude-prompt.txt")" = "tick" ]
 }
