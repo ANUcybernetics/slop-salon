@@ -19,9 +19,11 @@ agent to model than a fleet of per-operation tools, and the agent's
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import mimetypes
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -31,6 +33,12 @@ import typer
 DEFAULT_PDS = "https://bsky.social"
 DEFAULT_TIMEOUT = 20.0
 UPLOAD_TIMEOUT = 60.0
+# Skip an app.bsky.feed.post createRecord if an identical post already exists
+# within this many minutes. createRecord is non-idempotent, so a slow or lost
+# response makes the agent re-issue the write and the same post lands twice;
+# the guard collapses those. Override with SLOP_POST_DEDUP_WINDOW_MIN, or set
+# SLOP_POST_DEDUP=0 to disable entirely.
+DEDUP_WINDOW_MIN = 180.0
 
 
 COOKBOOK = """\
@@ -234,6 +242,89 @@ def _mime_of(path: Path) -> str:
     return mime or "application/octet-stream"
 
 
+def _norm_text(text: str | None) -> str:
+    """Collapse whitespace so a trivially-reformatted re-issue still matches."""
+    return re.sub(r"\s+", " ", (text or "").strip())
+
+
+def _collect_strings(obj: object, key: str, out: set[str]) -> None:
+    """Recursively gather every string stored under `key` anywhere in obj."""
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if k == key and isinstance(v, str):
+                out.add(v)
+            else:
+                _collect_strings(v, key, out)
+    elif isinstance(obj, list):
+        for v in obj:
+            _collect_strings(v, key, out)
+
+
+def _post_identity(record: dict) -> tuple[str, str | None, frozenset[str], frozenset[str]]:
+    """A comparable identity for an app.bsky.feed.post record: its text, its
+    reply parent, the blob CIDs embedded in it, and any records/links it
+    references. Enough to recognise the same finished post re-issued, without
+    merging two genuinely different posts that merely share a caption."""
+    embed = record.get("embed") or {}
+    blobs: set[str] = set()
+    _collect_strings(embed, "$link", blobs)
+    uris: set[str] = set()
+    _collect_strings(embed, "uri", uris)
+    parent = (((record.get("reply") or {}).get("parent")) or {}).get("uri")
+    return (_norm_text(record.get("text")), parent, frozenset(blobs), frozenset(uris))
+
+
+def _same_post(incoming: tuple, existing: tuple) -> bool:
+    text_i, parent_i, blobs_i, uris_i = incoming
+    text_e, parent_e, blobs_e, uris_e = existing
+    if text_i != text_e or parent_i != parent_e:
+        return False
+    if blobs_i or blobs_e:
+        # Media posts: the same piece iff they share an uploaded blob --- a
+        # retry that re-assembled the embed with fewer images still matches.
+        return bool(blobs_i & blobs_e)
+    # Text-only or quote posts: identity is the set of referenced records.
+    return uris_i == uris_e
+
+
+def _recent_duplicate(session: Session, record: dict) -> tuple[str, str] | None:
+    """Return (uri, cid) of a recent identical post in this repo, if any.
+
+    Best-effort and fail-open: any failure (guard disabled, listRecords down,
+    unparseable timestamps) returns None so the post still goes out --- the
+    guard must never be the reason a post fails to publish."""
+    if os.environ.get("SLOP_POST_DEDUP") == "0":
+        return None
+    try:
+        window_min = float(os.environ.get("SLOP_POST_DEDUP_WINDOW_MIN", DEDUP_WINDOW_MIN))
+    except ValueError:
+        window_min = DEDUP_WINDOW_MIN
+    try:
+        resp = httpx.get(
+            f"{session.pds}/xrpc/com.atproto.repo.listRecords",
+            params={"repo": session.did, "collection": "app.bsky.feed.post", "limit": 50},
+            headers=session.auth_headers,
+            timeout=DEFAULT_TIMEOUT,
+        )
+        if resp.status_code != 200:
+            return None
+        incoming = _post_identity(record)
+        cutoff = dt.datetime.now(dt.UTC) - dt.timedelta(minutes=window_min)
+        for item in resp.json().get("records", []):
+            value = item.get("value") or {}
+            try:
+                when = dt.datetime.fromisoformat(value.get("createdAt", "").replace("Z", "+00:00"))
+                if when < cutoff:
+                    continue
+            except ValueError, TypeError:
+                continue
+            if _same_post(incoming, _post_identity(value)):
+                return item.get("uri", ""), item.get("cid", "")
+    except Exception:
+        return None
+    return None
+
+
 @app.command()
 def get(
     nsid: str = typer.Argument(..., help="XRPC method NSID, e.g. app.bsky.feed.getTimeline"),
@@ -283,6 +374,24 @@ def post(
             raise typer.Exit(code=1) from e
     session = _get_session()
     url = f"{session.pds}/xrpc/{nsid}"
+    # Idempotency guard: createRecord is a non-idempotent write, so a slow or
+    # lost response makes the agent re-issue it and the same finished post
+    # lands more than once. Before writing a feed post, skip if an identical
+    # one already exists in the recent window, returning it as if just created.
+    if (
+        nsid == "com.atproto.repo.createRecord"
+        and isinstance(parsed, dict)
+        and parsed.get("collection") == "app.bsky.feed.post"
+        and isinstance(parsed.get("record"), dict)
+    ):
+        dup = _recent_duplicate(session, parsed["record"])
+        if dup is not None:
+            uri, cid = dup
+            typer.echo(
+                f"note: identical post within dedup window; skipped re-post of {uri}", err=True
+            )
+            typer.echo(json.dumps({"uri": uri, "cid": cid}))
+            raise typer.Exit(code=0)
     if file is not None:
         resp = httpx.post(
             url,
