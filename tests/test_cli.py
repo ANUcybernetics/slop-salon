@@ -299,6 +299,119 @@ def test_wake_genuine_failure_makes_run_red(live_config):
     assert "fail(1)" in result.output
 
 
+def _wedge_result():
+    """An ExecResult carrying the cold-start exec-proxy wedge signature."""
+    return MagicMock(
+        stdout="",
+        stderr="failed to start sprite command: failed to connect: "
+        "read tcp 10.46.16.55:43744->169.155.48.226:443: i/o timeout",
+        exit_code=1,
+    )
+
+
+def test_exec_tick_with_retry_absorbs_transient_wedge():
+    from slop_salon.cli import _exec_tick_with_retry
+
+    ok = MagicMock(stdout="", stderr="", exit_code=0)
+    sprites = MagicMock()
+    sprites.exec.side_effect = [_wedge_result(), ok]
+
+    result, retried = _exec_tick_with_retry(sprites, "spr_x")
+
+    assert retried is True
+    assert result is ok
+    assert sprites.exec.call_count == 2
+
+
+def test_exec_tick_with_retry_no_retry_when_first_attempt_clean():
+    from slop_salon.cli import _exec_tick_with_retry
+
+    ok = MagicMock(stdout="", stderr="", exit_code=0)
+    sprites = MagicMock()
+    sprites.exec.side_effect = [ok]
+
+    result, retried = _exec_tick_with_retry(sprites, "spr_x")
+
+    assert retried is False
+    assert result is ok
+    assert sprites.exec.call_count == 1
+
+
+def test_exec_tick_with_retry_does_not_retry_busy():
+    """A busy skip (exit 75) is not a wedge --- no retry."""
+    from slop_salon.cli import _exec_tick_with_retry
+
+    busy = MagicMock(stdout="", stderr="a tick is already running", exit_code=75)
+    sprites = MagicMock()
+    sprites.exec.side_effect = [busy]
+
+    _, retried = _exec_tick_with_retry(sprites, "spr_x")
+
+    assert retried is False
+    assert sprites.exec.call_count == 1
+
+
+def test_exec_tick_with_retry_genuine_wedge_stays_wedged():
+    from slop_salon.cli import _exec_tick_with_retry
+    from slop_salon.healing import is_wedge
+
+    sprites = MagicMock()
+    sprites.exec.side_effect = [_wedge_result(), _wedge_result()]
+
+    result, retried = _exec_tick_with_retry(sprites, "spr_x")
+
+    assert retried is True
+    assert sprites.exec.call_count == 2
+    # Second attempt still carries the signature, so the healer still acts.
+    assert is_wedge(result)
+
+
+def test_wake_retries_transient_wedge_and_recovers(live_config):
+    """Wedged once then ok: retried, stays green, flagged as retried."""
+    ok = MagicMock(stdout="", stderr="", exit_code=0)
+    seq = {"spr_lou": [ok], "spr_mina": [_wedge_result(), ok]}
+
+    def _exec(sprite_id, _cmd):
+        return seq[sprite_id].pop(0)
+
+    with (
+        patch("slop_salon.cli.SpritesClient") as mock_class,
+        patch("slop_salon.cli._heal_wedged_agents"),
+    ):
+        instance = MagicMock()
+        instance.exec.side_effect = _exec
+        mock_class.return_value = instance
+
+        result = runner.invoke(app, ["wake"])
+
+    assert result.exit_code == 0, result.output  # mina recovered on retry
+    assert "retried" in result.output
+    assert "fail" not in result.output
+
+
+def test_wake_genuine_wedge_retried_then_red(live_config):
+    """Wedged on both attempts: retried, still fails, reddens the run."""
+    ok = MagicMock(stdout="", stderr="", exit_code=0)
+    seq = {"spr_lou": [ok], "spr_mina": [_wedge_result(), _wedge_result()]}
+
+    def _exec(sprite_id, _cmd):
+        return seq[sprite_id].pop(0)
+
+    with (
+        patch("slop_salon.cli.SpritesClient") as mock_class,
+        patch("slop_salon.cli._heal_wedged_agents"),
+    ):
+        instance = MagicMock()
+        instance.exec.side_effect = _exec
+        mock_class.return_value = instance
+
+        result = runner.invoke(app, ["wake"])
+
+    assert result.exit_code == 1, result.output
+    assert "fail(1)" in result.output
+    assert "retried" in result.output
+
+
 def test_drift_reports_clean_and_drift(fake_config, tmp_path):
     # Create a templates dir + SOUL.md alongside the config
     templates = tmp_path / "templates"

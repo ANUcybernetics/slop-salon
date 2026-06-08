@@ -56,7 +56,12 @@ files live in `ops/systemd/`:
   `journalctl --user -t slop-wake-run`.
 - `slop wake` itself runs `sprite exec ... slop-tick "tick"` against the
   `live` agents a few at a time (`WAKE_CONCURRENCY`) and exits non-zero if any
-  genuinely fail.
+  genuinely fail. A first attempt that hits the cold-start i/o-timeout
+  signature (`healing.is_wedge`) is **retried once** before counting --- an
+  idle sprite often warms on the second connect --- so a transient blip doesn't
+  redden the run or feed the healer's consecutive-wedge counter (shown as
+  `(retried i/o-timeout)` in the wake line). A sprite that fails both attempts
+  is still classified and healed as before.
 
 Because firings overlap, the per-sprite guard lives in-sprite: `slop-tick`
 takes a non-blocking **flock**, so a tick still running when the next wake

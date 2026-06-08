@@ -32,7 +32,7 @@ import httpx
 import typer
 
 from slop_salon.config import load_config
-from slop_salon.healing import heal_wedged
+from slop_salon.healing import heal_wedged, is_wedge
 from slop_salon.provision import (
     SLOP_SALON_REPO,
     _build_install_ambient_hook_cmd,
@@ -340,6 +340,25 @@ WAKE_CONCURRENCY = 4
 SKIP_BUSY_CODE = 75
 
 
+def _exec_tick_with_retry(sprites: SpritesClient, sprite_id: str) -> tuple[ExecResult, bool]:
+    """Run one `slop-tick "tick"`, retrying once on the transient wedge signature.
+
+    A cold-start i/o-timeout to the sprite's exec proxy (the `is_wedge`
+    signature) is usually transient --- the sprite was idle/cold and the first
+    connect raced its warm-up; an immediate second attempt typically lands.
+    Absorbing it here keeps a one-off blip from being counted as a wedge, which
+    would otherwise redden the run and, after two in a row, trip an unnecessary
+    recreate. A genuinely wedged sprite fails both attempts --- the second result
+    still carries the wedge signature, so `heal_wedged` classifies and heals it
+    exactly as before. Returns (result, retried).
+    """
+    cmd = ["bash", "-lc", 'slop-tick "tick"']
+    result = sprites.exec(sprite_id, cmd)
+    if not is_wedge(result):
+        return result, False
+    return sprites.exec(sprite_id, cmd), True
+
+
 @app.command()
 def wake(
     config_path: str = typer.Option(None, "--config"),
@@ -364,16 +383,13 @@ def wake(
 
     def _tick(agent):
         start = time.monotonic()
-        result = sprites.exec(
-            agent.sprite_id,
-            ["bash", "-lc", 'slop-tick "tick"'],
-        )
-        return agent, result, time.monotonic() - start
+        result, retried = _exec_tick_with_retry(sprites, agent.sprite_id)
+        return agent, result, time.monotonic() - start, retried
 
     failed = 0
     results: dict[str, ExecResult] = {}
     with ThreadPoolExecutor(max_workers=min(WAKE_CONCURRENCY, len(live))) as pool:
-        for agent, result, elapsed in pool.map(_tick, live):
+        for agent, result, elapsed, retried in pool.map(_tick, live):
             results[agent.name] = result
             if result.exit_code == 0:
                 status = "ok"
@@ -381,7 +397,10 @@ def wake(
                 status = "busy"
             else:
                 status = f"fail({result.exit_code})"
-            typer.echo(f"{agent.name:12s}  {status:12s}  {elapsed:6.1f}s")
+            summary = f"{agent.name:12s}  {status:12s}  {elapsed:6.1f}s"
+            if retried:
+                summary += "  (retried i/o-timeout)"
+            typer.echo(summary)
             if result.exit_code not in (0, SKIP_BUSY_CODE):
                 failed += 1
                 tail = (result.stderr or result.stdout).strip().splitlines()[-5:]
