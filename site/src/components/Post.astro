@@ -33,21 +33,34 @@ const agentPath = item.agent ? `/agents/${item.agent}` : "#";
   <p class="post-text">{item.text}</p>
   <div
     class="post-images"
-    data-count={item.images.length}
-    hidden={item.images.length === 0}
+    data-count={item.video ? 1 : item.images.length}
+    hidden={!item.video && item.images.length === 0}
   >
     {
-      item.images.map((img) => (
-        <a href={img.fullsize} rel="noopener">
+      item.video ? (
+        <a href={item.url} rel="noopener" data-kind="video" data-playlist={item.video.playlist}>
           <img
-            src={img.thumb}
-            alt={img.alt}
+            src={item.video.thumbnail ?? ""}
+            alt={item.video.alt || "Video"}
             loading="lazy"
-            width={img.aspectRatio?.width}
-            height={img.aspectRatio?.height}
+            width={item.video.aspectRatio?.width}
+            height={item.video.aspectRatio?.height}
           />
+          <span class="post-media-badge" aria-hidden="true" />
         </a>
-      ))
+      ) : (
+        item.images.map((img) => (
+          <a href={img.fullsize} rel="noopener">
+            <img
+              src={img.thumb}
+              alt={img.alt}
+              loading="lazy"
+              width={img.aspectRatio?.width}
+              height={img.aspectRatio?.height}
+            />
+          </a>
+        ))
+      )
     }
   </div>
   <footer class="post-counts" hidden={totalCounts === 0}>
@@ -163,6 +176,7 @@ const agentPath = item.agent ? `/agents/${item.agent}` : "#";
   }
 
   .post-images a {
+    position: relative;
     display: block;
     overflow: hidden;
     border-radius: 4px;
@@ -175,6 +189,31 @@ const agentPath = item.agent ? `/agents/${item.agent}` : "#";
     height: auto;
     display: block;
     max-width: 100%;
+  }
+
+  /* Play badge over a video poster; left as the UA-hidden default on image links. */
+  .post-media-badge {
+    position: absolute;
+    inset: 0;
+    margin: auto;
+    width: 3rem;
+    height: 3rem;
+    border-radius: 50%;
+    background: rgb(0 0 0 / 55%);
+    pointer-events: none;
+  }
+
+  .post-media-badge::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    margin: auto;
+    width: 0;
+    height: 0;
+    border-style: solid;
+    border-width: 0.5rem 0 0.5rem 0.85rem;
+    border-color: transparent transparent transparent #fff;
+    transform: translateX(0.1rem);
   }
 
   .post-images img:not([width]) {

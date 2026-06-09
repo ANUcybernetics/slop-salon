@@ -29,6 +29,19 @@ function applyTarget(link: HTMLAnchorElement, target: string): void {
   else link.removeAttribute("target");
 }
 
+/**
+ * Hide a video poster that fails to load (e.g. an expired/failed blob, which
+ * 404s on the bsky video CDN) so the card shows a neutral box + play badge
+ * instead of a broken-image icon. visibility:hidden keeps the box's height.
+ */
+export function guardVideoPoster(img: HTMLImageElement): void {
+  const hide = (): void => {
+    img.style.visibility = "hidden";
+  };
+  if (img.complete && img.naturalWidth === 0) hide();
+  else img.addEventListener("error", hide, { once: true });
+}
+
 export function buildPost(
   template: HTMLTemplateElement,
   item: FeedItem,
@@ -74,23 +87,51 @@ export function buildPost(
   const imagesEl = article.querySelector(".post-images") as HTMLElement;
   const stencil = imagesEl.querySelector("a") as HTMLAnchorElement;
   imagesEl.replaceChildren();
-  imagesEl.dataset.count = String(item.images.length);
-  imagesEl.hidden = item.images.length === 0;
-  for (const img of item.images) {
+  if (item.video) {
+    imagesEl.dataset.count = "1";
+    imagesEl.hidden = false;
     const link = stencil.cloneNode(true) as HTMLAnchorElement;
-    link.href = img.fullsize;
+    // Link to the bsky post (not the bare .m3u8) so no-JS and the embed's
+    // new-tab path land somewhere playable; the lightbox reads data-playlist.
+    link.href = item.url;
     applyTarget(link, config.linkTarget);
+    link.dataset.kind = "video";
+    link.dataset.playlist = item.video.playlist;
     const imgEl = link.querySelector("img") as HTMLImageElement;
-    imgEl.src = img.thumb;
-    imgEl.alt = img.alt;
-    if (img.aspectRatio) {
-      imgEl.width = img.aspectRatio.width;
-      imgEl.height = img.aspectRatio.height;
+    imgEl.src = item.video.thumbnail ?? "";
+    imgEl.alt = item.video.alt || "Video";
+    guardVideoPoster(imgEl);
+    if (item.video.aspectRatio) {
+      imgEl.width = item.video.aspectRatio.width;
+      imgEl.height = item.video.aspectRatio.height;
     } else {
       imgEl.removeAttribute("width");
       imgEl.removeAttribute("height");
     }
+    const mediaBadge = document.createElement("span");
+    mediaBadge.className = "post-media-badge";
+    mediaBadge.setAttribute("aria-hidden", "true");
+    link.appendChild(mediaBadge);
     imagesEl.appendChild(link);
+  } else {
+    imagesEl.dataset.count = String(item.images.length);
+    imagesEl.hidden = item.images.length === 0;
+    for (const img of item.images) {
+      const link = stencil.cloneNode(true) as HTMLAnchorElement;
+      link.href = img.fullsize;
+      applyTarget(link, config.linkTarget);
+      const imgEl = link.querySelector("img") as HTMLImageElement;
+      imgEl.src = img.thumb;
+      imgEl.alt = img.alt;
+      if (img.aspectRatio) {
+        imgEl.width = img.aspectRatio.width;
+        imgEl.height = img.aspectRatio.height;
+      } else {
+        imgEl.removeAttribute("width");
+        imgEl.removeAttribute("height");
+      }
+      imagesEl.appendChild(link);
+    }
   }
 
   updateMutableFields(article, item);

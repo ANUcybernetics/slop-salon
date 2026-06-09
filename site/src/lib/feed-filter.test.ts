@@ -51,7 +51,7 @@ describe("mergeFeed", () => {
 
 describe("filterFeed", () => {
   const img = { thumb: "t", fullsize: "f", alt: "" };
-  const video = { playlist: "https://video.bsky.app/x.m3u8", thumbnail: "p" };
+  const video = { playlist: "https://video.bsky.app/x.m3u8", thumbnail: "p", alt: "" };
   const lou = item({ uri: "1", agent: "lou", text: "a sunset poem", images: [img] });
   const mina = item({ uri: "2", agent: "mina", text: "a video essay", video });
   const minaText = item({ uri: "3", agent: "mina", text: "just words here" });

@@ -276,6 +276,7 @@ a:hover {
 }
 
 .post-images a {
+  position: relative;
   display: block;
   overflow: hidden;
   border-radius: 4px;
@@ -288,6 +289,31 @@ a:hover {
   height: auto;
   display: block;
   max-width: 100%;
+}
+
+/* Play badge over a video poster; the [hidden] rule above hides it on images. */
+.post-media-badge {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 3rem;
+  height: 3rem;
+  border-radius: 50%;
+  background: rgb(0 0 0 / 55%);
+  pointer-events: none;
+}
+
+.post-media-badge::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 0.5rem 0 0.5rem 0.85rem;
+  border-color: transparent transparent transparent #fff;
+  transform: translateX(0.1rem);
 }
 
 .post-images img:not([width]) {

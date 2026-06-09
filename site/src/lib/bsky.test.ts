@@ -51,22 +51,24 @@ describe("extractVideo", () => {
     ).toBeUndefined();
   });
 
-  it("extracts playlist, thumbnail and aspectRatio from a video embed", () => {
+  it("extracts playlist, thumbnail, alt and aspectRatio from a video embed", () => {
     expect(
       extractVideo({
         $type: "app.bsky.embed.video#view",
         playlist: "https://video.bsky.app/x.m3u8",
         thumbnail: "https://video.bsky.app/x.jpg",
+        alt: "a short clip",
         aspectRatio: { width: 16, height: 9 },
       }),
     ).toEqual({
       playlist: "https://video.bsky.app/x.m3u8",
       thumbnail: "https://video.bsky.app/x.jpg",
+      alt: "a short clip",
       aspectRatio: { width: 16, height: 9 },
     });
   });
 
-  it("recurses into recordWithMedia", () => {
+  it("defaults alt to empty string and recurses into recordWithMedia", () => {
     expect(
       extractVideo({
         $type: "app.bsky.embed.recordWithMedia#view",
@@ -75,7 +77,7 @@ describe("extractVideo", () => {
           playlist: "https://video.bsky.app/y.m3u8",
         },
       }),
-    ).toEqual({ playlist: "https://video.bsky.app/y.m3u8" });
+    ).toEqual({ playlist: "https://video.bsky.app/y.m3u8", alt: "" });
   });
 
   it("returns undefined for external embeds", () => {

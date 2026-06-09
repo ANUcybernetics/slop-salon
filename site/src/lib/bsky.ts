@@ -12,6 +12,7 @@ export type FeedImage = {
 export type FeedVideo = {
   thumbnail?: string;
   playlist: string;
+  alt: string;
   aspectRatio?: { width: number; height: number };
 };
 
@@ -61,6 +62,7 @@ type BskyEmbedView =
       $type: "app.bsky.embed.video#view";
       playlist: string;
       thumbnail?: string;
+      alt?: string;
       aspectRatio?: { width: number; height: number };
     }
   | { $type: "app.bsky.embed.external#view"; external: BskyExternalView }
@@ -121,9 +123,15 @@ export function extractVideo(embed: BskyEmbedView | undefined): FeedVideo | unde
     const view = embed as {
       playlist: string;
       thumbnail?: string;
+      alt?: string;
       aspectRatio?: { width: number; height: number };
     };
-    return { thumbnail: view.thumbnail, playlist: view.playlist, aspectRatio: view.aspectRatio };
+    return {
+      thumbnail: view.thumbnail,
+      playlist: view.playlist,
+      alt: view.alt ?? "",
+      aspectRatio: view.aspectRatio,
+    };
   }
   if (embed.$type === "app.bsky.embed.recordWithMedia#view") {
     return extractVideo((embed as { media: BskyEmbedView }).media);
