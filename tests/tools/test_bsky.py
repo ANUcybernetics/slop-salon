@@ -412,6 +412,51 @@ def test_feed_post_dedup_skips_identical_recent(bsky_env, session_mock, httpx_mo
     assert not _posted_create_record(httpx_mock), "should not have written a second record"
 
 
+def test_feed_post_dedup_skips_identical_recent_via_file(
+    bsky_env, session_mock, httpx_mock, monkeypatch, tmp_path
+):
+    """A feed post sent via --file is deduped just like --json. Agents write the
+    record body to a file and post it with --file to dodge the quoting-heavy
+    inline `jq` recipe; that path must run the guard too, or a re-issued --file
+    post double-publishes (the exact bypass seen live)."""
+    monkeypatch.setenv("SLOP_POST_DEDUP_WINDOW_MIN", "999999999")
+    httpx_mock.add_response(
+        method="GET",
+        url=LIST_RECORDS_URL,
+        json={
+            "records": [
+                {
+                    "uri": "at://did:plc:fake123/app.bsky.feed.post/orig",
+                    "cid": "cid-orig",
+                    "value": {
+                        "$type": "app.bsky.feed.post",
+                        "text": "two stones in a shallow stream",
+                        "createdAt": "2026-06-06T02:12:13.000Z",
+                        "langs": ["en"],
+                    },
+                }
+            ]
+        },
+    )
+    from slop_salon.tools.bsky import app
+
+    body_file = tmp_path / "post.json"
+    body_file.write_text(
+        _feed_post_body(
+            {
+                "$type": "app.bsky.feed.post",
+                "text": "two stones in a shallow stream",
+                "createdAt": "2026-06-06T02:14:00.000Z",
+                "langs": ["en"],
+            }
+        )
+    )
+    result = runner.invoke(app, ["post", "com.atproto.repo.createRecord", "--file", str(body_file)])
+    assert result.exit_code == 0, result.output
+    assert "app.bsky.feed.post/orig" in result.output
+    assert not _posted_create_record(httpx_mock), "should not have written a second record"
+
+
 def test_feed_post_dedup_matches_on_shared_blob(bsky_env, session_mock, httpx_mock, monkeypatch):
     """A re-issue that re-assembled the embed with fewer images still matches,
     because the posts share an uploaded blob CID."""

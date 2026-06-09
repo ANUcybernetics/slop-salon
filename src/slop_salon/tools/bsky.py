@@ -372,6 +372,19 @@ def post(
         except json.JSONDecodeError as e:
             typer.echo(f"error: --json is not valid JSON: {e}", err=True)
             raise typer.Exit(code=1) from e
+    # Read a --file body once, up front, so the idempotency guard below can
+    # inspect it too. Agents routinely post feed records via --file (a JSON
+    # body written with `jq`) to sidestep the quoting-heavy inline --json
+    # recipe; that path must dedup exactly like --json, or a re-issued --file
+    # post double-publishes. Only createRecord bodies are parsed --- a binary
+    # --file (an uploadBlob image/video) leaves `parsed` as None and is sent
+    # untouched.
+    file_bytes = file.read_bytes() if file is not None else None
+    if parsed is None and file_bytes is not None and nsid == "com.atproto.repo.createRecord":
+        try:
+            parsed = json.loads(file_bytes)
+        except ValueError:
+            parsed = None
     session = _get_session()
     url = f"{session.pds}/xrpc/{nsid}"
     # Idempotency guard: createRecord is a non-idempotent write, so a slow or
@@ -396,7 +409,7 @@ def post(
         resp = httpx.post(
             url,
             headers={**session.auth_headers, "Content-Type": _mime_of(file)},
-            content=file.read_bytes(),
+            content=file_bytes,
             timeout=UPLOAD_TIMEOUT,
         )
     elif json_body is not None:
