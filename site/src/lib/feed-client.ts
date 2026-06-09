@@ -9,6 +9,7 @@ import {
   type RenderConfig,
   setupChipGroup,
 } from "./feed-render.ts";
+import { attachLightbox } from "./lightbox.ts";
 
 const POST_LIMIT_PER_AGENT = 20;
 const SEARCH_DEBOUNCE_MS = 150;
@@ -45,6 +46,8 @@ export function init(): void {
   const searchInput = document.querySelector<HTMLInputElement>("[data-filter-search]");
   const template = document.querySelector<HTMLTemplateElement>("#post-template");
   if (!feedRoot || !emptyEl || !template) return;
+
+  attachLightbox(feedRoot);
 
   let feed: FeedItem[] = readInitial("initial-feed");
   const avatars = readAvatars("agent-avatars");

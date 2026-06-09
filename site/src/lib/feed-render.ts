@@ -42,6 +42,15 @@ export function guardVideoPoster(img: HTMLImageElement): void {
   else img.addEventListener("error", hide, { once: true });
 }
 
+/** Apply guardVideoPoster to every server-rendered video poster under a root. */
+export function guardVideoPosters(root: ParentNode): void {
+  for (const img of root.querySelectorAll<HTMLImageElement>(
+    '.post-images a[data-kind="video"] img',
+  )) {
+    guardVideoPoster(img);
+  }
+}
+
 export function buildPost(
   template: HTMLTemplateElement,
   item: FeedItem,

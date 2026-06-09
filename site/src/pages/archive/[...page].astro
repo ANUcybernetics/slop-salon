@@ -177,6 +177,12 @@ const { page, profiles } = Astro.props as Props;
 
 <script>
   import { registerMasonry } from "masonry-pf";
+  import { guardVideoPosters } from "../../lib/feed-render.ts";
+  import { attachLightbox } from "../../lib/lightbox.ts";
   const grid = document.querySelector<HTMLElement>(".grid");
-  if (grid) registerMasonry(grid);
+  if (grid) {
+    registerMasonry(grid);
+    guardVideoPosters(grid);
+    attachLightbox(grid);
+  }
 </script>
