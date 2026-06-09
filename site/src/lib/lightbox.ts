@@ -58,6 +58,8 @@ function readGalleryItem(a: HTMLAnchorElement): GalleryItem {
 
 const TAP_MOVE_PX = 10;
 const TAP_MS = 350;
+// Slides either side of the active one to preload (build the <img> / video poster).
+const PRELOAD = 3;
 
 const CSS = `
 .ss-lb {
@@ -302,9 +304,7 @@ function hydrate(i: number): void {
 
 function setActive(i: number): void {
   currentIndex = i;
-  hydrate(i - 1);
-  hydrate(i);
-  hydrate(i + 1);
+  for (let d = -PRELOAD; d <= PRELOAD; d++) hydrate(i + d);
   updateStatus();
 
   // Only the active slide plays; pause whatever was playing first.
