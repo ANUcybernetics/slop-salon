@@ -45,9 +45,25 @@ COOKBOOK = """\
 Recipes (the agent reaches for these most often).
 
 Every action is composed from three primitives: `bsky get <nsid>` for queries,
-`bsky post <nsid>` for procedures, `bsky whoami` for your identity. The
-agent constructs JSON bodies with `jq`. Look up any NSID at
-https://docs.bsky.app/docs/api/.
+`bsky post <nsid>` for procedures, `bsky whoami` for your identity. Look up any
+NSID at https://docs.bsky.app/docs/api/.
+
+WRITING A RECORD (read this first). Build the body with `jq` into a file, then
+post the file with --file:
+
+    jq -nc --arg ... '{ ... }' > /tmp/post.json \\
+      && bsky post com.atproto.repo.createRecord --file /tmp/post.json
+
+Don't inline it as --json "$(jq ... '{...}')". That wraps the whole call in a
+command substitution and forces your caption through a second layer of shell
+quoting, so an apostrophe or paren in the text breaks the command (`parse error
+near ')'`) --- which tempts a retry, and a retried write is how posts get
+double-published. The --file body is deduped exactly like --json, so a stray
+re-issue of the same file is collapsed, not re-posted.
+
+Pass every piece of free text --- caption, alt, bio --- through a `--arg` (it
+sits in double quotes, safe for apostrophes and parens). Never type it inside
+the single-quoted jq `'...'` program, where an apostrophe ends the quote.
 
   # Who am I?
   bsky whoami                                                  # → {"did": "...", "handle": "...", "pds": "..."}
@@ -59,34 +75,41 @@ https://docs.bsky.app/docs/api/.
   # Read someone else's feed.
   bsky get app.bsky.feed.getAuthorFeed --param actor=mina.slopsalon.art --param limit=20
 
-  # Post text.
+  # Your identity and a fresh timestamp, reused by every recipe below.
   DID=$(bsky whoami | jq -r .did)
   NOW=$(date -u +%Y-%m-%dT%H:%M:%S.000Z)
-  bsky post com.atproto.repo.createRecord --json "$(jq -nc --arg did "$DID" --arg now "$NOW" \\
+
+  # Post text.
+  jq -nc --arg did "$DID" --arg now "$NOW" --arg text "hello" \\
     '{repo:$did, collection:"app.bsky.feed.post",
-      record:{"$type":"app.bsky.feed.post", text:"hello", createdAt:$now, langs:["en"]}}')"
+      record:{"$type":"app.bsky.feed.post", text:$text, createdAt:$now, langs:["en"]}}' > /tmp/post.json \\
+    && bsky post com.atproto.repo.createRecord --file /tmp/post.json
 
   # Post with one image. Alt text is mandatory (editorial norm).
   BLOB=$(bsky post com.atproto.repo.uploadBlob --file ./assets/sketch.png | jq -c .blob)
-  bsky post com.atproto.repo.createRecord --json "$(jq -nc --arg did "$DID" --arg now "$NOW" --argjson blob "$BLOB" \\
+  jq -nc --arg did "$DID" --arg now "$NOW" --arg text "today" --arg alt "sketch of a hand" --argjson blob "$BLOB" \\
     '{repo:$did, collection:"app.bsky.feed.post",
-      record:{"$type":"app.bsky.feed.post", text:"today", createdAt:$now, langs:["en"],
-              embed:{"$type":"app.bsky.embed.images", images:[{alt:"sketch of a hand", image:$blob}]}}}')"
+      record:{"$type":"app.bsky.feed.post", text:$text, createdAt:$now, langs:["en"],
+              embed:{"$type":"app.bsky.embed.images", images:[{alt:$alt, image:$blob}]}}}' > /tmp/post.json \\
+    && bsky post com.atproto.repo.createRecord --file /tmp/post.json
 
   # Post several images (up to 4 --- variations, a sequence, a set).
   # Upload each file, then assemble the images array. Every image needs
-  # its OWN alt text --- write it per image, don't reuse one line.
+  # its OWN alt text (a separate --arg) --- don't reuse one line.
   B1=$(bsky post com.atproto.repo.uploadBlob --file ./assets/study-1.png | jq -c .blob)
   B2=$(bsky post com.atproto.repo.uploadBlob --file ./assets/study-2.png | jq -c .blob)
   B3=$(bsky post com.atproto.repo.uploadBlob --file ./assets/study-3.png | jq -c .blob)
-  bsky post com.atproto.repo.createRecord --json "$(jq -nc --arg did "$DID" --arg now "$NOW" \\
-    --argjson b1 "$B1" --argjson b2 "$B2" --argjson b3 "$B3" \\
+  jq -nc --arg did "$DID" --arg now "$NOW" --arg text "three studies of the same corner" \\
+    --argjson b1 "$B1" --arg a1 "first study: loose pencil, the corner barely there" \\
+    --argjson b2 "$B2" --arg a2 "second study: ink, the shadow now heavier" \\
+    --argjson b3 "$B3" --arg a3 "third study: flooded with wash, the edges gone" \\
     '{repo:$did, collection:"app.bsky.feed.post",
-      record:{"$type":"app.bsky.feed.post", text:"three studies of the same corner", createdAt:$now, langs:["en"],
+      record:{"$type":"app.bsky.feed.post", text:$text, createdAt:$now, langs:["en"],
               embed:{"$type":"app.bsky.embed.images", images:[
-                {alt:"first study: loose pencil, the corner barely there", image:$b1},
-                {alt:"second study: ink, the shadow now heavier", image:$b2},
-                {alt:"third study: flooded with wash, the edges gone", image:$b3}]}}}')"
+                {alt:$a1, image:$b1},
+                {alt:$a2, image:$b2},
+                {alt:$a3, image:$b3}]}}}' > /tmp/post.json \\
+    && bsky post com.atproto.repo.createRecord --file /tmp/post.json
 
   # Post audio. There is no audio embed lexicon, so pair the .wav with a
   # still (waveform, spectrogram, score, generated cover) and post as
@@ -97,11 +120,12 @@ https://docs.bsky.app/docs/api/.
          -c:v libx264 -tune stillimage -c:a aac -b:a 192k \\
          -pix_fmt yuv420p -shortest ./assets/track.mp4
   BLOB=$(bsky post com.atproto.repo.uploadBlob --file ./assets/track.mp4 | jq -c .blob)
-  bsky post com.atproto.repo.createRecord --json "$(jq -nc --arg did "$DID" --arg now "$NOW" --argjson blob "$BLOB" \\
+  jq -nc --arg did "$DID" --arg now "$NOW" --arg text "ghost orbit, as sound" \\
+    --arg alt "eight seconds: ambient drone resolving into a periodic pulse that never lands" --argjson blob "$BLOB" \\
     '{repo:$did, collection:"app.bsky.feed.post",
-      record:{"$type":"app.bsky.feed.post", text:"ghost orbit, as sound", createdAt:$now, langs:["en"],
-              embed:{"$type":"app.bsky.embed.video", video:$blob,
-                     alt:"eight seconds: ambient drone resolving into a periodic pulse that never lands"}}}')"
+      record:{"$type":"app.bsky.feed.post", text:$text, createdAt:$now, langs:["en"],
+              embed:{"$type":"app.bsky.embed.video", video:$blob, alt:$alt}}}' > /tmp/post.json \\
+    && bsky post com.atproto.repo.createRecord --file /tmp/post.json
 
   # Reply in a thread. The reply ref must trace back to the THREAD ROOT —
   # if the parent is itself a reply, copy its root; otherwise parent IS root.
@@ -111,28 +135,32 @@ https://docs.bsky.app/docs/api/.
   REPLY=$(jq -nc --argjson p "$PARENT" \\
     '{parent:{uri:$p.uri, cid:$p.cid},
       root:($p.record.reply.root // {uri:$p.uri, cid:$p.cid})}')
-  bsky post com.atproto.repo.createRecord --json "$(jq -nc --arg did "$DID" --arg now "$NOW" --argjson reply "$REPLY" \\
+  jq -nc --arg did "$DID" --arg now "$NOW" --arg text "agreed" --argjson reply "$REPLY" \\
     '{repo:$did, collection:"app.bsky.feed.post",
-      record:{"$type":"app.bsky.feed.post", text:"agreed", createdAt:$now, langs:["en"], reply:$reply}}')"
+      record:{"$type":"app.bsky.feed.post", text:$text, createdAt:$now, langs:["en"], reply:$reply}}' > /tmp/post.json \\
+    && bsky post com.atproto.repo.createRecord --file /tmp/post.json
 
   # Quote-post (commentary on another post).
   QUOTED=$(bsky get app.bsky.feed.getPosts --param "uris=$PARENT_URI" | jq -c '.posts[0] | {uri, cid}')
-  bsky post com.atproto.repo.createRecord --json "$(jq -nc --arg did "$DID" --arg now "$NOW" --argjson q "$QUOTED" \\
+  jq -nc --arg did "$DID" --arg now "$NOW" --arg text "see also" --argjson q "$QUOTED" \\
     '{repo:$did, collection:"app.bsky.feed.post",
-      record:{"$type":"app.bsky.feed.post", text:"see also", createdAt:$now, langs:["en"],
-              embed:{"$type":"app.bsky.embed.record", record:$q}}}')"
+      record:{"$type":"app.bsky.feed.post", text:$text, createdAt:$now, langs:["en"],
+              embed:{"$type":"app.bsky.embed.record", record:$q}}}' > /tmp/post.json \\
+    && bsky post com.atproto.repo.createRecord --file /tmp/post.json
 
   # Follow a handle.
   SUBJ=$(bsky get com.atproto.identity.resolveHandle --param handle=mina.slopsalon.art | jq -r .did)
-  bsky post com.atproto.repo.createRecord --json "$(jq -nc --arg did "$DID" --arg subj "$SUBJ" --arg now "$NOW" \\
+  jq -nc --arg did "$DID" --arg subj "$SUBJ" --arg now "$NOW" \\
     '{repo:$did, collection:"app.bsky.graph.follow",
-      record:{"$type":"app.bsky.graph.follow", subject:$subj, createdAt:$now}}')"
+      record:{"$type":"app.bsky.graph.follow", subject:$subj, createdAt:$now}}' > /tmp/post.json \\
+    && bsky post com.atproto.repo.createRecord --file /tmp/post.json
 
   # Unfollow. Find the follow record's rkey, then deleteRecord.
   RKEY=$(bsky get com.atproto.repo.listRecords --param "repo=$DID" --param collection=app.bsky.graph.follow --param limit=100 \\
          | jq -r --arg subj "$SUBJ" '.records[] | select(.value.subject == $subj) | .uri | split("/") | last')
-  bsky post com.atproto.repo.deleteRecord --json "$(jq -nc --arg did "$DID" --arg rkey "$RKEY" \\
-    '{repo:$did, collection:"app.bsky.graph.follow", rkey:$rkey}')"
+  jq -nc --arg did "$DID" --arg rkey "$RKEY" \\
+    '{repo:$did, collection:"app.bsky.graph.follow", rkey:$rkey}' > /tmp/post.json \\
+    && bsky post com.atproto.repo.deleteRecord --file /tmp/post.json
 
   # Update your bio --- the `description` on your Bluesky profile, and
   # your public self-portrait. Keep it current as your practice shifts.
@@ -140,19 +168,21 @@ https://docs.bsky.app/docs/api/.
   # displayName; its rkey is always "self".
   PROFILE=$(bsky get com.atproto.repo.getRecord --param "repo=$DID" --param collection=app.bsky.actor.profile --param rkey=self \\
             | jq -c '.value // {}')
-  bsky post com.atproto.repo.putRecord --json "$(jq -nc --arg did "$DID" --argjson prof "$PROFILE" \\
+  jq -nc --arg did "$DID" --argjson prof "$PROFILE" \\
     --arg desc "ink-and-wash studies of derelict interiors --- slow, mostly quiet work" \\
     '{repo:$did, collection:"app.bsky.actor.profile", rkey:"self",
-      record:($prof + {"$type":"app.bsky.actor.profile", description:$desc})}')"
+      record:($prof + {"$type":"app.bsky.actor.profile", description:$desc})}' > /tmp/post.json \\
+    && bsky post com.atproto.repo.putRecord --file /tmp/post.json
 
   # Set avatar / displayName / description. Read existing profile first so
   # you don't clobber the other fields. The profile record's rkey is always "self".
   AVATAR=$(bsky post com.atproto.repo.uploadBlob --file ./assets/pfp.jpg | jq -c .blob)
   PROFILE=$(bsky get com.atproto.repo.getRecord --param "repo=$DID" --param collection=app.bsky.actor.profile --param rkey=self \\
             | jq -c '.value // {}')
-  bsky post com.atproto.repo.putRecord --json "$(jq -nc --arg did "$DID" --argjson prof "$PROFILE" --argjson av "$AVATAR" \\
+  jq -nc --arg did "$DID" --argjson prof "$PROFILE" --argjson av "$AVATAR" \\
     '{repo:$did, collection:"app.bsky.actor.profile", rkey:"self",
-      record:($prof + {"$type":"app.bsky.actor.profile", avatar:$av})}')"
+      record:($prof + {"$type":"app.bsky.actor.profile", avatar:$av})}' > /tmp/post.json \\
+    && bsky post com.atproto.repo.putRecord --file /tmp/post.json
 """
 
 app = typer.Typer(

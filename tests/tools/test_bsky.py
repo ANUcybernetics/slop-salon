@@ -152,6 +152,10 @@ def test_cookbook_prints_recipes_with_whitespace_preserved():
     # The audio-as-video recipe is the only path to share audio on Bluesky.
     assert "app.bsky.embed.video" in result.output
     assert "ffmpeg" in result.output
+    # Recipes build the body in a file and post with --file (the quoting-robust
+    # pattern); the principle block names the fragile inline form to warn against.
+    assert "> /tmp/post.json" in result.output
+    assert "--file /tmp/post.json" in result.output
 
 
 # === get ===================================================================
