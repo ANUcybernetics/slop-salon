@@ -9,7 +9,11 @@ export type FeedImage = {
   aspectRatio?: { width: number; height: number };
 };
 
-export type MediaType = "image" | "video";
+export type FeedVideo = {
+  thumbnail?: string;
+  playlist: string;
+  aspectRatio?: { width: number; height: number };
+};
 
 export type FeedItem = {
   uri: string;
@@ -24,8 +28,12 @@ export type FeedItem = {
   repostCount: number;
   likeCount: number;
   images: FeedImage[];
-  mediaTypes: MediaType[];
+  video?: FeedVideo;
 };
+
+export function hasMedia(item: FeedItem): boolean {
+  return item.images.length > 0 || item.video !== undefined;
+}
 
 type BskyAuthor = {
   did: string;
@@ -49,7 +57,12 @@ type BskyExternalView = {
 
 type BskyEmbedView =
   | { $type: "app.bsky.embed.images#view"; images: BskyImageView[] }
-  | { $type: "app.bsky.embed.video#view"; playlist: string; thumbnail?: string }
+  | {
+      $type: "app.bsky.embed.video#view";
+      playlist: string;
+      thumbnail?: string;
+      aspectRatio?: { width: number; height: number };
+    }
   | { $type: "app.bsky.embed.external#view"; external: BskyExternalView }
   | { $type: "app.bsky.embed.recordWithMedia#view"; media: BskyEmbedView }
   | { $type: string };
@@ -85,7 +98,7 @@ function bskyPostUrl(handle: string, uri: string): string {
   return `https://bsky.app/profile/${handle}/post/${rkey(uri)}`;
 }
 
-function extractImages(embed: BskyEmbedView | undefined): FeedImage[] {
+export function extractImages(embed: BskyEmbedView | undefined): FeedImage[] {
   if (!embed) return [];
   if (embed.$type === "app.bsky.embed.images#view") {
     const view = embed as { images: BskyImageView[] };
@@ -102,22 +115,27 @@ function extractImages(embed: BskyEmbedView | undefined): FeedImage[] {
   return [];
 }
 
-export function extractMediaTypes(embed: BskyEmbedView | undefined): MediaType[] {
-  if (!embed) return [];
-  if (embed.$type === "app.bsky.embed.images#view") return ["image"];
-  if (embed.$type === "app.bsky.embed.video#view") return ["video"];
-  if (embed.$type === "app.bsky.embed.recordWithMedia#view") {
-    return extractMediaTypes((embed as { media: BskyEmbedView }).media);
+export function extractVideo(embed: BskyEmbedView | undefined): FeedVideo | undefined {
+  if (!embed) return undefined;
+  if (embed.$type === "app.bsky.embed.video#view") {
+    const view = embed as {
+      playlist: string;
+      thumbnail?: string;
+      aspectRatio?: { width: number; height: number };
+    };
+    return { thumbnail: view.thumbnail, playlist: view.playlist, aspectRatio: view.aspectRatio };
   }
-  return [];
+  if (embed.$type === "app.bsky.embed.recordWithMedia#view") {
+    return extractVideo((embed as { media: BskyEmbedView }).media);
+  }
+  return undefined;
 }
 
 function entryToFeedItem(agent: Agent, entry: BskyFeedEntry): FeedItem {
   const post = entry.post;
   const isRepost = entry.reason?.$type === "app.bsky.feed.defs#reasonRepost";
   const images = extractImages(post.embed);
-  const mediaTypes = extractMediaTypes(post.embed);
-  if (images.length > 0 && !mediaTypes.includes("image")) mediaTypes.push("image");
+  const video = extractVideo(post.embed);
   return {
     uri: post.uri,
     agent: agent.name,
@@ -133,7 +151,7 @@ function entryToFeedItem(agent: Agent, entry: BskyFeedEntry): FeedItem {
     repostCount: post.repostCount ?? 0,
     likeCount: post.likeCount ?? 0,
     images,
-    mediaTypes,
+    video,
   };
 }
 

@@ -15,7 +15,6 @@ function item(overrides: Partial<FeedItem>): FeedItem {
     repostCount: 0,
     likeCount: 0,
     images: [],
-    mediaTypes: [],
     ...overrides,
   };
 }
@@ -52,16 +51,11 @@ describe("mergeFeed", () => {
 
 describe("filterFeed", () => {
   const img = { thumb: "t", fullsize: "f", alt: "" };
-  const lou = item({
-    uri: "1",
-    agent: "lou",
-    text: "a sunset poem",
-    images: [img],
-    mediaTypes: ["image"],
-  });
-  const mina = item({ uri: "2", agent: "mina", text: "a video essay", mediaTypes: ["video"] });
-  const minaText = item({ uri: "3", agent: "mina", text: "just words here", mediaTypes: [] });
-  const louVideo = item({ uri: "4", agent: "lou", text: "screen capture", mediaTypes: ["video"] });
+  const video = { playlist: "https://video.bsky.app/x.m3u8", thumbnail: "p" };
+  const lou = item({ uri: "1", agent: "lou", text: "a sunset poem", images: [img] });
+  const mina = item({ uri: "2", agent: "mina", text: "a video essay", video });
+  const minaText = item({ uri: "3", agent: "mina", text: "just words here" });
+  const louVideo = item({ uri: "4", agent: "lou", text: "screen capture", video });
   const all = [lou, mina, minaText, louVideo];
 
   it("returns everything with empty state", () => {
@@ -81,16 +75,16 @@ describe("filterFeed", () => {
     expect(filterFeed(all, state)).toHaveLength(4);
   });
 
-  it("keeps only posts with rendered images when hasMedia is set", () => {
+  it("keeps posts with images or video when hasMedia is set", () => {
     const state = emptyFilterState();
     state.hasMedia = true;
-    expect(filterFeed(all, state).map((i) => i.uri)).toEqual(["1"]);
+    expect(filterFeed(all, state).map((i) => i.uri)).toEqual(["1", "2", "4"]);
   });
 
-  it("drops video-only posts when hasMedia is set", () => {
+  it("keeps video-only posts and drops text-only ones when hasMedia is set", () => {
     const state = emptyFilterState();
     state.hasMedia = true;
-    expect(filterFeed([mina, louVideo, minaText], state)).toEqual([]);
+    expect(filterFeed([mina, louVideo, minaText], state).map((i) => i.uri)).toEqual(["2", "4"]);
   });
 
   it("filters by case-insensitive text substring", () => {

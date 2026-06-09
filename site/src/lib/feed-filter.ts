@@ -1,4 +1,4 @@
-import type { FeedItem } from "./bsky.ts";
+import { type FeedItem, hasMedia } from "./bsky.ts";
 
 export type FilterState = {
   artists: Set<string>;
@@ -21,7 +21,7 @@ export function filterFeed(items: FeedItem[], state: FilterState): FeedItem[] {
   const needle = state.text.trim().toLowerCase();
   return items.filter((item) => {
     if (state.artists.size > 0 && !state.artists.has(item.agent)) return false;
-    if (state.hasMedia && item.images.length === 0) return false;
+    if (state.hasMedia && !hasMedia(item)) return false;
     if (needle && !item.text.toLowerCase().includes(needle)) return false;
     return true;
   });
