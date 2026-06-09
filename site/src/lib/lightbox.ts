@@ -9,8 +9,11 @@
  *
  * The gallery spans every piece of media currently shown in the feed (in DOM
  * order), snapshotted to plain objects at open time so a feed refresh can't
- * invalidate it mid-view.
+ * invalidate it mid-view. Video slides play HLS — natively on Safari/iOS, via
+ * a dynamically-imported hls.js elsewhere — only while they are the active slide.
  */
+
+import type Hls from "hls.js";
 
 export type GalleryItem = {
   kind: "image" | "video";
@@ -165,6 +168,9 @@ let items: GalleryItem[] = [];
 let currentIndex = 0;
 let invoker: HTMLElement | null = null;
 let scrollSettleTimer: ReturnType<typeof setTimeout> | undefined;
+// hls.js instances keyed by slide index (native-HLS videos aren't tracked here).
+const players = new Map<number, Hls>();
+let playingVideo: HTMLVideoElement | null = null;
 
 function prefersReducedMotion(): boolean {
   return matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -273,12 +279,25 @@ function hydrate(i: number): void {
   if (slide.dataset.hydrated === "1") return;
   slide.dataset.hydrated = "1";
   const item = items[i];
-  const img = document.createElement("img");
-  img.className = "ss-lb-media";
-  img.alt = item.alt;
-  img.decoding = "async";
-  img.src = item.full;
-  slide.appendChild(img);
+  if (item.kind === "video") {
+    // The poster only; the HLS source is attached when the slide goes active.
+    const video = document.createElement("video");
+    video.className = "ss-lb-media";
+    video.controls = true;
+    video.playsInline = true;
+    video.muted = true;
+    video.preload = "none";
+    if (item.full) video.poster = item.full;
+    video.setAttribute("aria-label", item.alt || "Video");
+    slide.appendChild(video);
+  } else {
+    const img = document.createElement("img");
+    img.className = "ss-lb-media";
+    img.alt = item.alt;
+    img.decoding = "async";
+    img.src = item.full;
+    slide.appendChild(img);
+  }
 }
 
 function setActive(i: number): void {
@@ -287,6 +306,53 @@ function setActive(i: number): void {
   hydrate(i);
   hydrate(i + 1);
   updateStatus();
+
+  // Only the active slide plays; pause whatever was playing first.
+  if (playingVideo) {
+    playingVideo.pause();
+    playingVideo = null;
+  }
+  if (items[i]?.kind === "video") void playVideo(i);
+
+  // Free hls.js pipelines that have fallen outside the ±1 window.
+  for (const [j, hls] of players) {
+    if (Math.abs(j - i) > 1) {
+      hls.destroy();
+      players.delete(j);
+    }
+  }
+}
+
+async function playVideo(i: number): Promise<void> {
+  if (!ui) return;
+  const item = items[i];
+  if (!item?.playlist) return;
+  const video = (ui.track.children[i] as HTMLElement | undefined)?.querySelector("video");
+  if (!video) return;
+  playingVideo = video;
+
+  if (!video.src && !players.has(i)) {
+    if (video.canPlayType("application/vnd.apple.mpegurl")) {
+      video.src = item.playlist; // native HLS (Safari / iOS)
+    } else {
+      const { default: Hls } = await import("hls.js");
+      // The viewer may have moved on or closed while the chunk loaded.
+      if (currentIndex !== i || !video.isConnected) return;
+      if (Hls.isSupported()) {
+        const hls = new Hls();
+        hls.loadSource(item.playlist);
+        hls.attachMedia(video);
+        players.set(i, hls);
+      } else {
+        video.src = item.playlist;
+      }
+    }
+  }
+
+  // Autoplay muted; a blocked play() or reduced-motion just leaves the poster up.
+  if (!prefersReducedMotion()) {
+    video.play().catch(() => {});
+  }
 }
 
 // Navigate to a slide. currentIndex moves synchronously so rapid arrow presses
@@ -330,6 +396,9 @@ function open(list: GalleryItem[], start: number, from: HTMLElement | null): voi
 
 function onClose(): void {
   unlockScroll();
+  for (const hls of players.values()) hls.destroy();
+  players.clear();
+  playingVideo = null;
   ui?.track.replaceChildren();
   items = [];
   const back = invoker && invoker.isConnected ? invoker : null;

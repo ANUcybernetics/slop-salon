@@ -11,6 +11,9 @@ importers:
       astro:
         specifier: ^6.3.5
         version: 6.3.5(@types/node@25.9.0)(rollup@4.60.4)(yaml@2.9.0)
+      hls.js:
+        specifier: ^1.6.16
+        version: 1.6.16
       markdown-it:
         specifier: ^14.1.1
         version: 14.1.1
@@ -1727,6 +1730,9 @@ packages:
 
   hastscript@9.0.1:
     resolution: {integrity: sha512-g7df9rMFX/SPi34tyGCyUBREQoKkapwdY/T04Qn9TDWfHhAYt4/I0gMVirzK5wEzeUqIjEB+LXC/ypb7Aqno5w==}
+
+  hls.js@1.6.16:
+    resolution: {integrity: sha512-VSIRpLfRwlAAdGL4wiTucx2ScRipo0ed1FBatWkyt832jC4CReKstga6yIhYVwGu9LOBjuX9wzmRMeQdBJtzEA==}
 
   hookified@1.15.1:
     resolution: {integrity: sha512-MvG/clsADq1GPM2KGo2nyfaWVyn9naPiXrqIe4jYjXNZQt238kWyOGrsyc/DmRAQ+Re6yeo6yX/yoNCG5KAEVg==}
@@ -4481,6 +4487,8 @@ snapshots:
       hast-util-parse-selector: 4.0.0
       property-information: 7.1.0
       space-separated-tokens: 2.0.2
+
+  hls.js@1.6.16: {}
 
   hookified@1.15.1: {}
 
