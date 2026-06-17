@@ -99,9 +99,14 @@ class HealReport:
 
 
 def _load_state(path: Path) -> dict:
+    # Missing (first run) or corrupt (truncated mid-write) --- either way start
+    # fresh. Two clauses, not a tuple: under py314 ruff strips the parens from
+    # `except (A, B):`, leaving a py2-looking `except A, B:` that reads as a bug.
     try:
         data = json.loads(path.read_text())
-    except FileNotFoundError, json.JSONDecodeError:
+    except FileNotFoundError:
+        data = {}
+    except json.JSONDecodeError:
         data = {}
     data.setdefault("agents", {})
     return data

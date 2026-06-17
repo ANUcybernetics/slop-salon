@@ -151,6 +151,18 @@ def test_locked_out_when_another_wake_is_healing(tmp_path):
         os.close(held)
 
 
+def test_corrupt_state_file_is_treated_as_empty(tmp_path):
+    # A truncated/garbage heal.json must not crash the wake --- _load_state has to
+    # actually catch JSONDecodeError (not just FileNotFoundError) and start fresh.
+    state = tmp_path / "heal.json"
+    state.parent.mkdir(parents=True, exist_ok=True)
+    state.write_text("{not valid json")
+    recreated, rec = _recorder()
+    report = _heal({"gert": WEDGE}, state=state, rec=rec)
+    assert report.wedged == ["gert"]  # processed normally from a clean slate
+    assert recreated == []
+
+
 def test_busy_streak_alerts_at_threshold_without_recreating(tmp_path):
     from slop_salon.healing import BUSY_CONSECUTIVE_THRESHOLD
 
