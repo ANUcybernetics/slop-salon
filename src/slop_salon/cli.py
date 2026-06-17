@@ -32,7 +32,7 @@ import httpx
 import typer
 
 from slop_salon.config import load_config
-from slop_salon.healing import heal_wedged, is_wedge
+from slop_salon.healing import SKIP_BUSY_CODE, claude_failed, heal_wedged, is_wedge
 from slop_salon.provision import (
     SLOP_SALON_REPO,
     _build_install_ambient_hook_cmd,
@@ -334,11 +334,6 @@ def talk(
 # Raise toward saturation, lower for more headroom.
 WAKE_CONCURRENCY = 4
 
-# Exit code `slop-tick` uses when another tick already holds the sprite's lock
-# (overlapping wake runs are expected; see templates/slop-tick). Treated as a
-# clean skip, not a failure.
-SKIP_BUSY_CODE = 75
-
 
 def _exec_tick_with_retry(sprites: SpritesClient, sprite_id: str) -> tuple[ExecResult, bool]:
     """Run one `slop-tick "tick"`, retrying once on the transient wedge signature.
@@ -392,7 +387,10 @@ def wake(
         for agent, result, elapsed, retried in pool.map(_tick, live):
             results[agent.name] = result
             if result.exit_code == 0:
-                status = "ok"
+                # slop-tick exits 0 even when `claude` itself errored (it still
+                # commits partial work), so an exit-0 tick isn't necessarily a
+                # working one --- surface that instead of a false `ok`.
+                status = "claude-err" if claude_failed(result) else "ok"
             elif result.exit_code == SKIP_BUSY_CODE:
                 status = "busy"
             else:
@@ -401,7 +399,9 @@ def wake(
             if retried:
                 summary += "  (retried i/o-timeout)"
             typer.echo(summary)
-            if result.exit_code not in (0, SKIP_BUSY_CODE):
+            # A claude-err tick produced nothing --- count it as a failure so the
+            # run goes red, the same as a non-zero exit would.
+            if result.exit_code not in (0, SKIP_BUSY_CODE) or claude_failed(result):
                 failed += 1
                 tail = (result.stderr or result.stdout).strip().splitlines()[-5:]
                 for line in tail:

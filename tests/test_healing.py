@@ -18,6 +18,13 @@ OK = ExecResult(stdout="ok", stderr="", exit_code=0)
 CONFLICT = ExecResult(
     stdout="", stderr="fatal: Exiting because of an unresolved conflict.", exit_code=128
 )
+BUSY = ExecResult(
+    stdout="", stderr="slop-tick: a tick is already running in this sprite, skipping", exit_code=75
+)
+# claude 400'd but slop-tick still exited 0 (it commits partial work).
+CLAUDE_ERR = ExecResult(
+    stdout="API Error: 400 ...", stderr="slop-tick: claude exited 1", exit_code=0
+)
 NOW = dt.datetime(2026, 6, 5, 12, 0, tzinfo=dt.UTC)
 
 
@@ -47,6 +54,21 @@ def test_is_wedge_only_matches_the_connection_signature():
     assert not is_wedge(OK)
     assert not is_wedge(CONFLICT)  # merge conflict is not a wedge
     assert not is_wedge(ExecResult("", "some unrelated error", 1))
+
+
+def test_busy_and_claude_failed_are_distinct_from_a_wedge():
+    from slop_salon.healing import claude_failed, is_busy
+
+    assert is_busy(BUSY)
+    assert not is_busy(OK)
+    assert claude_failed(CLAUDE_ERR)
+    assert not claude_failed(OK)
+    # A claude error is exit-0 with slop-tick's diagnostic --- reachable sprite,
+    # so neither a wedge nor a busy skip. Keeping them disjoint matters: only
+    # wedges recreate.
+    assert not is_wedge(CLAUDE_ERR)
+    assert not is_busy(CLAUDE_ERR)
+    assert not claude_failed(WEDGE)
 
 
 def test_first_wedge_does_not_recreate(tmp_path):
@@ -127,3 +149,56 @@ def test_locked_out_when_another_wake_is_healing(tmp_path):
         assert report.wedged == ["gert", "vita"]  # still reports what it saw
     finally:
         os.close(held)
+
+
+def test_busy_streak_alerts_at_threshold_without_recreating(tmp_path):
+    from slop_salon.healing import BUSY_CONSECUTIVE_THRESHOLD
+
+    state = tmp_path / "heal.json"
+    recreated, rec = _recorder()
+    msgs, alert = _alerts()
+
+    # A couple of busies is just a slow tick overlapping the next wake --- silent.
+    for _ in range(BUSY_CONSECUTIVE_THRESHOLD - 1):
+        report = _heal({"mina": BUSY}, state=state, rec=rec, alert=alert)
+        assert report.busy_stuck == []
+    assert not any("stuck `busy`" in m for m in msgs)
+
+    # Crossing the threshold means a tick wedged holding the lock --- alert.
+    report = _heal({"mina": BUSY}, state=state, rec=rec, alert=alert)
+    assert report.busy_stuck == ["mina"]
+    assert any("stuck `busy`" in m for m in msgs)
+    # A stuck flock is never auto-recreated --- the holder must be killed instead.
+    assert recreated == []
+
+
+def test_busy_streak_alert_fires_once_then_resets_on_recovery(tmp_path):
+    from slop_salon.healing import BUSY_CONSECUTIVE_THRESHOLD
+
+    state = tmp_path / "heal.json"
+    msgs, alert = _alerts()
+
+    for _ in range(BUSY_CONSECUTIVE_THRESHOLD + 3):
+        _heal({"mina": BUSY}, state=state, alert=alert)
+    # Only the exact crossing alerts --- not every wake past it.
+    assert sum("stuck `busy`" in m for m in msgs) == 1
+
+    _heal({"mina": OK}, state=state, alert=alert)  # a real tick resets the streak
+    _heal({"mina": BUSY}, state=state, alert=alert)
+    assert sum("stuck `busy`" in m for m in msgs) == 1
+
+
+def test_claude_error_streak_alerts_without_recreating(tmp_path):
+    from slop_salon.healing import CLAUDE_ERROR_CONSECUTIVE_THRESHOLD
+
+    state = tmp_path / "heal.json"
+    recreated, rec = _recorder()
+    msgs, alert = _alerts()
+
+    report = None
+    for _ in range(CLAUDE_ERROR_CONSECUTIVE_THRESHOLD):
+        report = _heal({"lelia": CLAUDE_ERR}, state=state, rec=rec, alert=alert)
+    assert report.claude_failing == ["lelia"]
+    assert any("claude errored" in m for m in msgs)
+    # Recreating could land a newer, vLLM-incompatible claude --- must not.
+    assert recreated == []

@@ -37,6 +37,23 @@ RECREATE_COOLDOWN = dt.timedelta(hours=2)
 # The sprites-CLI connection-failure signature (exec proxy unreachable).
 _WEDGE_MARKERS = ("failed to connect", "failed to start sprite command", "i/o timeout")
 
+# Exit code slop-tick uses when another tick already holds the sprite's flock
+# (overlapping wakes are normal; see templates/slop-tick). A few consecutive
+# busies just means a slow tick overlapped the next wake; a long unbroken streak
+# means a tick wedged while holding the lock, so every later wake no-ops. Alert
+# (don't recreate): the fix is killing the lock-holder, which the gc-hardened
+# slop-tick now prevents anyway.
+SKIP_BUSY_CODE = 75
+BUSY_CONSECUTIVE_THRESHOLD = 4
+
+# slop-tick prints these to stderr when `claude --print` fails but the tick
+# still exits 0 (so it can commit partial work). Unsurfaced, an agent whose
+# every tick errors reads as a healthy `ok` --- lelia sat dead ~3.5 days this
+# way. Alert (don't recreate): a recreate can't fix an API/model error and may
+# land a newer, vLLM-incompatible claude.
+_CLAUDE_ERROR_MARKERS = ("slop-tick: claude exited", "slop-tick: claude exceeded")
+CLAUDE_ERROR_CONSECUTIVE_THRESHOLD = 2
+
 
 def _state_path() -> Path:
     base = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
@@ -51,11 +68,32 @@ def is_wedge(result: ExecResult) -> bool:
     return any(marker in blob for marker in _WEDGE_MARKERS)
 
 
+def is_busy(result: ExecResult) -> bool:
+    """True if the tick cleanly skipped because another tick holds the flock."""
+    return result.exit_code == SKIP_BUSY_CODE
+
+
+def claude_failed(result: ExecResult) -> bool:
+    """True if the tick ran but `claude` itself errored.
+
+    slop-tick exits 0 even when claude fails (so it can still commit partial
+    work), so this keys off slop-tick's own stderr diagnostic rather than the
+    exit code. Not a wedge --- the sprite is reachable --- and never a recreate
+    trigger.
+    """
+    if result.exit_code != 0:
+        return False
+    blob = f"{result.stderr}\n{result.stdout}".lower()
+    return any(marker in blob for marker in _CLAUDE_ERROR_MARKERS)
+
+
 @dataclass
 class HealReport:
     wedged: list[str] = field(default_factory=list)
     recreated: list[str] = field(default_factory=list)
     skipped_cooldown: list[str] = field(default_factory=list)
+    busy_stuck: list[str] = field(default_factory=list)
+    claude_failing: list[str] = field(default_factory=list)
     platform_incident: bool = False
     locked_out: bool = False
 
@@ -115,6 +153,14 @@ def heal_wedged(
                 entry["consecutive_wedges"] = entry.get("consecutive_wedges", 0) + 1
             else:
                 entry["consecutive_wedges"] = 0
+            if is_busy(result):
+                entry["consecutive_busy"] = entry.get("consecutive_busy", 0) + 1
+            else:
+                entry["consecutive_busy"] = 0
+            if claude_failed(result):
+                entry["consecutive_claude_errors"] = entry.get("consecutive_claude_errors", 0) + 1
+            else:
+                entry["consecutive_claude_errors"] = 0
 
         if len(wedged_now) >= PLATFORM_INCIDENT_THRESHOLD:
             report.platform_incident = True
@@ -156,6 +202,32 @@ def heal_wedged(
                 alert_fn(f"AUTO-HEAL: {name} recreated.")
             except Exception as exc:  # noqa: BLE001 --- one bad recreate must not abort the rest
                 alert_fn(f"AUTO-HEAL FAILED for {name}: {exc!r}")
+
+        # Silent-failure alerts the wedge path doesn't cover. Neither recreates:
+        # a stuck flock needs the in-sprite lock-holder killed (the hardened
+        # slop-tick prevents it recurring); a claude error needs eyes, not a
+        # fresh sprite. Fire once on first crossing --- the wake line shows the
+        # status (`busy` / `claude-err`) on every wake regardless.
+        for name, result in results.items():
+            entry = agents[name]
+            if is_busy(result) and entry.get("consecutive_busy", 0) == BUSY_CONSECUTIVE_THRESHOLD:
+                report.busy_stuck.append(name)
+                alert_fn(
+                    f"{name} stuck `busy` for {BUSY_CONSECUTIVE_THRESHOLD} consecutive wakes "
+                    f"--- a tick is likely wedged holding ~/.slop-tick.lock; the lock won't "
+                    f"free until the holder dies. Check in-sprite processes."
+                )
+            if (
+                claude_failed(result)
+                and entry.get("consecutive_claude_errors", 0) == CLAUDE_ERROR_CONSECUTIVE_THRESHOLD
+            ):
+                report.claude_failing.append(name)
+                alert_fn(
+                    f"{name} claude errored on {CLAUDE_ERROR_CONSECUTIVE_THRESHOLD} consecutive "
+                    f"ticks (the tick still exits 0, so the wake looks healthy). Check "
+                    f"`slop logs {name}`; do NOT blindly recreate --- it can land a newer, "
+                    f"vLLM-incompatible claude."
+                )
 
         _save_state(path, state)
         return report

@@ -299,6 +299,26 @@ def test_wake_genuine_failure_makes_run_red(live_config):
     assert "fail(1)" in result.output
 
 
+def test_wake_surfaces_claude_error_instead_of_a_false_ok(live_config):
+    # slop-tick exits 0 even though claude 400'd: the tick "succeeded" but did
+    # nothing. It must not read as a healthy `ok` (lelia hid here for ~3.5 days).
+    result = _wake_with_outcomes(
+        {
+            "spr_lou": MagicMock(stdout="", stderr="", exit_code=0),
+            "spr_mina": MagicMock(
+                stdout="API Error: 400 ...",
+                stderr="slop-tick: claude exited 1",
+                exit_code=0,
+            ),
+        }
+    )
+
+    assert "claude-err" in result.output
+    assert "ok" in result.output  # lou still reads as ok
+    # A do-nothing tick reddens the run, the same as a hard failure would.
+    assert result.exit_code == 1, result.output
+
+
 def _wedge_result():
     """An ExecResult carrying the cold-start exec-proxy wedge signature."""
     return MagicMock(
