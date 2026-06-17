@@ -42,7 +42,8 @@ fi
 # if a tick already holds the lock this one is a clean no-op (exit 75, which
 # `slop wake` renders as `busy` rather than a failure). Opened *after* the
 # tailscaled spawn above so that long-lived daemon never inherits the lock fd;
-# fd 9 is closed in the `claude` child below so its orphan shells can't pin it.
+# fd 9 is closed in the `claude` child (and the git commit/push) below so no
+# orphan shell or detached git gc can pin it.
 exec 9>"$HOME/.slop-tick.lock"
 if ! flock -n 9; then
   echo "slop-tick: a tick is already running in this sprite, skipping" >&2
@@ -51,10 +52,21 @@ fi
 
 cd "$HOME/slop-salon-$AGENT_NAME"
 
+# Never let git run a background gc during a tick. `git gc --auto` (triggered by
+# our own commit/push) detaches by default, and as a daemon it inherits the lock
+# fd (9) and keeps it open after the tick exits --- pinning ~/.slop-tick.lock so
+# every later wake no-ops as `busy` (this silently stalled mina for ~16h). The
+# detached repack can also wedge in D-state on the read-only remount of an idle
+# checkpoint. These repos are tiny and never need it; gc off-sprite by hand if
+# loose objects ever pile up.
+git config gc.auto 0
+git config maintenance.auto false
+
 # Pick up any admin-side edits to the repo (CLAUDE.md, SOUL.md, etc).
 # --autostash preserves WIP across the rebase. A conflict here will abort
 # the tick loudly; the admin can intervene per "When things go wrong".
-git pull --rebase --autostash
+# fd 9 closed so a fetch-triggered maintenance run can't inherit the lock.
+git pull --rebase --autostash 9>&-
 
 # Enrich the vacuous "tick" prompt with a short studio-state preamble: an
 # automated read of the agent's own recent practice (how long since it revised
@@ -90,6 +102,8 @@ pkill -f "shell-snapshots/snapshot-zsh" 2>/dev/null || true
 
 if ! git diff --quiet HEAD || [[ -n "$(git ls-files --others --exclude-standard)" ]]; then
   git add -A
-  git commit -m "session $(date -Iseconds)"
-  git push
+  # Close the lock fd (9) for commit/push --- belt-and-braces with the gc.auto
+  # disable above, so nothing git spawns here can inherit and pin the lock.
+  git commit -m "session $(date -Iseconds)" 9>&-
+  git push 9>&-
 fi

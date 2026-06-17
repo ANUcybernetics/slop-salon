@@ -91,6 +91,16 @@ teardown() {
     [ "$log_count" -ge 2 ]
 }
 
+@test "disables git auto-gc/maintenance so a detached gc can't pin the lock" {
+    run bash "$SCRIPT" "tick"
+    [ "$status" -eq 0 ]
+    cd "$AGENT_DIR"
+    # A backgrounded `git gc --auto --detach` would inherit the flock fd and
+    # keep it open after the tick exits, stalling every later wake as `busy`.
+    [ "$(git config --get gc.auto)" = "0" ]
+    [ "$(git config --get maintenance.auto)" = "false" ]
+}
+
 @test "skips cleanly when another tick holds the sprite lock" {
     cd "$AGENT_DIR"
     initial_count=$(git log --oneline | wc -l)
