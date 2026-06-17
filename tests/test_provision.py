@@ -114,6 +114,17 @@ def test_apt_install_cmd_uses_required_packages():
         assert pkg not in cmd
 
 
+def test_claude_pin_cmd_installs_explicit_known_good_version():
+    from slop_salon.provision import CLAUDE_VERSION, _build_claude_pin_cmd
+
+    cmd = _build_claude_pin_cmd()
+    assert cmd == f"claude install {CLAUDE_VERSION} --force"
+    # Must be an explicit version, never a moving channel: a recreate off a newer
+    # base image must not drift onto a build whose Skills injection vLLM rejects.
+    assert CLAUDE_VERSION not in ("latest", "stable")
+    assert CLAUDE_VERSION[0].isdigit()
+
+
 def test_uv_install_cmd_installs_uv_and_slop_salon():
     from slop_salon.provision import _build_uv_and_slop_install_cmd
 
@@ -277,8 +288,9 @@ siblings = ["other"]
 
     sprites.create_sprite.assert_called_once()
 
-    # env-file write, apt, uv-install, clone+symlink, pre-commit, git-config = 6 execs
-    assert sprites.exec.call_count >= 6
+    # env-file write, tailscale, apt, claude-pin, uv-install, ambient-hook,
+    # clone+symlink, pre-commit, git-config = 9 execs
+    assert sprites.exec.call_count >= 9
 
     # Ticks are driven by the external wake driver (slop-wake.timer), not an
     # in-sprite service or cron. Provisioning must not create one.
@@ -286,7 +298,12 @@ siblings = ["other"]
     assert not any("sprite-env services create tick" in cmd for cmd in exec_commands)
     assert not any("crontab" in cmd for cmd in exec_commands)
 
-    # claude is pre-installed in the sprite image, so provisioning must not reinstall it.
+    # claude ships in the base image but its version drifts with the image, so
+    # provisioning pins it to a known-good build via the native `claude install`
+    # subcommand (never the curl installer).
+    from slop_salon.provision import CLAUDE_VERSION
+
+    assert any(f"claude install {CLAUDE_VERSION}" in cmd for cmd in exec_commands)
     assert not any("claude.ai/install.sh" in cmd for cmd in exec_commands)
 
     # The env file is written inside the sprite (the REST `env` field is ignored).
@@ -332,9 +349,7 @@ def test_settings_merge_preserves_existing_permissions_and_hooks(tmp_path):
             "PostToolUse": [
                 {"matcher": "Bash", "hooks": [{"type": "command", "command": "sprite-env-check"}]}
             ],
-            "UserPromptSubmit": [
-                {"hooks": [{"type": "command", "command": "sprite-env-check"}]}
-            ],
+            "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "sprite-env-check"}]}],
         },
     }
     (tmp_path / ".claude" / "settings.json").write_text(json.dumps(initial))
@@ -349,8 +364,7 @@ def test_settings_merge_preserves_existing_permissions_and_hooks(tmp_path):
     post = result["hooks"]["PostToolUse"]
     assert any(e["matcher"] == "Bash" for e in post), "sprite-env-check entry must survive"
     assert any(
-        any("ambient-recall.sh" in h.get("command", "") for h in e.get("hooks", []))
-        for e in post
+        any("ambient-recall.sh" in h.get("command", "") for h in e.get("hooks", [])) for e in post
     ), "ambient-recall entry must be present"
 
 

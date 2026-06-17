@@ -27,6 +27,14 @@ SPRITE_HOME = "/home/sprite"
 # rust, gh, plus claude/gemini/codex CLIs. Only media tooling is missing.
 APT_PACKAGES = "imagemagick ffmpeg sox"
 SLOP_SALON_REPO = "git+https://github.com/ANUcybernetics/slop-salon"
+# Pin the in-sprite Claude Code. The base image ships whatever version was
+# current when it was built and we keep autoUpdates off, so a sprite created
+# from a newer image lands on a newer claude. Newer builds (seen on 2.1.168)
+# surface the available-Skills list as a `system`-role message *inside*
+# `messages`; the self-hosted vLLM only allows user/assistant there and 400s
+# every tick, silently killing the agent (slop-tick still exits 0). Pinning to
+# a version the fleet runs cleanly keeps recreate/provision off that landmine.
+CLAUDE_VERSION = "2.1.92"
 
 
 def resolve_secrets(
@@ -94,6 +102,16 @@ def _interpolate(
 
 def _build_apt_install_cmd() -> str:
     return f"sudo apt-get update && sudo apt-get install -y {APT_PACKAGES}"
+
+
+def _build_claude_pin_cmd() -> str:
+    """Pin the in-sprite Claude Code to `CLAUDE_VERSION`.
+
+    `claude install <version>` repoints the ~/.local/bin/claude launcher at the
+    requested native build; `--force` reinstalls even though the base image
+    always ships some version already.
+    """
+    return f"claude install {shlex.quote(CLAUDE_VERSION)} --force"
 
 
 def _build_uv_and_slop_install_cmd() -> str:
@@ -345,16 +363,16 @@ def provision_agent(
         == 0
     )
     if repo_exists:
-        typer.echo(f"[1/12] GH repo {agent.github_repo} already exists, skipping create")
+        typer.echo(f"[1/14] GH repo {agent.github_repo} already exists, skipping create")
     else:
-        typer.echo(f"[1/12] Creating GH repo {agent.github_repo}")
+        typer.echo(f"[1/14] Creating GH repo {agent.github_repo}")
         subprocess.run(
             ["gh", "repo", "create", agent.github_repo, "--public"],
             check=True,
             env={**os.environ, "GH_TOKEN": gh_token},
         )
 
-    typer.echo("[2/12] Pushing templates as initial commit")
+    typer.echo("[2/14] Pushing templates as initial commit")
     files = _build_template_files(
         templates_dir,
         Path(soul_path),
@@ -365,12 +383,12 @@ def provision_agent(
     _push_initial_commit(agent.github_repo, files, gh_token)
 
     if not skip_dns_confirm:
-        typer.echo(f"[3/12] MANUAL: add Bluesky DNS TXT record at _atproto.{agent.handle}")
+        typer.echo(f"[3/14] MANUAL: add Bluesky DNS TXT record at _atproto.{agent.handle}")
         typer.confirm("Have you added the DNS record?", abort=True)
     else:
-        typer.echo("[3/12] Skipping DNS confirm (--yes-dns set)")
+        typer.echo("[3/14] Skipping DNS confirm (--yes-dns set)")
 
-    typer.echo("[4/12] Creating sprite")
+    typer.echo("[4/14] Creating sprite")
     sprites = SpritesClient()
     sprite_id = sprites.create_sprite(name=name)
 
@@ -382,32 +400,35 @@ def provision_agent(
                 f"stderr: {result.stderr}"
             )
 
-    typer.echo("[5/12] Writing ~/.slop-env in sprite (secrets + AGENT_NAME)")
+    typer.echo("[5/14] Writing ~/.slop-env in sprite (secrets + AGENT_NAME)")
     _exec(_build_write_env_file_cmd({"AGENT_NAME": name, **env}))
 
-    typer.echo("[6/12] Installing Tailscale and joining the tailnet")
+    typer.echo("[6/14] Installing Tailscale and joining the tailnet")
     _exec(_build_tailscale_join_cmd(name))
 
-    typer.echo("[7/12] Apt install (imagemagick, ffmpeg, sox)")
+    typer.echo("[7/14] Apt install (imagemagick, ffmpeg, sox)")
     _exec(_build_apt_install_cmd())
 
-    typer.echo("[8/13] uv tool install slop-salon")
+    typer.echo(f"[8/14] Pinning Claude Code to {CLAUDE_VERSION}")
+    _exec(_build_claude_pin_cmd())
+
+    typer.echo("[9/14] uv tool install slop-salon")
     _exec(_build_uv_and_slop_install_cmd())
 
-    typer.echo("[9/13] Installing ambient-recall hook + Claude Code settings")
+    typer.echo("[10/14] Installing ambient-recall hook + Claude Code settings")
     _exec(_build_install_ambient_hook_cmd())
 
-    typer.echo("[10/13] Cloning agent repo + symlinking slop-tick into ~/.local/bin")
+    typer.echo("[11/14] Cloning agent repo + symlinking slop-tick into ~/.local/bin")
     repo_url = f"https://{gh_token}@github.com/{agent.github_repo}.git"
     _exec(_build_clone_and_symlink_cmd(name, repo_url))
 
-    typer.echo("[11/13] pre-commit install")
+    typer.echo("[12/14] pre-commit install")
     _exec(_build_pre_commit_install_cmd(name))
 
-    typer.echo("[12/13] Configuring git in sprite")
+    typer.echo("[13/14] Configuring git in sprite")
     _exec(_build_git_config_cmd(name, gh_token))
 
-    typer.echo(f"[13/13] Saving sprite_id to {config.path}")
+    typer.echo(f"[14/14] Saving sprite_id to {config.path}")
     save_sprite_id(config, name, sprite_id)
 
     typer.echo(f"\nProvisioned {name} → sprite {sprite_id}")
