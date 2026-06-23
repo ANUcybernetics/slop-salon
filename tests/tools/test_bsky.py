@@ -312,6 +312,79 @@ def test_post_file_unknown_extension_falls_back_to_octet_stream(
     assert req.headers["content-type"] == "application/octet-stream"
 
 
+def test_uploadblob_rejects_over_length_video(bsky_env, httpx_mock, tmp_path, monkeypatch):
+    """A video over Bluesky's 3-min cap never transcodes, so refuse it before
+    upload --- failing loudly instead of letting it post as a dead player. The
+    guard runs before auth, so no HTTP should happen."""
+    from slop_salon.tools import bsky
+
+    vid = tmp_path / "track.mp4"
+    vid.write_bytes(b"\x00\x00\x00\x18ftypmp42fake")
+    monkeypatch.setattr(bsky, "_video_duration_seconds", lambda _p: 192.0)
+
+    result = runner.invoke(bsky.app, ["post", "com.atproto.repo.uploadBlob", "--file", str(vid)])
+    assert result.exit_code == 1
+    assert "3 min" in result.output
+    assert "3m12s" in result.output
+
+
+def test_uploadblob_rejects_oversize_video(bsky_env, httpx_mock, tmp_path, monkeypatch):
+    """Size is checked before duration, so an oversize blob is refused without
+    even probing it."""
+    from slop_salon.tools import bsky
+
+    vid = tmp_path / "big.mp4"
+    vid.write_bytes(b"x" * 64)
+    monkeypatch.setattr(bsky, "BSKY_VIDEO_MAX_BYTES", 16)
+    monkeypatch.setattr(
+        bsky, "_video_duration_seconds", lambda _p: pytest.fail("probed despite oversize")
+    )
+
+    result = runner.invoke(bsky.app, ["post", "com.atproto.repo.uploadBlob", "--file", str(vid)])
+    assert result.exit_code == 1
+    assert "100 MB" in result.output
+
+
+def test_uploadblob_allows_short_video(bsky_env, session_mock, httpx_mock, tmp_path, monkeypatch):
+    """A within-cap video sails through the guard and uploads as video/mp4."""
+    from slop_salon.tools import bsky
+
+    vid = tmp_path / "track.mp4"
+    vid.write_bytes(b"\x00\x00\x00\x18ftypmp42fake")
+    monkeypatch.setattr(bsky, "_video_duration_seconds", lambda _p: 5.0)
+    httpx_mock.add_response(
+        method="POST",
+        url=f"{FAKE_PDS}/xrpc/com.atproto.repo.uploadBlob",
+        json={"blob": {"$type": "blob", "ref": {"$link": "bafy-vid"}}},
+    )
+
+    result = runner.invoke(bsky.app, ["post", "com.atproto.repo.uploadBlob", "--file", str(vid)])
+    assert result.exit_code == 0, result.output
+    req = _find_request(httpx_mock, "uploadBlob")
+    assert req.headers["content-type"] == "video/mp4"
+    assert "bafy-vid" in result.output
+
+
+def test_uploadblob_video_passes_when_duration_unknown(
+    bsky_env, session_mock, httpx_mock, tmp_path, monkeypatch
+):
+    """Fail open: if ffprobe is absent or errors, we'd rather post than block."""
+    from slop_salon.tools import bsky
+
+    vid = tmp_path / "track.mp4"
+    vid.write_bytes(b"\x00\x00\x00\x18ftypmp42fake")
+    monkeypatch.setattr(bsky, "_video_duration_seconds", lambda _p: None)
+    httpx_mock.add_response(
+        method="POST",
+        url=f"{FAKE_PDS}/xrpc/com.atproto.repo.uploadBlob",
+        json={"blob": {"$type": "blob", "ref": {"$link": "bafy-vid"}}},
+    )
+
+    result = runner.invoke(bsky.app, ["post", "com.atproto.repo.uploadBlob", "--file", str(vid)])
+    assert result.exit_code == 0, result.output
+    assert "bafy-vid" in result.output
+
+
 def test_post_rejects_json_and_file_together(bsky_env, tmp_path):
     """Mutex check runs before auth, so no HTTP traffic should happen."""
     img = tmp_path / "img.jpg"

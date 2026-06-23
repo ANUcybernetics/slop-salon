@@ -24,6 +24,8 @@ import json
 import mimetypes
 import os
 import re
+import shutil
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -33,6 +35,13 @@ import typer
 DEFAULT_PDS = "https://bsky.social"
 DEFAULT_TIMEOUT = 20.0
 UPLOAD_TIMEOUT = 60.0
+# Bluesky transcodes an embed.video blob into HLS only within its limits: a
+# 3-minute duration cap and a ~100 MB size cap (plus a daily per-account quota).
+# The raw uploadBlob path enforces none of them, so an over-limit video still
+# posts but never transcodes --- its playlist.m3u8 404s forever, leaving a dead
+# "video" card on the feed. We preflight the two deterministic limits below.
+BSKY_VIDEO_MAX_SECONDS = 180.0
+BSKY_VIDEO_MAX_BYTES = 100 * 1024 * 1024
 # Skip an app.bsky.feed.post createRecord if an identical post already exists
 # within this many minutes. createRecord is non-idempotent, so a slow or lost
 # response makes the agent re-issue the write and the same post lands twice;
@@ -116,6 +125,10 @@ the single-quoted jq `'...'` program, where an apostrophe ends the quote.
   # video. `-shortest` ends the clip when the audio ends; `-tune
   # stillimage` and `-pix_fmt yuv420p` keep the file small and broadly
   # playable. The `alt` field describes the SOUND, not the still.
+  # Bluesky caps video at 3 minutes (and ~100 MB): a longer clip posts but
+  # never transcodes, landing as a dead player that never plays. `uploadBlob`
+  # refuses an over-cap video, so keep audio pieces under 3:00 --- shorten the
+  # track or split a longer one across posts.
   ffmpeg -loop 1 -i ./assets/cover.png -i ./assets/track.wav \\
          -c:v libx264 -tune stillimage -c:a aac -b:a 192k \\
          -pix_fmt yuv420p -shortest ./assets/track.mp4
@@ -272,6 +285,62 @@ def _mime_of(path: Path) -> str:
     return mime or "application/octet-stream"
 
 
+def _video_duration_seconds(path: Path) -> float | None:
+    """Probe a video's duration with ffprobe; None if it can't be determined."""
+    if shutil.which("ffprobe") is None:
+        return None
+    try:
+        out = subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                str(path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=True,
+        ).stdout.strip()
+        return float(out)
+    except subprocess.SubprocessError, ValueError:
+        return None
+
+
+def _guard_video_upload(path: Path) -> None:
+    """Refuse a video blob Bluesky would silently drop rather than transcode.
+
+    The 3-minute and ~100 MB caps are deterministic and locally checkable, so
+    we fail loudly here instead of letting an over-limit clip post as a dead
+    card (see the BSKY_VIDEO_* notes above). Non-video files and probe failures
+    pass through --- we'd rather post than block on a flaky or absent ffprobe.
+    """
+    if not _mime_of(path).startswith("video/"):
+        return
+    size = path.stat().st_size
+    if size > BSKY_VIDEO_MAX_BYTES:
+        typer.echo(
+            f"error: {path.name} is {size / 1_048_576:.0f} MB; Bluesky caps video at ~100 MB "
+            f"and won't transcode a larger blob (it would post but never play). Re-encode smaller.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    duration = _video_duration_seconds(path)
+    if duration is not None and duration > BSKY_VIDEO_MAX_SECONDS:
+        mins, secs = divmod(int(duration), 60)
+        typer.echo(
+            f"error: {path.name} runs {mins}m{secs:02d}s; Bluesky caps video at 3 min and "
+            f"silently drops longer clips (they post but never play). Trim it under 3:00 --- "
+            f"for an audio piece, shorten the track or split it across posts.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+
 def _norm_text(text: str | None) -> str:
     """Collapse whitespace so a trivially-reformatted re-issue still matches."""
     return re.sub(r"\s+", " ", (text or "").strip())
@@ -409,6 +478,8 @@ def post(
     # post double-publishes. Only createRecord bodies are parsed --- a binary
     # --file (an uploadBlob image/video) leaves `parsed` as None and is sent
     # untouched.
+    if file is not None:
+        _guard_video_upload(file)
     file_bytes = file.read_bytes() if file is not None else None
     if parsed is None and file_bytes is not None and nsid == "com.atproto.repo.createRecord":
         try:

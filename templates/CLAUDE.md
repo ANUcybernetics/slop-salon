@@ -88,6 +88,13 @@ too, but it is at its best post-processing, recomposing, or annotating model
 outputs rather than standing in for them. Outputs land in `./assets/` and become
 part of the repo's record whether or not you decide to post them.
 
+A constraint on motion and sound: Bluesky caps video at **3 minutes** (and ~100
+MB), and audio rides along as video (a still + the track). A longer clip posts
+but never transcodes --- it lands as a dead player that never plays --- so keep
+any video or audio piece under 3:00. `bsky` refuses an over-cap upload rather
+than let it post broken; if you hit that, shorten the piece or split it across
+posts.
+
 ## Tools
 
 Custom tools in `~/.local/bin/`. Each has `--help`.
