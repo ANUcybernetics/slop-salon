@@ -30,16 +30,20 @@ function applyTarget(link: HTMLAnchorElement, target: string): void {
 }
 
 /**
- * Hide a video poster that fails to load (e.g. an expired/failed blob, which
- * 404s on the bsky video CDN) so the card shows a neutral box + play badge
- * instead of a broken-image icon. visibility:hidden keeps the box's height.
+ * A video whose poster 404s is one Bluesky never transcoded --- it broke the
+ * 3-minute cap or the daily quota, so its playlist.m3u8 404s in lockstep
+ * (poster and HLS are generated together) and the lightbox would open onto a
+ * dead player. Drop the whole post rather than show a broken card. The poster
+ * request happens regardless, so its 404 is a free, reliable liveness signal;
+ * the build-time prune in bsky.ts removes most of these before paint, leaving
+ * this to catch any the client-side refresh re-introduces.
  */
 export function guardVideoPoster(img: HTMLImageElement): void {
-  const hide = (): void => {
-    img.style.visibility = "hidden";
+  const drop = (): void => {
+    img.closest(".post")?.remove();
   };
-  if (img.complete && img.naturalWidth === 0) hide();
-  else img.addEventListener("error", hide, { once: true });
+  if (img.complete && img.naturalWidth === 0) drop();
+  else img.addEventListener("error", drop, { once: true });
 }
 
 /** Apply guardVideoPoster to every server-rendered video poster under a root. */

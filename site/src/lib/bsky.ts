@@ -163,6 +163,70 @@ function entryToFeedItem(agent: Agent, entry: BskyFeedEntry): FeedItem {
   };
 }
 
+// Bluesky transcodes an embed.video blob into HLS asynchronously, and only
+// while the blob stays within its limits (the 3-minute cap; the per-account
+// daily quota of 25 videos / 10GB). A video that breaks them still posts ---
+// uploadBlob and createRecord both succeed --- but is never transcoded, so its
+// playlist.m3u8 and thumbnail.jpg 404 forever, leaving a dead "video" card that
+// opens the lightbox onto nothing. Prune those at build time so the feed never
+// shows them.
+//
+// The check is fail-open: only a definitive 404 prunes. A 200, any other
+// status, or a network error keeps the video --- so a transient blip can't
+// erase good posts. Freshly posted videos are still transcoding (their playlist
+// 404s briefly), so a grace window leaves recent posts untouched. Liveness is
+// memoised per playlist URL across the build, and a no-op in the browser (the
+// client refresh stays fast; the render layer drops any dead card that the
+// merge re-introduces).
+const VIDEO_TRANSCODE_GRACE_MS = 15 * 60 * 1000;
+const VIDEO_LIVENESS_CONCURRENCY = 8;
+const playlistLiveness = new Map<string, Promise<boolean>>();
+
+function playlistIsDead(url: string): Promise<boolean> {
+  let verdict = playlistLiveness.get(url);
+  if (!verdict) {
+    verdict = fetch(url, { method: "HEAD" })
+      .then((res) => res.status === 404)
+      .catch(() => false);
+    playlistLiveness.set(url, verdict);
+  }
+  return verdict;
+}
+
+export async function pruneDeadVideos(
+  items: FeedItem[],
+  now: number = Date.now(),
+): Promise<FeedItem[]> {
+  const aged = items.filter(
+    (it) => it.video && now - Date.parse(it.createdAt) > VIDEO_TRANSCODE_GRACE_MS,
+  );
+  const deadUris = new Set<string>();
+  for (let i = 0; i < aged.length; i += VIDEO_LIVENESS_CONCURRENCY) {
+    const batch = aged.slice(i, i + VIDEO_LIVENESS_CONCURRENCY);
+    // oxlint-disable-next-line no-await-in-loop -- bounded-concurrency batches
+    const verdicts = await Promise.all(batch.map((it) => playlistIsDead(it.video!.playlist)));
+    batch.forEach((it, j) => {
+      if (verdicts[j]) deadUris.add(it.uri);
+    });
+  }
+  if (deadUris.size === 0) return items;
+  // A dead video is a post's whole point, so drop the post --- unless it also
+  // carries images (a recordWithMedia), where just the video embed goes.
+  return items.filter((it) => {
+    if (!it.video || !deadUris.has(it.uri)) return true;
+    if (it.images.length > 0) {
+      it.video = undefined;
+      return true;
+    }
+    return false;
+  });
+}
+
+// Build-time only: in the browser the dead-card removal in feed-render covers it.
+function prunedForBuild(items: FeedItem[]): Promise<FeedItem[]> {
+  return import.meta.env.SSR ? pruneDeadVideos(items) : Promise.resolve(items);
+}
+
 async function fetchAuthorFeedPage(
   agent: Agent,
   limit: number,
@@ -207,11 +271,13 @@ async function fetchAuthorFeedAll(agent: Agent): Promise<FeedItem[]> {
 export async function loadCombinedFeed(agents: Agent[], perAgent = 20): Promise<FeedItem[]> {
   const live = agents.filter((a) => a.live);
   const results = await Promise.all(live.map((a) => fetchAuthorFeed(a, perAgent)));
-  return results.flat().toSorted((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+  const items = await prunedForBuild(results.flat());
+  return items.toSorted((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
 }
 
 export async function loadCombinedHistory(agents: Agent[]): Promise<FeedItem[]> {
   const live = agents.filter((a) => a.live);
   const results = await Promise.all(live.map(fetchAuthorFeedAll));
-  return results.flat().toSorted((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+  const items = await prunedForBuild(results.flat());
+  return items.toSorted((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
 }
