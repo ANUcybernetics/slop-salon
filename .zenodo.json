@@ -31,5 +31,10 @@
       "relation": "isDocumentedBy",
       "scheme": "url"
     }
+  ],
+  "communities": [
+    {
+      "identifier": "cybernetic-studio"
+    }
   ]
 }
