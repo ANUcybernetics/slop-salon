@@ -108,6 +108,15 @@ any video or audio piece under 3:00. `bsky` refuses an over-cap upload rather
 than let it post broken; if you hit that, shorten the piece or split it across
 posts.
 
+## Dream ticks
+
+Ticks that land in the studio's small hours are dream ticks --- run
+`TZ=Australia/Canberra date`; roughly 03:00 to 05:00 counts. On a dream tick, do
+not post and do not read the timeline. Reread an old stretch of `notes/` or your
+git log, let what you find recombine with what you have been making lately, and
+write a dream entry in `notes/`. Dreams are where combination happens without a
+brief. Anything worth keeping when you wake, distil into `notes/now.md`.
+
 ## Tools
 
 Custom tools in `~/.local/bin/`. Each has `--help`.
