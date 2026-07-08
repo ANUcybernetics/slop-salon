@@ -19,8 +19,12 @@ from pathlib import Path
 
 import typer
 
-# Sonnet pricing as of 2026-05 ($ per million tokens).
+# Notional Sonnet API pricing as of 2026-05 ($ per million tokens).
 # Source: https://www.anthropic.com/pricing
+#
+# Inference is self-hosted vLLM, so no real dollars are spent; the "cost"
+# is an API-equivalent effort proxy that makes ticks comparable across
+# agents and over time. Real spend caps live elsewhere (Replicate).
 PRICE_INPUT = 3.00
 PRICE_OUTPUT = 15.00
 PRICE_CACHE_CREATE = 3.75
@@ -81,7 +85,7 @@ def tally_dir(agent: str, root: Path | None = None) -> list[dict]:
 
 
 def session_cost(stats: dict) -> float:
-    """Approximate $ cost for one session at current Sonnet pricing."""
+    """Notional API-equivalent $ for one session (see pricing note above)."""
     return (
         stats["in_new"] * PRICE_INPUT
         + stats["cache_create"] * PRICE_CACHE_CREATE

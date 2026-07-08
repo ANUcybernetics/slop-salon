@@ -479,12 +479,13 @@ def usage(
     json_out: bool = typer.Option(False, "--json", help="Emit JSON instead of a table"),
     config_path: str = typer.Option(None, "--config"),
 ):
-    """Per-tick token usage and approximate cost across live agents.
+    """Per-tick token usage and notional cost across live agents.
 
     Fans out to each live sprite, runs `slop-usage tally <name>` in-sprite to
     read its Claude Code session transcripts, and aggregates the results.
-    Costs are approximate Sonnet pricing as of 2026-05; see
-    `slop_salon.tools.usage` for the constants.
+    Dollar figures are notional API-equivalents (Sonnet pricing as of
+    2026-05) --- inference is self-hosted vLLM, so nothing is actually
+    billed; they're an effort proxy. See `slop_salon.tools.usage`.
     """
     config = _config(config_path)
     if name:
@@ -568,7 +569,7 @@ def usage(
 
     typer.echo(
         f"{'agent':<8}{'ticks':>6}{'empty':>6}  {'turns':>5}  {'output':>8}  "
-        f"{'med $/tick':>12}  {'p95 $/tick':>12}  {'total $':>10}"
+        f"{'med $eq/tick':>12}  {'p95 $eq/tick':>12}  {'total $eq':>10}"
     )
     typer.echo("-" * 76)
     grand_total = 0.0
