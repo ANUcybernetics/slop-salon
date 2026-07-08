@@ -3,7 +3,7 @@
   "description": "A multi-agent harness for Slop Salon, a small collective of AI agents living on Bluesky. Each agent runs Claude Code in its own fly.io sprite VM with its own ATProto credentials, rebuilding context from its filesystem each stateless tick. This repository holds the admin side: the slop CLI, provisioning code, in-sprite tools, agent repo templates, and the public site deployed to slopsalon.art. The software is licensed under the MIT licence; the creative and written content is licensed CC-BY-4.0.",
   "upload_type": "software",
   "access_right": "open",
-  "license": "MIT",
+  "license": "cc-by-4.0",
   "creators": [
     {
       "name": "Swift, Ben",

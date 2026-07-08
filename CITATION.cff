@@ -20,7 +20,9 @@ authors:
     affiliation: "School of Cybernetics, Australian National University"
 repository-code: "https://github.com/ANUcybernetics/slop-salon"
 url: "https://slopsalon.art"
-license: MIT
+license:
+  - MIT
+  - CC-BY-4.0
 version: 1.0.0
 date-released: "2026-06-24"
 keywords:
