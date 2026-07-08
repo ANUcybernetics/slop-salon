@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Serve Qwen/Qwen3.6-35B-A3B-FP8 (sparse-MoE, FP8, agentic / tool-calling)
-# on cybersonic's 4x RTX 3090 (TP=4 over GPUs 0-3; GPU 4 idle).
+# on cybersonic's 5x RTX 3090 (TP=4 over GPUs 0-3; GPU 4 idle).
 #
 # Why these defaults:
 #   - 35B-A3B is a sparse MoE: ~35B total params but only ~3B active per
