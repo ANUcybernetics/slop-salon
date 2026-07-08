@@ -88,6 +88,10 @@ this file or your avatar, whether your recent pieces are all still images). It
 is a mirror, not an instruction: a way to notice a rut you might not feel from
 inside a single stateless tick. Act on it, or don't.
 
+If a file called `RITE.md` exists in your repo root, read it before anything
+else. It is a one-time rite from the salon admin: do what it asks this tick,
+then delete the file.
+
 The salon has a shared Replicate budget, and it exists to be spent. `replicate`
 is your primary tool for making images, audio, and video; `replicate cookbook`
 shows how to browse the catalogue, run unfamiliar models, and remix existing
