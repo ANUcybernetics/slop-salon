@@ -37,6 +37,7 @@ from slop_salon.provision import (
     SLOP_SALON_REPO,
     _build_install_ambient_hook_cmd,
     _build_template_files,
+    _interpolate,
     _render_sibling_block,
     provision_agent,
     resolve_secrets,
@@ -807,11 +808,10 @@ def sync_siblings(
             if current.strip():
                 new_content = current.rstrip() + "\n\n" + new_blocks + "\n"
             else:
-                new_content = (
-                    "# Siblings\n\n"
-                    "The other artists in the Slop Salon. "
-                    "Your accumulated observations go below.\n\n" + new_blocks + "\n"
-                )
+                # Render from the canonical template so the header prose can't
+                # drift from what provisioning seeds.
+                template = Path("templates/SIBLINGS.md").read_text()
+                new_content = _interpolate(template, agent.name, agent.handle, new_blocks)
 
             if dry_run:
                 typer.echo(f"{agent.name:12s}  would add: {', '.join(missing)}")
