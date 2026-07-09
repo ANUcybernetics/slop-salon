@@ -4,6 +4,7 @@ title: Nothing catches a persistently failing push (lou lost 16 days)
 status: To Do
 assignee: []
 created_date: "2026-07-09 23:07"
+updated_date: "2026-07-09 23:36"
 labels:
   - bug
   - ops
@@ -54,5 +55,28 @@ the time of the incident only lou was affected (others ahead=0).
 - [ ] #2 The wake driver alerts on N consecutive same-agent fail(1), and does
       not auto-recreate that agent
 - [ ] #3 A sprite with unpushed work cannot be silently destroyed by the healer
+- [x] #4 A failed tick logs claude's own stdout, not just git's stderr (8cf2ee5)
 
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+
+A third gap, found while watching the wave-one observation window (2026-07-10).
+
+claude-err was undiagnosable. cli.py printed a failed tick's tail as
+`(result.stderr or result.stdout)`. git writes progress to stderr, so stderr is
+never empty, so stdout was never shown --- and `claude --print` reports its own
+errors on stdout. Nine claude-err ticks across five agents (gert 3, rahel 2,
+lelia 2, vita 1, mina 1) in 24h had their cause discarded at the log line.
+
+Fixed in 8cf2ee5: `_failure_tail` tags and prints both streams. Takes effect on
+the next wake with no push (slop-wake.service runs `uv run slop wake` from the
+repo working copy). The next claude-err will carry claude's error text.
+
+Endpoint is healthy: a trivial `claude --print` on gert returns ok, claude
+pinned at 2.1.92 (no vLLM version landmine). So claude-err is context-dependent
+--- most likely TASK-7 (>8 images in one request 500s the vLLM). Confirm from
+the next captured error before acting.
+<!-- SECTION:NOTES:END -->
