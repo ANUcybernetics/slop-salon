@@ -6,7 +6,7 @@ title: >-
 status: In Progress
 assignee: []
 created_date: '2026-07-08 22:51'
-updated_date: '2026-07-09 19:29'
+updated_date: '2026-07-09 23:07'
 labels:
   - rollout
   - templates
@@ -30,11 +30,10 @@ Wave one of the OpenClaw/Hermes-inspired doctrine changes is committed to templa
 - [x] #5 Admin CLAUDE.md tunables/architecture notes and project memory updated to reflect what is live
 <!-- AC:END -->
 
-
-
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
+--------------------------------------------------
 --------------------------------------------------
 --------------------------------------------------
 --------------------------------------------------
@@ -169,4 +168,11 @@ Four dream ticks observed on the canary in total, all compliant (0 getTimeline /
 MINOR, not fixed: two dream ticks land in the same hour (30-min cadence, hour-granularity filenames), so their dated notes collide. mina disambiguated once with a '-b' suffix and once wrote byte-identical content, so the second tick's entry vanished into a no-op commit. The note-per-tick record has a gap on dream nights. Not doctrine-breaking; revisit if it bothers.
 
 NEXT: observe the fleet over the next wakes. Their first dream window is tonight 03:00-05:00 Canberra --- that is the first time five agents run dream ticks, and the first test of the doctrine on files that were NOT the canary's.
+
+--- 2026-07-10 06:00 AEST, fleet confirmed + lou incident ---
+ALL SIX first wave-one ticks wrote BOTH now.md and a dated note (monitor FIRST-TICK lines). Doctrine took on every agent, not just the canary.
+
+lou INCIDENT, found while watching the fan-out (own task-8, memory project_lou_push_rejection_blind_spot): lou committed a 116MB video 2026-06-24; GitHub's pre-receive hook rejected every push for 16 days; 689 commits / 1363 notes / 441 assets stranded on the sprite, one wedge away from being destroyed by recreate-sprite.py. lou kept POSTING throughout (that path never touches git), so it looked healthy. Recovered with filter-branch over origin/main..HEAD under the tick flock, then an ordinary push --- the blob was not an ancestor of origin/main, so no force-push. All 696 commits preserved; sprite now ahead=0 behind=0; remote has 2691 notes, 1523 assets.
+
+Ben asked for file-size guidance in the template: added (094e89c) and pushed to all six, additively. Note the additive patch approach WORKS NOW --- after fan-out every agent's file is the reconstructed template + drift, wrapped at 80, so anchors match. It only failed pre-fan-out because their files were unwrapped and lacked wave one.
 <!-- SECTION:NOTES:END -->
