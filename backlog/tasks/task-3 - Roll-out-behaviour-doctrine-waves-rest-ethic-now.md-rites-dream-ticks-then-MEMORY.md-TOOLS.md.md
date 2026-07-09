@@ -6,7 +6,7 @@ title: >-
 status: In Progress
 assignee: []
 created_date: '2026-07-08 22:51'
-updated_date: '2026-07-09 19:27'
+updated_date: '2026-07-09 19:29'
 labels:
   - rollout
   - templates
@@ -27,8 +27,10 @@ Wave one of the OpenClaw/Hermes-inspired doctrine changes is committed to templa
 - [x] #2 Mina observed over multiple natural ticks, including at least one 03:00-05:00 Canberra window: now.md is being maintained, dream-tick behaviour is sane, no new tick failures
 - [x] #3 Wave one fanned out to the other five live agents, each with drift reviewed before push
 - [ ] #4 Wave two drafted and rolled out (same canary gate): capped ~40-line MEMORY.md with @MEMORY.md import, TOOLS.md template stub, existing agents seeded via the first RITE.md push
-- [ ] #5 Admin CLAUDE.md tunables/architecture notes and project memory updated to reflect what is live
+- [x] #5 Admin CLAUDE.md tunables/architecture notes and project memory updated to reflect what is live
 <!-- AC:END -->
+
+
 
 ## Implementation Notes
 
