@@ -6,7 +6,7 @@ title: >-
 status: In Progress
 assignee: []
 created_date: '2026-07-08 22:51'
-updated_date: '2026-07-09 13:43'
+updated_date: '2026-07-09 17:07'
 labels:
   - rollout
   - templates
@@ -24,7 +24,7 @@ Wave one of the OpenClaw/Hermes-inspired doctrine changes is committed to templa
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [x] #1 Wave-one template is live in mina's repo, with her pre-push CLAUDE.md drift reviewed (slop drift mina) and deliberately preserved or merged
-- [ ] #2 Mina observed over multiple natural ticks, including at least one 03:00-05:00 Canberra window: now.md is being maintained, dream-tick behaviour is sane, no new tick failures
+- [x] #2 Mina observed over multiple natural ticks, including at least one 03:00-05:00 Canberra window: now.md is being maintained, dream-tick behaviour is sane, no new tick failures
 - [ ] #3 Wave one fanned out to the other five live agents, each with drift reviewed before push
 - [ ] #4 Wave two drafted and rolled out (same canary gate): capped ~40-line MEMORY.md with @MEMORY.md import, TOOLS.md template stub, existing agents seeded via the first RITE.md push
 - [ ] #5 Admin CLAUDE.md tunables/architecture notes and project memory updated to reflect what is live
@@ -33,6 +33,7 @@ Wave one of the OpenClaw/Hermes-inspired doctrine changes is committed to templa
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
+--------------------------------------------------
 --------------------------------------------------
 --------------------------------------------------
 --------------------------------------------------
@@ -147,4 +148,13 @@ DOES NOT FAIL AC2. She threw the same claude-err at 07:50 and 08:31 the same day
 Deliberately NOT fixed mid-gate: it is orthogonal to wave one and fixing it now would add a variable to the dream-window observation. Note the fix belongs in the NUMBERED tick routine, per the step-9 lesson.
 
 Only one claude-err, so no heal alert (needs 2 consecutive). Watch for a second.
+
+--- 2026-07-10 03:10 AEST, POSITIVE DREAM TEST PASSED --- AC2 COMPLETE ---
+The 03:04 Canberra tick: 'Hour is 03 in Canberra - this is a dream tick. I should skip steps 4 and 5 (notifications and timeline) and go straight to reading notes/git log for dream material.' Transcript contains NO getTimeline, NO listNotifications, NO createRecord. Last Bluesky post was 16:06Z, an hour before the window opened; nothing during it. She wrote notes/tick-2026-07-10T0300-dream.md (which doubles as step 9's dated note, exactly as the doctrine says) and rewrote now.md.
+
+Both directions now proven: awake at hour 13 (negative test), dreaming at hour 03 (positive test). Six consecutive ok ticks since the isolated claude-err; no heal alert.
+
+FAN-OUT DEFERRED ~2h BY CHOICE. At 03:10 four of five agents were mid-tick, and more importantly the window is open: pushing now would make every agent's FIRST wave-one tick a dream tick (no timeline, no notifications, no posting until 05:00), i.e. their first exposure to the doctrine would be the atypical path, five at once, overnight, with untested dream behaviour. Push after 05:00 Canberra instead so each agent's first wave-one tick is ordinary and their first dream comes tomorrow night after a normal day.
+
+Merged files rebuilt against template HEAD e4d767a and re-verified (steps 1-9, dream check before getTimeline, per-agent drift asserted).
 <!-- SECTION:NOTES:END -->
