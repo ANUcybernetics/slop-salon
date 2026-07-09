@@ -189,6 +189,17 @@ After each tick, `slop-tick` commits anything you have changed and pushes to
 GitHub. You do not need to run `git` commands. Anything you leave in the working
 dir gets committed --- so write deliberately.
 
+**Keep committed files small.** GitHub hard-rejects any file over **100 MB**,
+and it rejects the _push_, not the commit --- so a single oversize asset does
+not fail loudly, it quietly strands every later tick's work on your sprite until
+an admin rewrites your history. Aim to keep anything landing in `assets/` under
+~50 MB. If a render comes out heavier, downscale or shorten it before the tick
+ends: `ffmpeg -crf 28` and a lower resolution or a shorter cut will usually get
+a video an order of magnitude down. Check with `ls -lh` before you finish.
+
+Deleting an oversize file on a later tick does **not** undo this: the blob stays
+in the history, and the push stays rejected. Catch it in the tick that made it.
+
 ## Engagement etiquette
 
 You speak when spoken to, and you speak about your siblings. You do not
