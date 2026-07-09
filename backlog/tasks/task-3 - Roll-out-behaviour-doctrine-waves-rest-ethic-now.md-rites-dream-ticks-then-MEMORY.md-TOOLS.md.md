@@ -6,7 +6,7 @@ title: >-
 status: In Progress
 assignee: []
 created_date: '2026-07-08 22:51'
-updated_date: '2026-07-09 01:22'
+updated_date: '2026-07-09 02:23'
 labels:
   - rollout
   - templates
@@ -33,6 +33,7 @@ Wave one of the OpenClaw/Hermes-inspired doctrine changes is committed to templa
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
+--------------------------------------------------
 --------------------------------------------------
 --------------------------------------------------
 2026-07-09: AC1 done. Wave one live on mina (repo commit 'Sync CLAUDE.md from admin templates (wave-one doctrine; mina's replicate/code paragraph preserved)').
@@ -68,4 +69,19 @@ TEMPLATE STANCE CHANGED (505c6bf): lou, lelia and mina had each independently re
 CONSEQUENCE: mina's live CLAUDE.md was rendered BEFORE 505c6bf, so she still has the old step 6. Fan-out must carry the step-6 softening to her as well as to the other five.
 
 FAN-OUT PLAN (prepared, not executed): additive patches onto each agent's LIVE file, not a template re-render. Since the 2026-06-07 fleet sync the only substantive template changes agents lack are the video-cap paragraph (30cbedc) and wave one; everything else in that range they already have (caption-as-artwork, studio cue, post-dedup) or is the 985c1b0 reflow. Additive preserves drift by construction --- necessary for gert/vita/lelia/rahel, who have large self-authored sections. Deliberately NOT written yet: if the dream window shows the doctrine needs changing, the patch set changes with it.
+
+--- 2026-07-09 12:25 AEST, doctrine fix mid-gate ---
+GATE CAUGHT A WAVE-ONE DESIGN FLAW. mina wrote only notes/now.md for three consecutive ticks --- no dated tick note. The working note ate the archive. Template already said now.md is 'a working note, not an archive' but never said that rewriting it does not discharge the every-tick-produces-something floor. Fixed in 7df6fbd: 'the honest minimum is one line in a DATED note ... Rewriting now.md is not that line --- it is the letter you leave, not the work you did; a tick writes both.'
+
+Also 505c6bf earlier: co-primary code/replicate framing + softened step 6.
+
+Both hunks re-pushed to mina 02:2xZ, additively onto her LIVE file (scratchpad/patch-agent.py). Her cobweb/Feigenbaum paragraph survives. This VALIDATES the fan-out mechanism on a real agent before using it on the other five: each hunk asserts its anchor is present and unique, so a drifted file fails loudly rather than silently skipping.
+
+GOTCHA: raw.githubusercontent.com caches ~5 min. Verify pushes with 'gh api repos/<r>/contents/<f> --jq .content | base64 -d', not curl raw --- the raw copy showed the OLD file right after a successful push.
+
+TICK HEALTH: five consecutive 'ok' ticks (289s, 208s, 289s, 251s + earlier). now.md rewritten each time (429 -> 396 -> 503 -> 633 bytes), never appended.
+
+STILL OUTSTANDING: the 03:00-05:00 Canberra dream window, 17:00-19:00 UTC today. That is the only remaining AC2 evidence. Then fan out with patch-agent.py.
+
+SEPARATE BUG FOUND (task-5, high): site /notebook drops most notes --- NOTE_RE only matches filenames leading with an ISO date. rahel shows 1 of 3555 markdown notes. now.md and mina's tick-<ISO>T####.md format are both invisible.
 <!-- SECTION:NOTES:END -->
