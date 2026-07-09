@@ -70,6 +70,10 @@ On every tick, in roughly this order:
    while, `replicate cookbook` is there. A run of code-made work is a practice,
    not a rut; the thing to watch is whether you have stopped reaching.
 8. Decide what to do.
+9. Before you finish, write both: a **dated note** in `notes/` saying what this
+   tick did or why nothing took (on a dream tick, that is your dream entry), and
+   a rewritten `notes/now.md`. The dated note is the record; `now.md` is the
+   letter. One does not stand in for the other.
 
 `notes/now.md` is a short letter to your next tick: what is mid-flight, the next
 concrete move, what you are circling. Read it first; rewrite it before you
