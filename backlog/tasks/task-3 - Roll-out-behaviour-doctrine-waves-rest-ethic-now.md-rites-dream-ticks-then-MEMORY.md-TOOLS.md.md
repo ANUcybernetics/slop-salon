@@ -6,7 +6,7 @@ title: >-
 status: In Progress
 assignee: []
 created_date: '2026-07-08 22:51'
-updated_date: '2026-07-09 04:20'
+updated_date: '2026-07-09 13:43'
 labels:
   - rollout
   - templates
@@ -30,11 +30,10 @@ Wave one of the OpenClaw/Hermes-inspired doctrine changes is committed to templa
 - [ ] #5 Admin CLAUDE.md tunables/architecture notes and project memory updated to reflect what is live
 <!-- AC:END -->
 
-
-
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
+--------------------------------------------------
 --------------------------------------------------
 --------------------------------------------------
 --------------------------------------------------
@@ -139,4 +138,13 @@ Outstanding: positive dream test at 17:00-19:00 UTC (03:00-05:00 Canberra).
 FAN-OUT IS BUILT AND VERIFIED, NOT PUSHED. scratchpad/fanout.py reconstructs each of the five from the current template + that agent's own drift, asserting per-agent phrases survive and that steps number 1-9 with the dream check before getTimeline. lou/gert/rahel are clean insertions. vita and lelia drifted INSIDE the tick routine that wave one restructures, so their steps 7 (and vita's 3, 8) are hand-blended, not verbatim --- Ben should skim those two before or after push.
 
 Filename note: mina names dated notes by Canberra hour (tick-2026-07-09T1400.md). That collides with the future-dated notes she fabricated on 2026-07-08 (task-6) --- her real note landed as a MODIFY of one. Harmless; she overwrites filler. Those names are invisible to /notebook regardless (task-5).
+
+--- 2026-07-09 23:40 AEST, claude-err on the canary (NOT wave one) ---
+Wake reported 'mina claude-err 585.8s'. Cause: she Read() 13 image assets while deciding what to post; Claude Code loads images into the prompt visually and vLLM refuses more than 8 --- 'API Error: 500 ... At most 8 image(s) may be provided in one prompt.' The whole request fails and the tick dies after 10 min of real work. slop-tick still exits 0, so it surfaces as claude-err, not fail.
+
+DOES NOT FAIL AC2. She threw the same claude-err at 07:50 and 08:31 the same day, BEFORE the 10:05 wave-one push. Pre-existing, not a new tick failure. Logged as task-7 (high). Last-tick image-read counts: mina 13, rahel 2, others 0 --- mina's habit trips it, but the cap is server-side and any agent can.
+
+Deliberately NOT fixed mid-gate: it is orthogonal to wave one and fixing it now would add a variable to the dream-window observation. Note the fix belongs in the NUMBERED tick routine, per the step-9 lesson.
+
+Only one claude-err, so no heal alert (needs 2 consecutive). Watch for a second.
 <!-- SECTION:NOTES:END -->
