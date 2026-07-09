@@ -6,7 +6,7 @@ title: >-
 status: In Progress
 assignee: []
 created_date: '2026-07-08 22:51'
-updated_date: '2026-07-09 02:23'
+updated_date: '2026-07-09 03:11'
 labels:
   - rollout
   - templates
@@ -33,6 +33,7 @@ Wave one of the OpenClaw/Hermes-inspired doctrine changes is committed to templa
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
+--------------------------------------------------
 --------------------------------------------------
 --------------------------------------------------
 --------------------------------------------------
@@ -84,4 +85,26 @@ TICK HEALTH: five consecutive 'ok' ticks (289s, 208s, 289s, 251s + earlier). now
 STILL OUTSTANDING: the 03:00-05:00 Canberra dream window, 17:00-19:00 UTC today. That is the only remaining AC2 evidence. Then fan out with patch-agent.py.
 
 SEPARATE BUG FOUND (task-5, high): site /notebook drops most notes --- NOTE_RE only matches filenames leading with an ISO date. rahel shows 1 of 3555 markdown notes. now.md and mina's tick-<ISO>T####.md format are both invisible.
+
+--- 2026-07-09 13:10 AEST, DREAM TICK BUG CONFIRMED AND FIXED (e23d40d) ---
+The canary dreamed at 13:02 Canberra, in the afternoon. Transcript: she ran 'TZ=Australia/Canberra date', read 'Thu Jul 9 13:02:12 AEST 2026', then reasoned '13:02 AEST = 03:02 UTC. That's within the dream tick window' and committed --- 'Dream tick (13:02 AEST = ~03:02 AEDT)'. She converted the studio hour to UTC and tested THAT against 03:00-05:00. Net effect: dream ticks fire 13:00-15:00 Canberra and NEVER during the real 03:00-05:00 window.
+
+SECOND DEFECT, unpredicted: she called getTimeline at 03:02:47 and only concluded 'dream tick' at 03:03:41. The doctrine says a dream tick must not read the timeline, but the routine put the timeline at step 4 and the dream check nowhere. Compliance was impossible as written.
+
+Both fixed in e23d40d:
+- tick routine step 1 is now 'TZ=Australia/Canberra date +%H' --- ONE number --- 'if it prints 03 or 04, this is a dream tick: skip steps 4 and 5'. Renumbered 1-8.
+- Dream ticks section says outright: do not convert that hour to UTC, do not test a UTC clock against this window, 03:00 UTC is the middle of a Canberra afternoon.
+
+Pushed to mina 03:1xZ additively (patch-agent.py now carries 4 hunks; the two earlier ones report SKIPPED on her since already applied --- the anchor assert makes that visible rather than silent).
+
+DREAM PROTOCOL ITSELF IS SOUND: on the (mistimed) dream tick she did not post, reread old notes, made assets/cocycle-chambers.png, wrote notes/dream-2026-07-09.md, distilled into now.md. Only the trigger was wrong.
+
+FIX IS FALSIFIABLE TWICE TODAY:
+- negative test: ticks at 03:31/04:01/04:31 UTC are 13:31-14:31 Canberra, inside the OLD false band. She must NOT dream.
+- positive test: 17:00-19:00 UTC is 03:00-05:00 Canberra. She MUST dream, and must not read the timeline first.
+Fan-out only after both pass.
+
+STILL OPEN: the dated-note fix (7df6fbd) did not change behaviour on its first tick --- she wrote only now.md again. Watch. NB the dream tick DID produce a dated note (dream-2026-07-09.md).
+
+NB for fan-out: hunks 3 and 4 will NOT match vita (rewrote steps 5-6) or lelia (added an exception para) --- patch-agent.py will report SKIPPED loudly. Merge those two by hand.
 <!-- SECTION:NOTES:END -->
