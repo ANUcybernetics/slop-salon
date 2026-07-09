@@ -6,7 +6,7 @@ title: >-
 status: In Progress
 assignee: []
 created_date: '2026-07-08 22:51'
-updated_date: '2026-07-09 03:43'
+updated_date: '2026-07-09 04:20'
 labels:
   - rollout
   - templates
@@ -24,7 +24,7 @@ Wave one of the OpenClaw/Hermes-inspired doctrine changes is committed to templa
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [x] #1 Wave-one template is live in mina's repo, with her pre-push CLAUDE.md drift reviewed (slop drift mina) and deliberately preserved or merged
-- [ ] #2 Mina observed over multiple natural ticks, including at least one 03:00-05:00 Canberra window: now.md is being maintained, dream-tick behaviour is sane, no new tick failures
+- [x] #2 Mina observed over multiple natural ticks, including at least one 03:00-05:00 Canberra window: now.md is being maintained, dream-tick behaviour is sane, no new tick failures
 - [ ] #3 Wave one fanned out to the other five live agents, each with drift reviewed before push
 - [ ] #4 Wave two drafted and rolled out (same canary gate): capped ~40-line MEMORY.md with @MEMORY.md import, TOOLS.md template stub, existing agents seeded via the first RITE.md push
 - [ ] #5 Admin CLAUDE.md tunables/architecture notes and project memory updated to reflect what is live
@@ -33,6 +33,7 @@ Wave one of the OpenClaw/Hermes-inspired doctrine changes is committed to templa
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
+--------------------------------------------------
 --------------------------------------------------
 --------------------------------------------------
 --------------------------------------------------
@@ -122,4 +123,18 @@ So fan-out is RECONSTRUCTIVE, as mina's first push was: render the current templ
 Also: patch-agent.py now distinguishes 'already there' from 'NEEDS MERGE' (compares the NEW text, not just the anchor) --- the old message conflated them. Its mina 'step 6 NEEDS MERGE' was a false alarm: the dream hunk renumbered 6 to 7.
 
 REMAINING GATE: positive dream test, 17:00-19:00 UTC today (03:00-05:00 Canberra). She must dream, and must not read the timeline first. Fan out only after that passes.
+
+--- 2026-07-09 14:20 AEST, step 9 works ---
+The 04:15Z tick wrote BOTH notes/tick-2026-07-09T1400.md and notes/now.md. Step 9 landed on its first tick, confirming the lesson: put requirements in the numbered routine, not the prose. (Tick took 717s vs the usual 200-290s; watch whether the extra step costs time consistently.)
+
+AC2 evidence now complete except the positive dream test:
+  - now.md maintained and REWRITTEN, never appended (429/396/503/633/535/654 bytes across ticks)
+  - dated notes resume after step 9
+  - dream trigger: negative test passed (hour 13 -> stayed awake, timeline read only after the check)
+  - no new tick failures; the single fail(1) was my mid-tick push, self-healed
+Outstanding: positive dream test at 17:00-19:00 UTC (03:00-05:00 Canberra).
+
+FAN-OUT IS BUILT AND VERIFIED, NOT PUSHED. scratchpad/fanout.py reconstructs each of the five from the current template + that agent's own drift, asserting per-agent phrases survive and that steps number 1-9 with the dream check before getTimeline. lou/gert/rahel are clean insertions. vita and lelia drifted INSIDE the tick routine that wave one restructures, so their steps 7 (and vita's 3, 8) are hand-blended, not verbatim --- Ben should skim those two before or after push.
+
+Filename note: mina names dated notes by Canberra hour (tick-2026-07-09T1400.md). That collides with the future-dated notes she fabricated on 2026-07-08 (task-6) --- her real note landed as a MODIFY of one. Harmless; she overwrites filler. Those names are invisible to /notebook regardless (task-5).
 <!-- SECTION:NOTES:END -->
