@@ -6,7 +6,7 @@ title: >-
 status: In Progress
 assignee: []
 created_date: '2026-07-08 22:51'
-updated_date: '2026-07-09 00:34'
+updated_date: '2026-07-09 01:22'
 labels:
   - rollout
   - templates
@@ -34,6 +34,7 @@ Wave one of the OpenClaw/Hermes-inspired doctrine changes is committed to templa
 
 <!-- SECTION:NOTES:BEGIN -->
 --------------------------------------------------
+--------------------------------------------------
 2026-07-09: AC1 done. Wave one live on mina (repo commit 'Sync CLAUDE.md from admin templates (wave-one doctrine; mina's replicate/code paragraph preserved)').
 
 Pushed a HAND-MERGED file, not push-template.py: mina had one genuine self-edit (a paragraph arguing code-based making is co-primary with replicate, from her cobweb/Feigenbaum work). Ben chose to preserve it. Method: diff live CLAUDE.md against the blob left by the last 'Ben Swift' sync commit (2026-06-07) to separate her edits from admin-side reflow noise, splice hers into the fresh render, push that. The rest of 'slop drift' output is cosmetic --- the template was rewrapped to 80 cols after the last sync.
@@ -54,4 +55,17 @@ LESSON FOR FAN-OUT: pushing a template mid-tick costs that agent one fail(1). Ti
 CONFIRMED WAVE-ONE DOCTRINE IS LIVE: tick 4771874f (00:30Z, first tick on the new file) read notes/now.md, ran 'TZ=Australia/Canberra date', and reasoned explicitly 'It is 10:31 AM in Canberra - not a dream tick'. now.md did not exist yet, which the tick noticed.
 
 SEPARATE BUG FOUND (own task): SIBLINGS.md exceeds the 25k-token Read cap on all six agents, so tick step 2 fails every tick.
+
+--- 2026-07-09 ~11:10 AEST, gate progress ---
+AC2 partly met. Two clean 'ok' ticks since the push (289s, 208s). notes/now.md created on the first full tick and REWRITTEN (429 -> 396 bytes) on the second, not appended --- the rewrite-not-append rule is holding. First tick on the new file ran 'TZ=Australia/Canberra date' and reasoned 'not a dream tick'. Still outstanding: the 03:00-05:00 Canberra dream window (17:00-19:00 UTC today).
+
+WATCH: in now.md mina writes 'It's 00:31 UTC. No dream tick.' She ran the Canberra date command in-thinking but records UTC in the note. Both agreed at that hour. If she keys the window off UTC she will dream at 03:00 UTC = 13:00 Canberra. The window tonight settles it.
+
+WATCH: that tick produced only now.md, no dated tick note. Satisfies the rest ethic, but if now.md displaces dated notes the site's /notebook page thins out (it lists files in notes/).
+
+TEMPLATE STANCE CHANGED (505c6bf): lou, lelia and mina had each independently rewritten the 'code-based making is at its best post-processing' paragraph to say code is co-primary. Convergent drift across three agents that cannot see each other's CLAUDE.md. Ben chose to fold it into the template and soften tick-routine step 6. slop-studio's cue left alone --- it fires on modality (all stills -> a/v), not code-vs-replicate, and drives Replicate spend.
+
+CONSEQUENCE: mina's live CLAUDE.md was rendered BEFORE 505c6bf, so she still has the old step 6. Fan-out must carry the step-6 softening to her as well as to the other five.
+
+FAN-OUT PLAN (prepared, not executed): additive patches onto each agent's LIVE file, not a template re-render. Since the 2026-06-07 fleet sync the only substantive template changes agents lack are the video-cap paragraph (30cbedc) and wave one; everything else in that range they already have (caption-as-artwork, studio cue, post-dedup) or is the 985c1b0 reflow. Additive preserves drift by construction --- necessary for gert/vita/lelia/rahel, who have large self-authored sections. Deliberately NOT written yet: if the dream window shows the doctrine needs changing, the patch set changes with it.
 <!-- SECTION:NOTES:END -->
