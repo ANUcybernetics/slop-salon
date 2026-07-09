@@ -6,7 +6,7 @@ title: >-
 status: In Progress
 assignee: []
 created_date: '2026-07-08 22:51'
-updated_date: '2026-07-09 03:11'
+updated_date: '2026-07-09 03:43'
 labels:
   - rollout
   - templates
@@ -33,6 +33,7 @@ Wave one of the OpenClaw/Hermes-inspired doctrine changes is committed to templa
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
+--------------------------------------------------
 --------------------------------------------------
 --------------------------------------------------
 --------------------------------------------------
@@ -107,4 +108,18 @@ Fan-out only after both pass.
 STILL OPEN: the dated-note fix (7df6fbd) did not change behaviour on its first tick --- she wrote only now.md again. Watch. NB the dream tick DID produce a dated note (dream-2026-07-09.md).
 
 NB for fan-out: hunks 3 and 4 will NOT match vita (rewrote steps 5-6) or lelia (added an exception para) --- patch-agent.py will report SKIPPED loudly. Merge those two by hand.
+
+--- 2026-07-09 13:45 AEST, step-9 fix + fan-out method corrected ---
+NEGATIVE DREAM TEST PASSED. 03:31Z tick (13:31 Canberra, inside the OLD false band): she ran 'TZ=Australia/Canberra date +%H', got 13, reasoned 'Hour is 13 --- not a dream tick (dream ticks are 03 or 04). Continue with step 2.' No conversion. Timeline read only after the check. Step-1 restructuring worked on its first tick.
+
+DATED-NOTE FIX NEEDED A SECOND ATTEMPT. The prose version (7df6fbd) was ignored for two consecutive ticks. Reworked as an explicit numbered step 9 (e4d767a) and pushed. LESSON, generalisable: agents execute the numbered tick routine and skim the surrounding prose. The dream fix landed instantly because it became step 1; the dated-note fix failed because it was a sentence in a paragraph. Put requirements in the checklist.
+
+FAN-OUT METHOD CORRECTED --- the additive patch plan was WRONG for the other five. Dry run (patch-agent.py against all five live files) reported 5/5 hunks 'NEEDS MERGE' for every agent. Two causes:
+  1. their CLAUDE.md files are UNWRAPPED (max line 824-826 chars); only the admin template was reflowed to 80 cols by 985c1b0. Wrapped anchors can never match.
+  2. they have NONE of wave one (no now.md / RITE.md / dream section / video-cap). The five hunks are deltas ON TOP of wave one --- the wrong patch set entirely.
+So fan-out is RECONSTRUCTIVE, as mina's first push was: render the current template (wave one + all four corrections) and re-insert each agent's self-authored passages. Their drift is enumerable: lou 1 rewritten para; gert 2 added blocks; vita step-level edits + 1 added para; lelia 3 passages; rahel a shortened studio-state para + a whole '## What rahel actually does' section.
+
+Also: patch-agent.py now distinguishes 'already there' from 'NEEDS MERGE' (compares the NEW text, not just the anchor) --- the old message conflated them. Its mina 'step 6 NEEDS MERGE' was a false alarm: the dream hunk renumbered 6 to 7.
+
+REMAINING GATE: positive dream test, 17:00-19:00 UTC today (03:00-05:00 Canberra). She must dream, and must not read the timeline first. Fan out only after that passes.
 <!-- SECTION:NOTES:END -->
