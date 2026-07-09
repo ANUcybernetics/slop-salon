@@ -6,7 +6,7 @@ title: >-
 status: In Progress
 assignee: []
 created_date: '2026-07-08 22:51'
-updated_date: '2026-07-09 17:07'
+updated_date: '2026-07-09 19:27'
 labels:
   - rollout
   - templates
@@ -25,7 +25,7 @@ Wave one of the OpenClaw/Hermes-inspired doctrine changes is committed to templa
 <!-- AC:BEGIN -->
 - [x] #1 Wave-one template is live in mina's repo, with her pre-push CLAUDE.md drift reviewed (slop drift mina) and deliberately preserved or merged
 - [x] #2 Mina observed over multiple natural ticks, including at least one 03:00-05:00 Canberra window: now.md is being maintained, dream-tick behaviour is sane, no new tick failures
-- [ ] #3 Wave one fanned out to the other five live agents, each with drift reviewed before push
+- [x] #3 Wave one fanned out to the other five live agents, each with drift reviewed before push
 - [ ] #4 Wave two drafted and rolled out (same canary gate): capped ~40-line MEMORY.md with @MEMORY.md import, TOOLS.md template stub, existing agents seeded via the first RITE.md push
 - [ ] #5 Admin CLAUDE.md tunables/architecture notes and project memory updated to reflect what is live
 <!-- AC:END -->
@@ -33,6 +33,7 @@ Wave one of the OpenClaw/Hermes-inspired doctrine changes is committed to templa
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
+--------------------------------------------------
 --------------------------------------------------
 --------------------------------------------------
 --------------------------------------------------
@@ -157,4 +158,13 @@ Both directions now proven: awake at hour 13 (negative test), dreaming at hour 0
 FAN-OUT DEFERRED ~2h BY CHOICE. At 03:10 four of five agents were mid-tick, and more importantly the window is open: pushing now would make every agent's FIRST wave-one tick a dream tick (no timeline, no notifications, no posting until 05:00), i.e. their first exposure to the doctrine would be the atypical path, five at once, overnight, with untested dream behaviour. Push after 05:00 Canberra instead so each agent's first wave-one tick is ordinary and their first dream comes tomorrow night after a normal day.
 
 Merged files rebuilt against template HEAD e4d767a and re-verified (steps 1-9, dream check before getTimeline, per-agent drift asserted).
+
+--- 2026-07-10 05:20 AEST, FAN-OUT COMPLETE (AC3) ---
+Pushed reconstructed CLAUDE.md to lou, gert, vita, rahel, lelia after the dream window closed and each sprite was verified idle (pgrep -x claude == 0; lelia waited one poll). Verified via API (not raw CDN): all five live files byte-identical to the built merges; all six agents now have every doctrine element, their own drift intact, and the dream check before getTimeline.
+
+Four dream ticks observed on the canary in total, all compliant (0 getTimeline / 0 listNotifications / 0 createRecord), and she woke correctly at hour 05, making assets/transit.png. Window boundary respected in both directions.
+
+MINOR, not fixed: two dream ticks land in the same hour (30-min cadence, hour-granularity filenames), so their dated notes collide. mina disambiguated once with a '-b' suffix and once wrote byte-identical content, so the second tick's entry vanished into a no-op commit. The note-per-tick record has a gap on dream nights. Not doctrine-breaking; revisit if it bothers.
+
+NEXT: observe the fleet over the next wakes. Their first dream window is tonight 03:00-05:00 Canberra --- that is the first time five agents run dream ticks, and the first test of the doctrine on files that were NOT the canary's.
 <!-- SECTION:NOTES:END -->
