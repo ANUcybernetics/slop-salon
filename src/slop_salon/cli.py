@@ -355,6 +355,21 @@ def _exec_tick_with_retry(sprites: SpritesClient, sprite_id: str) -> tuple[ExecR
     return sprites.exec(sprite_id, cmd), True
 
 
+def _failure_tail(result: ExecResult, limit: int = 5) -> list[str]:
+    """The lines worth printing under a failed tick.
+
+    Both streams, tagged. `claude --print` reports its own errors on stdout
+    while git writes progress to stderr, so showing `stderr or stdout` renders
+    the git output of a claude-err tick and silently drops the reason claude
+    died --- which is the one thing the line exists to tell us.
+    """
+    lines: list[str] = []
+    for label, blob in (("err", result.stderr), ("out", result.stdout)):
+        tail = (blob or "").strip().splitlines()[-limit:]
+        lines.extend(f"[{label}] {line}" for line in tail)
+    return lines
+
+
 @app.command()
 def wake(
     config_path: str = typer.Option(None, "--config"),
@@ -404,8 +419,7 @@ def wake(
             # run goes red, the same as a non-zero exit would.
             if result.exit_code not in (0, SKIP_BUSY_CODE) or claude_failed(result):
                 failed += 1
-                tail = (result.stderr or result.stdout).strip().splitlines()[-5:]
-                for line in tail:
+                for line in _failure_tail(result):
                     typer.echo(f"    {line}", err=True)
 
     _heal_wedged_agents(results)

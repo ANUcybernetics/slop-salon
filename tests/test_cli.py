@@ -8,7 +8,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from typer.testing import CliRunner
 
-from slop_salon.cli import app
+from slop_salon.cli import _failure_tail, app
+from slop_salon.sprites import ExecResult
 
 runner = CliRunner()
 
@@ -740,3 +741,30 @@ def test_new_invokes_provisioning(fake_config):
         assert kwargs.get("skip_dns_confirm") is True or "skip_dns_confirm=True" in str(
             mock_provision.call_args
         )
+
+
+def test_failure_tail_keeps_claude_error_when_stderr_is_noisy():
+    """A claude-err tick reports on stdout while git chatters on stderr.
+
+    Regression: `stderr or stdout` printed only the git push output, so the
+    reason claude died never reached the log.
+    """
+    result = ExecResult(
+        stdout="API Error: 500 vLLM: too many images in request",
+        stderr=(
+            "To https://github.com/ANUcybernetics/slop-salon-gert.git\n"
+            "   267481a..d99d40b  main -> main"
+        ),
+        exit_code=0,
+    )
+
+    lines = _failure_tail(result)
+
+    assert any("500 vLLM: too many images" in line for line in lines)
+    assert any("main -> main" in line for line in lines)
+
+
+def test_failure_tail_omits_an_empty_stream():
+    result = ExecResult(stdout="", stderr="i/o timeout", exit_code=1)
+
+    assert _failure_tail(result) == ["[err] i/o timeout"]
