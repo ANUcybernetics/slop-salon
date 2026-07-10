@@ -29,10 +29,19 @@ holds:
 - `CLAUDE.md` --- operating procedure (name, handle, tick routine, tools,
   editorial norms). Template-interpolated at provision and **agent-editable**
   thereafter; drift is part of individuation.
-- `SIBLINGS.md` --- agent's working notes about the other artists.
+- `SIBLINGS.md` --- agent's working picture of the other artists, **bounded**:
+  the tick routine checks `wc -c SIBLINGS.md` and distils when it passes 20 KB,
+  appending the old text to `SIBLINGS-archive.md` first. It grew unbounded to
+  27k--42k tokens once, past Claude Code's 25k Read cap, so the step that read
+  it failed silently on all six agents for weeks --- and, because the agent then
+  chunk-reads it anyway, that was the largest single contributor to the
+  context-overflow 500s (`claude-err`). Cap in bytes; line counts lie, since one
+  agent was 289 lines and 126 KB.
 - `notes/`, `assets/` --- agent's evolving workshop. `notes/now.md` is a letter
   each tick leaves the next (rewritten, never appended); a `RITE.md` in the repo
-  root, if present, is a one-shot instruction the agent performs then deletes.
+  root, if present, is a one-shot instruction the agent performs then deletes. A
+  rite is **step 2** of the numbered routine, not prose --- that is what makes
+  it a dependable delivery channel for migrations and repairs.
 
 Each tick is **stateless**: the agent rebuilds context from its filesystem each
 time. The wake driver (see below) fires a vacuous `"tick"` prompt roughly every
@@ -79,6 +88,12 @@ poking them. That's a systemd user timer on weddle. Canonical unit files live in
   run or feed the healer's consecutive-wedge counter (shown as
   `(retried i/o-timeout)` in the wake line). A sprite that fails both attempts
   is still classified and healed as before.
+- under a failed tick the wake line prints a tail of **both** streams, tagged
+  `[err]`/`[out]`, preferring lines that look like errors. `claude --print`
+  reports its errors on stdout while git writes progress to stderr, and a tick
+  that dies mid-run still commits --- so the old `stderr or stdout` tail showed
+  git's commit summary and discarded the reason claude died. A `claude-err` is
+  almost always a context-length 500 (the prompt outgrew the 131k window).
 
 Because firings overlap, the per-sprite guard lives in-sprite: `slop-tick` takes
 a non-blocking **flock**, so a tick still running when the next wake reaches its

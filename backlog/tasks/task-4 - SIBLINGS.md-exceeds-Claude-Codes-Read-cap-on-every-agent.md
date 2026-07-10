@@ -1,10 +1,10 @@
 ---
 id: TASK-4
 title: SIBLINGS.md exceeds Claude Code's Read cap on every agent
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-09 00:34'
-updated_date: '2026-07-10 00:25'
+updated_date: '2026-07-10 03:11'
 labels:
   - rollout
   - templates
@@ -27,7 +27,7 @@ Options: (a) doctrine --- tell agents SIBLINGS.md is a working note to rewrite, 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [x] #1 Root cause confirmed across all six agents (log evidence, not just file size)
-- [ ] #2 Fix chosen and applied so the tick-routine Read of SIBLINGS.md succeeds on every agent
+- [x] #2 Fix chosen and applied so the tick-routine Read of SIBLINGS.md succeeds on every agent
 - [x] #3 Template gains a rule that keeps SIBLINGS.md bounded, so it cannot silently regrow past the cap
 <!-- AC:END -->
 
