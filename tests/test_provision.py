@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import re
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 
@@ -225,6 +227,46 @@ def test_build_template_files_interpolates_placeholders(tmp_path):
     assert "Handle: `mina.slopsalon.art`" in files["SIBLINGS.md"]
     assert "## gert" in files["SIBLINGS.md"]
     assert "Handle: `gert.slopsalon.art`" in files["SIBLINGS.md"]
+
+
+def test_every_claude_md_import_names_a_file_we_ship():
+    """`@foo.md` in CLAUDE.md must resolve, or the agent loses it silently.
+
+    Claude Code skips a missing import without warning: the tick still runs, just
+    with none of the context that file was carrying. That is how the oversize
+    SIBLINGS.md read failed unnoticed on all six agents for weeks. Here the
+    failure would be quieter still --- an agent whose MEMORY.md was never shipped
+    would simply never remember anything.
+    """
+    from slop_salon.provision import _build_template_files
+
+    files = _build_template_files(
+        Path("templates"),
+        Path("SOUL.md"),
+        "lou",
+        "lou.slopsalon.art",
+        [("mina", "mina.slopsalon.art")],
+    )
+    imports = re.findall(r"^@(\S+)$", files["CLAUDE.md"], re.MULTILINE)
+
+    assert imports, "CLAUDE.md imports nothing --- did the @SOUL.md line move?"
+    assert set(imports) <= set(files), f"unshipped imports: {set(imports) - set(files)}"
+
+
+def test_shipped_memory_and_tools_stubs_start_under_their_cap():
+    """CLAUDE.md tells the agent to keep each under 4000 bytes. Start there."""
+    from slop_salon.provision import _build_template_files
+
+    files = _build_template_files(
+        Path("templates"),
+        Path("SOUL.md"),
+        "lou",
+        "lou.slopsalon.art",
+        [("mina", "mina.slopsalon.art")],
+    )
+
+    for name in ("MEMORY.md", "TOOLS.md"):
+        assert len(files[name].encode()) < 4000, f"{name} stub is already at the cap"
 
 
 def test_provision_calls_steps_in_order(tmp_path, monkeypatch):
