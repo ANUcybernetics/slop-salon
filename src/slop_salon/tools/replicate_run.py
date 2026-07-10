@@ -184,16 +184,42 @@ def _parse_input(items: list[str]) -> dict[str, object]:
     return result
 
 
-def _is_url(value) -> bool:
-    if not isinstance(value, str):
-        return False
-    parsed = urlparse(value)
-    return parsed.scheme in {"http", "https"}
+def _url_of(value) -> str | None:
+    """The downloadable URL of a model output, or None if it is plain text.
+
+    `replicate.run` returns `FileOutput` objects, not strings --- they are not
+    str subclasses, so an `isinstance(value, str)` gate silently skips every
+    download and prints the URL instead. Agents then fetched the URLs with
+    `curl -s -L`, which without `-f` writes a 404 body into the target file; the
+    resulting `{"detail": ...}` named `.webp` kills whichever tick later reads
+    it as an image.
+    """
+    url = getattr(value, "url", value)
+    if not isinstance(url, str):
+        return None
+    return url if urlparse(url).scheme in {"http", "https"} else None
 
 
 def _filename_from_url(url: str, idx: int) -> str:
     name = Path(urlparse(url).path).name
     return name or f"output-{idx}"
+
+
+# An error body is the thing we must never write under a media extension.
+_TEXT_TYPES = ("application/json", "text/")
+
+
+def _reject_reason(response: httpx.Response) -> str | None:
+    """Why this response must not be written to disk, or None if it is fine."""
+    content_type = response.headers.get("content-type", "").split(";")[0].strip().lower()
+    if content_type.startswith(_TEXT_TYPES):
+        return f"served {content_type or 'no content-type'}, not media"
+    body = response.content
+    if not body:
+        return "empty body"
+    if body.lstrip()[:1] in (b"{", b"["):
+        return "body looks like JSON, not media"
+    return None
 
 
 @app.command()
@@ -207,6 +233,14 @@ def run(
         typer.echo("error: REPLICATE_API_TOKEN env var is required", err=True)
         raise typer.Exit(code=1)
 
+    if output.suffix:
+        typer.echo(
+            f"error: --output is a directory, not a file (got {output}). "
+            "Media keeps the model's own filename inside it.",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
     inputs = _parse_input(input)
     result = replicate.run(model, input=inputs)
 
@@ -214,15 +248,27 @@ def run(
     output = output.resolve()
     output.mkdir(parents=True, exist_ok=True)
 
+    failed = 0
     for idx, item in enumerate(items):
-        if _is_url(item):
-            response = httpx.get(item)
-            response.raise_for_status()
-            target = output / _filename_from_url(item, idx)
-            target.write_bytes(response.content)
-            typer.echo(str(target))
-        else:
+        url = _url_of(item)
+        if url is None:
             typer.echo(item if isinstance(item, str) else str(item))
+            continue
+
+        response = httpx.get(url, follow_redirects=True)
+        response.raise_for_status()
+        reason = _reject_reason(response)
+        if reason is not None:
+            typer.echo(f"error: refusing to save {url} --- {reason}", err=True)
+            failed += 1
+            continue
+
+        target = output / _filename_from_url(url, idx)
+        target.write_bytes(response.content)
+        typer.echo(str(target))
+
+    if failed:
+        raise typer.Exit(code=1)
 
 
 @app.command()
