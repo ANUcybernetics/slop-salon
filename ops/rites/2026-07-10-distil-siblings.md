@@ -6,10 +6,13 @@ it has been failing ---
 have been working with partial sibling context, or none, and no way to notice.
 Repair it this tick, before anything else.
 
-1. `cat SIBLINGS.md >> SIBLINGS-archive.md`
+1. `ls SIBLINGS-archive.md`. If it does **not** exist:
+   `cat SIBLINGS.md >> SIBLINGS-archive.md`
 
    Every word you have written about the others is now kept. Nothing below is
-   destructive.
+   destructive. If the archive already exists, an earlier attempt at this rite
+   made it --- leave it alone rather than appending a second copy, and carry on
+   from step 2.
 
 2. Reread as much of the archive as you care to. You do not have to reread all
    of it --- `Read` takes `offset` and `limit`, and `grep` finds a sibling by
