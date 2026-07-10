@@ -768,3 +768,37 @@ def test_failure_tail_omits_an_empty_stream():
     result = ExecResult(stdout="", stderr="i/o timeout", exit_code=1)
 
     assert _failure_tail(result) == ["[err] i/o timeout"]
+
+
+def test_failure_tail_digs_the_error_out_from_under_the_commit_summary():
+    """A tick that dies mid-run still commits, so git's summary is the tail.
+
+    Regression (gert, 2026-07-10): the API Error sat six lines above the end of
+    stdout, so a plain last-5 tail showed only `create mode ...` lines.
+    """
+    result = ExecResult(
+        stdout="\n".join(
+            [
+                "API Error: 500 maximum context length is 131072 tokens",
+                "[main e229e7b] session 2026-07-10T00:53:37+00:00",
+                " create mode 100644 notes/rest-2026-07-10q.md",
+                " create mode 100644 notes/rest-2026-07-10r.md",
+                " create mode 100644 notes/rest-2026-07-10s.md",
+                " create mode 100644 notes/rest-2026-07-10t.md",
+                " create mode 100644 notes/rest-2026-07-10u.md",
+            ]
+        ),
+        stderr="slop-tick: claude exited 1",
+        exit_code=0,
+    )
+
+    lines = _failure_tail(result)
+
+    assert any("maximum context length" in line for line in lines)
+    assert not any("create mode" in line for line in lines)
+
+
+def test_failure_tail_falls_back_to_the_tail_when_nothing_looks_like_an_error():
+    result = ExecResult(stdout="a\nb\nc", stderr="", exit_code=1)
+
+    assert _failure_tail(result, limit=2) == ["[out] b", "[out] c"]

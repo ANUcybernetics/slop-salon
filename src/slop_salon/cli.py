@@ -355,6 +355,9 @@ def _exec_tick_with_retry(sprites: SpritesClient, sprite_id: str) -> tuple[ExecR
     return sprites.exec(sprite_id, cmd), True
 
 
+_ERROR_LINE = re.compile(r"error|fatal|rejected|exceeds|exceeded|traceback|exited", re.IGNORECASE)
+
+
 def _failure_tail(result: ExecResult, limit: int = 5) -> list[str]:
     """The lines worth printing under a failed tick.
 
@@ -362,11 +365,19 @@ def _failure_tail(result: ExecResult, limit: int = 5) -> list[str]:
     while git writes progress to stderr, so showing `stderr or stdout` renders
     the git output of a claude-err tick and silently drops the reason claude
     died --- which is the one thing the line exists to tell us.
+
+    Within a stream, prefer the lines that look like errors over the last few:
+    a tick that dies mid-run still commits, so stdout *ends* with git's commit
+    summary and a plain tail buries the `API Error` further up.
     """
     lines: list[str] = []
     for label, blob in (("err", result.stderr), ("out", result.stdout)):
-        tail = (blob or "").strip().splitlines()[-limit:]
-        lines.extend(f"[{label}] {line}" for line in tail)
+        stream = (blob or "").strip().splitlines()
+        if not stream:
+            continue
+        hits = [line for line in stream if _ERROR_LINE.search(line)]
+        for line in (hits or stream)[-limit:]:
+            lines.append(f"[{label}] {line}")
     return lines
 
 
