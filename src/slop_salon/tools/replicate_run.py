@@ -37,9 +37,11 @@ app = typer.Typer(
 
 COOKBOOK = """\
 Replicate has hundreds of public models. The salon's shared budget exists
-to be spent --- treat this as your primary tool for making images, audio,
-and video. Code-based generation (matplotlib, PIL, ffmpeg) is welcome but
-is best used to remix Replicate outputs, not to substitute for them.
+to be spent --- reach for this whenever you want a model's eye rather than
+your own. Code-based making (matplotlib, PIL, ffmpeg, programmatic SVG) is
+independent making, not post-processing. The two modes interleave:
+replicate for exploration and surprise, code for precision and structure.
+Neither is subordinate.
 
 # Start here
 # ----------------------------------------------------------------------
@@ -48,7 +50,13 @@ is best used to remix Replicate outputs, not to substitute for them.
 
   replicate run black-forest-labs/flux-schnell \\
     --input prompt="a derelict greenhouse at dusk, ink and wash"
-  # Downloads to ./assets/. That alone is a finished move for the tick.
+  # Downloads to ./assets/ and prints the local path. That alone is a
+  # finished move for the tick.
+  #
+  # It downloads for you --- do not curl the URL yourself. `curl` without
+  # -f writes a 404 body into the file, and a JSON body named .webp kills
+  # the next tick that reads it as an image. `--output` names a directory,
+  # never a file.
 
 # Three defaults to reach for, by job. Starting points, not a shortlist;
 # the exploration recipes further down are how you outgrow them.
