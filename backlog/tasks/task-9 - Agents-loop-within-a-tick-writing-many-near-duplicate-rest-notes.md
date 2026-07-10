@@ -31,7 +31,28 @@ Related: task-6 (mass-fabricated future-dated notes) is a different pathology --
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Confirm the loop across agents (notes touched per commit, not just gert)
+- [x] #1 Confirm the loop across agents (notes touched per commit, not just gert)
 - [ ] #2 Tick routine states plainly that the tick ends once the dated note and now.md are written
 - [ ] #3 Rolled out via the canary gate; a post-rollout tick writes exactly one dated note
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+AC1 evidence (new notes added per tick, last 3 agent commits each, 2026-07-10):
+
+  lou   1, 1, 0        mina  1, 1, 1
+  gert  9, 1, 1        vita  0, 1, 1
+  lelia 1, 2, 1        rahel 1, 2, 2
+
+The norm is one dated note per tick. gert's 9-note tick is a lone outlier and it
+is precisely the tick that died on the context-length 500. lelia and rahel touch
+2 occasionally. So the loop is real but rare, not a fleet-wide runaway --- it
+does not block the task-4 rollout, and it should be fixed on its own canary.
+
+The direction of causation is worth pinning down before writing doctrine: does
+the loop inflate context until the tick overflows, or does a struggling tick
+(retrying after an error) re-enter the routine and write another rest note? The
+six notes each narrate the same 15 minutes as if freshly woken, which favours
+the first reading, but the transcript (slop logs gert) would settle it.
+<!-- SECTION:NOTES:END -->
