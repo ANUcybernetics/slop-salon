@@ -26,14 +26,13 @@ Examples:
 from __future__ import annotations
 
 import os
-import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from slop_salon.config import load_config  # noqa: E402
+from slop_salon.github_push import put_file  # noqa: E402
 from slop_salon.provision import _build_template_files, resolve_secrets  # noqa: E402
 
 
@@ -64,36 +63,17 @@ def push_template(name: str, filename: str, config_path: str = "slop_salon.toml"
         raise SystemExit(f"no template renders to {filename!r}; have {sorted(files)}")
     rendered = files[filename]
 
-    with tempfile.TemporaryDirectory() as tmp:
-        clone_dir = Path(tmp) / "repo"
-        subprocess.run(
-            ["gh", "repo", "clone", agent.github_repo, str(clone_dir), "--", "--depth=1"],
-            check=True,
-            capture_output=True,
-            env=push_env,
-        )
-        target = clone_dir / filename
-        if target.exists() and target.read_text() == rendered:
-            print(f"{name}: {filename} already matches template, skipping")
-            return
-        target.write_text(rendered)
-        subprocess.run(["git", "add", filename], cwd=clone_dir, check=True)
-        result = subprocess.run(
-            ["git", "commit", "-m", f"Sync {filename} from admin templates"],
-            cwd=clone_dir,
-            capture_output=True,
-        )
-        if result.returncode != 0:
-            print(f"{name}: {filename} unchanged (no commit)")
-            return
-        subprocess.run(
-            ["git", "push"],
-            cwd=clone_dir,
-            check=True,
-            capture_output=True,
-            env=push_env,
-        )
-        print(f"{name}: pushed {filename}")
+    outcome = put_file(
+        agent.github_repo,
+        filename,
+        rendered,
+        f"Sync {filename} from admin templates",
+        push_env,
+    )
+    if outcome == "unchanged":
+        print(f"{name}: {filename} already matches template, skipping")
+    else:
+        print(f"{name}: {outcome} {filename}")
 
 
 if __name__ == "__main__":

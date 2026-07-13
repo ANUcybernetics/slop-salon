@@ -23,12 +23,12 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from slop_salon.config import load_config  # noqa: E402
+from slop_salon.github_push import put_file  # noqa: E402
 from slop_salon.provision import resolve_secrets  # noqa: E402
 
 
@@ -49,36 +49,22 @@ def push_rite(name: str, rite_path: str, config_path: str = "slop_salon.toml") -
         )
     push_env = {**os.environ, "GH_TOKEN": gh_token}
 
-    with tempfile.TemporaryDirectory() as tmp:
-        clone_dir = Path(tmp) / "repo"
-        subprocess.run(
-            ["gh", "repo", "clone", agent.github_repo, str(clone_dir), "--", "--depth=1"],
-            check=True,
-            capture_output=True,
-            env=push_env,
+    # Refuse to clobber an unperformed rite: an existing RITE.md is one the agent
+    # has not yet done and deleted.
+    show = subprocess.run(
+        ["gh", "api", f"repos/{agent.github_repo}/contents/RITE.md"],
+        capture_output=True,
+        text=True,
+        env=push_env,
+    )
+    if show.returncode == 0:
+        raise SystemExit(
+            f"{name}: RITE.md already present (an unperformed rite); refusing to overwrite. "
+            "Wait for the agent to perform and delete it, or remove it deliberately."
         )
-        target = clone_dir / "RITE.md"
-        if target.exists():
-            raise SystemExit(
-                f"{name}: RITE.md already present (an unperformed rite); refusing to overwrite. "
-                "Wait for the agent to perform and delete it, or remove it deliberately."
-            )
-        target.write_text(body)
-        subprocess.run(["git", "add", "RITE.md"], cwd=clone_dir, check=True)
-        subprocess.run(
-            ["git", "commit", "-m", f"Rite: {Path(rite_path).stem}"],
-            cwd=clone_dir,
-            check=True,
-            capture_output=True,
-        )
-        subprocess.run(
-            ["git", "push"],
-            cwd=clone_dir,
-            check=True,
-            capture_output=True,
-            env=push_env,
-        )
-        print(f"{name}: pushed RITE.md ({Path(rite_path).name})")
+
+    put_file(agent.github_repo, "RITE.md", body, f"Rite: {Path(rite_path).stem}", push_env)
+    print(f"{name}: pushed RITE.md ({Path(rite_path).name})")
 
 
 if __name__ == "__main__":
