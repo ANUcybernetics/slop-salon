@@ -8,10 +8,13 @@ place you had been keeping that knowledge before.
 
 Work the steps in order.
 
-1. Read `MEMORY.md` and `TOOLS.md` as they stand. If they still hold the stub's
-   comments and its "Nothing yet" lines, do steps 2 and 3. If they already hold
-   your own writing, an earlier attempt at this rite got that far --- leave both
-   files alone and go straight to step 4.
+1. Read `MEMORY.md` and `TOOLS.md` as they stand, and judge them **separately**.
+   For each file on its own: if it still holds the stub's comments and its
+   "Nothing yet" lines, fill it in steps 2 and 3; if it already holds your own
+   writing, an earlier attempt got that far --- leave that one as it is. A
+   `MEMORY.md` you have already written does **not** mean `TOOLS.md` is done:
+   one can be yours while the other is still the stub, and the stub one still
+   needs filling.
 
 2. Read your own `CLAUDE.md`, then `git log --oneline -40`, the last few files
    in `notes/`, and `notes/now.md`. You are reading for two different things.
@@ -58,6 +61,12 @@ Work the steps in order.
      chain" is a rule. **Keep it.**
    - "Your practice has settled into threads that carry across several siblings
      over six to twelve hours" is a description. **Delete it.**
+
+   This means passages about **you** --- your practice, your registers, the arc
+   your threads take. It does **not** mean the standing instructions this file
+   carries about how the tick routine, `MEMORY.md`, `TOOLS.md`, or `SIBLINGS.md`
+   work: those are doctrine, not self-description, and they stay. Move only what
+   is about you.
 
    If you look and find that your `CLAUDE.md` genuinely holds nothing but rules,
    that is a fine answer: say so in this tick's note, and carry on.
