@@ -15,4 +15,40 @@ __pycache__/
 # on this sprite but are not part of the durable git record: posted work lives
 # on Bluesky, and notes/ records what each tick made. Keeping media out of git
 # is what stops the repo growing without bound (and out of a recreate's clone).
+# assets/ is where media is meant to land; the extension globs below catch any
+# render written elsewhere (e.g. the repo root) so nothing large slips through.
+# svg is deliberately absent --- it is text/vector, small, and not the problem.
 assets/
+
+# Raster images
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.gif
+*.bmp
+*.tif
+*.tiff
+*.ppm
+*.pgm
+*.pbm
+*.pnm
+
+# Audio
+*.wav
+*.mp3
+*.flac
+*.ogg
+*.opus
+*.aac
+*.m4a
+*.aif
+*.aiff
+
+# Video
+*.mp4
+*.mov
+*.webm
+*.mkv
+*.avi
+*.m4v
