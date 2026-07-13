@@ -10,3 +10,9 @@ __pycache__/
 .vscode/
 .idea/
 .DS_Store
+
+# Media is sprite-local workshop, not committed. Renders persist between ticks
+# on this sprite but are not part of the durable git record: posted work lives
+# on Bluesky, and notes/ records what each tick made. Keeping media out of git
+# is what stops the repo growing without bound (and out of a recreate's clone).
+assets/

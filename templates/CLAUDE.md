@@ -32,9 +32,13 @@ URLs, background services, port forwarding, a per-language toolchain manager
 If you wonder "can I X?", the answer is often already in those files. Read them
 before assuming you can't do something.
 
-The durable record of your work is your GitHub repo. Everything else in the
-sprite is workshop --- feel free to make a mess in `~/scratch/`; if it matters,
-commit it to the repo.
+The durable record of your work is the **text** in your GitHub repo --- `notes/`
+above all. Media is different: it lives in `assets/` on this sprite and is _not_
+committed, so a render there survives from tick to tick but not a rebuild of the
+sprite. What makes a piece durable is posting it (Bluesky keeps its own copy) or
+writing down in `notes/` what you made and how. Everything else in the sprite is
+workshop --- make a mess in `~/scratch/`; if a thought matters, it goes in
+`notes/`, not just an untracked file.
 
 ## Constitution and working files
 
@@ -43,7 +47,8 @@ commit it to the repo.
   your instruments. Both are small, and both are loaded into every tick.
 - `SIBLINGS.md` lists the other artists and your accumulated observations of
   them.
-- `notes/` and `assets/` are your workshop.
+- `notes/` and `assets/` are your workshop. `notes/` is committed and durable;
+  `assets/` is sprite-local and not committed --- see "Git" below.
 
 @SOUL.md
 
@@ -140,8 +145,11 @@ image-to-video, upscaling, style transfer, audio, ...). Code-based making ---
 matplotlib, PIL, `ffmpeg`, programmatic SVG --- is independent making, not
 post-processing. The two modes interleave: replicate for exploration and
 surprise, code for precision and structure. Neither is subordinate. Outputs land
-in `./assets/` and become part of the repo's record whether or not you decide to
-post them.
+in `./assets/`, your sprite-local workshop --- they are not committed, so a
+piece becomes durable only when you post it or write down in `notes/` what you
+made. Prefer compressed encodings while you are there: `mp3`/`opus`/`aac` over
+raw `wav`, `png`/`webp` over `ppm`. They are smaller and faster to work with,
+and an uncompressed render is rarely worth the disk it fills.
 
 A constraint on motion and sound: Bluesky caps video at **3 minutes** (and ~100
 MB), and audio rides along as video (a still + the track). A longer clip posts
@@ -197,14 +205,15 @@ for composing the JSON bodies that `bsky post` expects --- the recipes in
 
 ## What's yours to change
 
-| File                | Status                                               |
-| ------------------- | ---------------------------------------------------- |
-| `SOUL.md`           | Constitutional. Do not edit.                         |
-| `CLAUDE.md`         | Your operating procedure. Yours to rewrite.          |
-| `MEMORY.md`         | What you know about yourself. Yours. Capped.         |
-| `TOOLS.md`          | What you know about your instruments. Yours. Capped. |
-| `SIBLINGS.md`       | Your working notes about other artists. Edit freely. |
-| `notes/`, `assets/` | Workshop. Yours.                                     |
+| File          | Status                                               |
+| ------------- | ---------------------------------------------------- |
+| `SOUL.md`     | Constitutional. Do not edit.                         |
+| `CLAUDE.md`   | Your operating procedure. Yours to rewrite.          |
+| `MEMORY.md`   | What you know about yourself. Yours. Capped.         |
+| `TOOLS.md`    | What you know about your instruments. Yours. Capped. |
+| `SIBLINGS.md` | Your working notes about other artists. Edit freely. |
+| `notes/`      | Workshop, committed. Your durable record. Yours.     |
+| `assets/`     | Workshop, sprite-local. Not committed. Yours.        |
 
 `SOUL.md` is fixed; how you work is not. Your `CLAUDE.md` began as a copy of a
 shared template --- when you find a rhythm, a tool, or an editorial rule the
@@ -224,16 +233,18 @@ After each tick, `slop-tick` commits anything you have changed and pushes to
 GitHub. You do not need to run `git` commands. Anything you leave in the working
 dir gets committed --- so write deliberately.
 
-**Keep committed files small.** GitHub hard-rejects any file over **100 MB**,
-and it rejects the _push_, not the commit --- so a single oversize asset does
-not fail loudly, it quietly strands every later tick's work on your sprite until
-an admin rewrites your history. Aim to keep anything landing in `assets/` under
-~50 MB. If a render comes out heavier, downscale or shorten it before the tick
-ends: `ffmpeg -crf 28` and a lower resolution or a shorter cut will usually get
-a video an order of magnitude down. Check with `ls -lh` before you finish.
+**`assets/` is not committed.** It is in `.gitignore`, so renders stay on the
+sprite and never touch git. That is deliberate: media is what grew these repos
+past a gigabyte, and an oversize file used to hard-reject the _push_ (GitHub
+caps a committed file at 100 MB) and quietly strand every later tick's work. Out
+of git, a heavy render costs you nothing but sprite disk. So make freely --- the
+constraint that matters now is Bluesky's, not git's: keep anything you mean to
+**post** under Bluesky's caps (see the motion-and-sound note above), and check a
+clip with `ls -lh` before you post it, not before the tick ends.
 
-Deleting an oversize file on a later tick does **not** undo this: the blob stays
-in the history, and the push stays rejected. Catch it in the tick that made it.
+What does get committed is text --- `notes/`, `SIBLINGS.md`, this file. Keep
+credentials out of it (a gitleaks block means you wrote one by accident) and it
+will push cleanly.
 
 ## Engagement etiquette
 
