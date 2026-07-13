@@ -1,11 +1,11 @@
 ---
 id: TASK-11
 title: Bound agent repo growth (assets/ media bloat)
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-07-13 06:38'
-updated_date: '2026-07-13 11:34'
+updated_date: '2026-07-13 12:24'
 labels:
   - infra
   - ops
@@ -26,20 +26,16 @@ Agent GitHub repos have grown to 0.5-1.1 GB each (~5 GB fleet-wide; gert 1.17 GB
 - [x] #2 A decision is recorded on where large assets live --- bounded in-repo assets/, Git LFS, or an external store --- with the effect on the site's notebook loader (raw.githubusercontent) and on posted-media-on-Bluesky considered
 - [x] #3 Existing bloat is reduced across all six repos, or a deliberate decision is recorded not to rewrite history
 - [x] #4 A fresh clone and recreate-sprite.py both complete reliably within a reasonable time on the reduced repos
-- [ ] #5 Agents are steered away from committing uncompressed formats (WAV, PPM) --- prefer compressed audio/image encodings
+- [x] #5 Agents are steered away from committing uncompressed formats (WAV, PPM) --- prefer compressed audio/image encodings
 <!-- AC:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Resolved 2026-07-13. Decision: assets/ is an ephemeral cache, not an archive (media is not the durable copy of anything --- posted work is a Bluesky blob, the site reads only notes/).
+Follow-ups completed 2026-07-13 (same session):
+- AC5 doctrine + WAV/PPM steer delivered to all six live agents via rite ops/rites/2026-07-13-assets-ephemeral.md. Each agent reworded its own (drifted) CLAUDE.md: removed the now-false "durable record is your repo" / 100 MB oversize-push warning / "outputs become part of the repo's record", added media-is-uncommitted + compressed-encoding preference. Verified fleet-wide: RITE.md gone, "100 MB" absent, "not committed" + compressed nudge present on all six.
+- Root-level media loophole closed: templates/.gitignore now ignores media by extension (raster/audio/video globs), not just assets/. Pushed to all six.
+- Canary discipline held throughout: mina canaried both the strip and the rite (each observed clean before fan-out).
 
-- AC1 retention: templates/.gitignore ignores assets/ (passive, no per-tick agent compliance). Live on all six; growth halted. Verified in-sprite via git check-ignore.
-- AC2 decision recorded in CLAUDE.md (architecture), docs/runbook.md, and memory.
-- AC3 existing bloat: one-time git filter-repo rewrite (ops/strip-assets.py) force-pushed all six. Fleet .git ~5.1 GB -> ~28 MB (mina 619->3, vita 872->8.5, lou 948->4.9, rahel/gert 1.1GB->~4, lelia 490->2.6, all MB).
-- AC4 verified: fresh clone of every repo now 5-6s with a 2.7-8.9M .git, zero assets (the recreate-sprite.py path).
-
-Migration notes: strip resets sprites onto rewritten history out of band (never a rite) because slop-tick's git pull --rebase would replay pre-rewrite commits. Pre-flight refuses on a running tick or un-pushed commits (lelia had 1 stranded session note --- pushed it, no loss, then re-stripped). Fixed a pre-flight pgrep self-match bug mid-migration.
-
-Follow-ups (not blocking): (a) AC5 WAV/PPM steer is in the template CLAUDE.md but not yet on live agents' drifted CLAUDE.md --- rolls out with the doctrine reword. (b) assets/-only ignore misses stray root-level media some agents commit (negligible today); could extend to ignore media by extension. (c) sprite-local .git stays fat (unreferenced objects) until next recreate; not gc'd to avoid the checkpoint-remount wedge.
+Not done (deliberately): sprite-local .git left fat (unreferenced objects reclaim on next recreate; foreground gc risks the checkpoint-remount wedge). No AC needs it.
 <!-- SECTION:NOTES:END -->
