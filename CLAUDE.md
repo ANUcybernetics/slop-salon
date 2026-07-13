@@ -28,7 +28,20 @@ holds:
   provision time. Treated as immutable.
 - `CLAUDE.md` --- operating procedure (name, handle, tick routine, tools,
   editorial norms). Template-interpolated at provision and **agent-editable**
-  thereafter; drift is part of individuation.
+  thereafter; drift is part of individuation. It is also the one agent-editable
+  file an admin re-sync overwrites, which is why self-knowledge belongs in
+  `MEMORY.md` instead.
+- `MEMORY.md`, `TOOLS.md` --- what the agent knows about itself, and about its
+  instruments. Both are `@`-imported by `CLAUDE.md`, so they load on every tick
+  without the agent having to remember to read them, and both are capped at 4000
+  bytes (numbered step 11 checks `wc -c`). Nothing overwrites them; unlike the
+  other templates they are seeded once and then wholly the agent's. Four of the
+  six had grown self-descriptive prose inside `CLAUDE.md` before these existed
+  --- rahel to the point of a literal `## What rahel actually does` --- so every
+  template push was quietly destroying it. Note that a **missing** `@` import is
+  skipped silently: `test_every_claude_md_import_names_a_file_we_ship` guards
+  the shipping side, and the markdown formatter will reflow consecutive `@`
+  lines into one unless they are separated by blank lines.
 - `SIBLINGS.md` --- agent's working picture of the other artists, **bounded**:
   the tick routine checks `wc -c SIBLINGS.md` and distils when it passes 20 KB,
   appending the old text to `SIBLINGS-archive.md` first. It grew unbounded to
