@@ -42,6 +42,14 @@ UPLOAD_TIMEOUT = 60.0
 # "video" card on the feed. We preflight the two deterministic limits below.
 BSKY_VIDEO_MAX_SECONDS = 180.0
 BSKY_VIDEO_MAX_BYTES = 100 * 1024 * 1024
+# Bluesky's app.bsky.embed.images lexicon caps a post at 4 images, each image
+# blob at 1,000,000 bytes (the same per-blob cap applies to an avatar).
+# createRecord validates both and 400s over either, but the error is opaque ---
+# an agent that assembled a 5-image embed, or referenced a 2 MB PNG, just loses
+# the tick to a failed post. We preflight both deterministically, the way we do
+# for video: image count at createRecord, blob size at uploadBlob.
+BSKY_IMAGE_MAX_COUNT = 4
+BSKY_IMAGE_MAX_BYTES = 1_000_000
 # Skip an app.bsky.feed.post createRecord if an identical post already exists
 # within this many minutes. createRecord is non-idempotent, so a slow or lost
 # response makes the agent re-issue the write and the same post lands twice;
@@ -341,6 +349,44 @@ def _guard_video_upload(path: Path) -> None:
         raise typer.Exit(code=1)
 
 
+def _guard_image_upload(path: Path) -> None:
+    """Refuse an image blob larger than Bluesky's per-blob cap.
+
+    Bluesky caps an embed image (and an avatar) at 1,000,000 bytes and 400s the
+    createRecord/putRecord that references a larger blob. uploadBlob itself
+    accepts the oversized blob, so the failure surfaces later as an opaque
+    record-validation error --- we fail loudly and locally here instead.
+    Non-image files pass through untouched.
+    """
+    if not _mime_of(path).startswith("image/"):
+        return
+    size = path.stat().st_size
+    if size > BSKY_IMAGE_MAX_BYTES:
+        typer.echo(
+            f"error: {path.name} is {size / 1000:.0f} KB; Bluesky caps an image blob at "
+            f"{BSKY_IMAGE_MAX_BYTES // 1000} KB and rejects the post that embeds a larger "
+            f"one. Re-encode smaller --- downscale, or raise JPEG/WebP compression.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+
+def _embed_image_count(record: dict) -> int:
+    """How many images an app.bsky.feed.post record's embed will carry.
+
+    Images sit at embed.images for a plain image embed, or embed.media.images
+    when the post also quotes a record (recordWithMedia). Any other embed is 0.
+    """
+    embed = record.get("embed")
+    if not isinstance(embed, dict):
+        return 0
+    images = embed.get("images")
+    if not isinstance(images, list):
+        media = embed.get("media")
+        images = media.get("images") if isinstance(media, dict) else None
+    return len(images) if isinstance(images, list) else 0
+
+
 def _norm_text(text: str | None) -> str:
     """Collapse whitespace so a trivially-reformatted re-issue still matches."""
     return re.sub(r"\s+", " ", (text or "").strip())
@@ -480,12 +526,31 @@ def post(
     # untouched.
     if file is not None:
         _guard_video_upload(file)
+        _guard_image_upload(file)
     file_bytes = file.read_bytes() if file is not None else None
     if parsed is None and file_bytes is not None and nsid == "com.atproto.repo.createRecord":
         try:
             parsed = json.loads(file_bytes)
         except ValueError:
             parsed = None
+    # Preflight the embed's image count before auth: Bluesky caps a feed post at
+    # 4 images and 400s a larger embed with an opaque error, costing the agent a
+    # whole tick. Fail loudly and locally instead (cf. _guard_video_upload).
+    if (
+        nsid == "com.atproto.repo.createRecord"
+        and isinstance(parsed, dict)
+        and parsed.get("collection") == "app.bsky.feed.post"
+        and isinstance(parsed.get("record"), dict)
+    ):
+        count = _embed_image_count(parsed["record"])
+        if count > BSKY_IMAGE_MAX_COUNT:
+            typer.echo(
+                f"error: this post embeds {count} images; Bluesky allows at most "
+                f"{BSKY_IMAGE_MAX_COUNT} per post and rejects more. Drop the extras, or "
+                f"spread them across a thread.",
+                err=True,
+            )
+            raise typer.Exit(code=1)
     session = _get_session()
     url = f"{session.pds}/xrpc/{nsid}"
     # Idempotency guard: createRecord is a non-idempotent write, so a slow or

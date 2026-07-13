@@ -385,6 +385,105 @@ def test_uploadblob_video_passes_when_duration_unknown(
     assert "bafy-vid" in result.output
 
 
+def test_uploadblob_rejects_oversize_image(bsky_env, httpx_mock, tmp_path):
+    """An image blob over Bluesky's 1,000,000-byte cap is refused before upload
+    --- createRecord would 400 on the embed otherwise. The guard runs before
+    auth, so no HTTP should happen."""
+    from slop_salon.tools import bsky
+
+    img = tmp_path / "big.png"
+    img.write_bytes(b"x" * (bsky.BSKY_IMAGE_MAX_BYTES + 1))
+
+    result = runner.invoke(bsky.app, ["post", "com.atproto.repo.uploadBlob", "--file", str(img)])
+    assert result.exit_code == 1
+    assert "1000 KB" in result.output
+    assert not httpx_mock.get_requests()
+
+
+def test_uploadblob_allows_within_cap_image(bsky_env, session_mock, httpx_mock, tmp_path):
+    """A within-cap image sails through the guard and uploads as image/png."""
+    from slop_salon.tools import bsky
+
+    img = tmp_path / "sketch.png"
+    img.write_bytes(b"x" * 4096)
+    httpx_mock.add_response(
+        method="POST",
+        url=f"{FAKE_PDS}/xrpc/com.atproto.repo.uploadBlob",
+        json={"blob": {"$type": "blob", "ref": {"$link": "bafy-img"}}},
+    )
+
+    result = runner.invoke(bsky.app, ["post", "com.atproto.repo.uploadBlob", "--file", str(img)])
+    assert result.exit_code == 0, result.output
+    req = _find_request(httpx_mock, "uploadBlob")
+    assert req.headers["content-type"] == "image/png"
+    assert "bafy-img" in result.output
+
+
+def _image_embed(n: int) -> dict:
+    return {
+        "$type": "app.bsky.embed.images",
+        "images": [{"alt": f"study {i}", "image": {"$type": "blob"}} for i in range(n)],
+    }
+
+
+def test_createrecord_rejects_over_count_images(bsky_env, httpx_mock):
+    """A feed post embedding more than 4 images is refused before auth: Bluesky
+    caps embed.images at 4 and 400s a larger one with an opaque error."""
+    from slop_salon.tools.bsky import app
+
+    body = _feed_post_body(
+        {"$type": "app.bsky.feed.post", "text": "five studies", "embed": _image_embed(5)}
+    )
+    result = runner.invoke(app, ["post", "com.atproto.repo.createRecord", "--json", body])
+    assert result.exit_code == 1
+    assert "5 images" in result.output
+    assert not httpx_mock.get_requests()
+
+
+def test_createrecord_counts_recordwithmedia_images(bsky_env, httpx_mock):
+    """recordWithMedia carries its images under embed.media.images; the 4-image
+    cap applies there too."""
+    from slop_salon.tools.bsky import app
+
+    body = _feed_post_body(
+        {
+            "$type": "app.bsky.feed.post",
+            "text": "quote plus five",
+            "embed": {
+                "$type": "app.bsky.embed.recordWithMedia",
+                "record": {
+                    "$type": "app.bsky.embed.record",
+                    "record": {"uri": "at://x", "cid": "c"},
+                },
+                "media": _image_embed(5),
+            },
+        }
+    )
+    result = runner.invoke(app, ["post", "com.atproto.repo.createRecord", "--json", body])
+    assert result.exit_code == 1
+    assert "5 images" in result.output
+    assert not httpx_mock.get_requests()
+
+
+def test_createrecord_allows_four_images(bsky_env, session_mock, httpx_mock, monkeypatch):
+    """Exactly 4 images is within cap and posts normally (dedup off to keep the
+    wire to a single createRecord)."""
+    monkeypatch.setenv("SLOP_POST_DEDUP", "0")
+    from slop_salon.tools.bsky import app
+
+    httpx_mock.add_response(
+        method="POST",
+        url=f"{FAKE_PDS}/xrpc/com.atproto.repo.createRecord",
+        json={"uri": "at://did:plc:fake123/app.bsky.feed.post/new", "cid": "cid-new"},
+    )
+    body = _feed_post_body(
+        {"$type": "app.bsky.feed.post", "text": "four studies", "embed": _image_embed(4)}
+    )
+    result = runner.invoke(app, ["post", "com.atproto.repo.createRecord", "--json", body])
+    assert result.exit_code == 0, result.output
+    assert _posted_create_record(httpx_mock)
+
+
 def test_post_rejects_json_and_file_together(bsky_env, tmp_path):
     """Mutex check runs before auth, so no HTTP traffic should happen."""
     img = tmp_path / "img.jpg"
