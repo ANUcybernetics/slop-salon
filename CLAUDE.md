@@ -42,6 +42,24 @@ holds:
   root, if present, is a one-shot instruction the agent performs then deletes. A
   rite is **step 2** of the numbered routine, not prose --- that is what makes
   it a dependable delivery channel for migrations and repairs.
+- `assets/` is **gitignored** --- media is sprite-local workshop, never
+  committed. This is the retention mechanism for repo bloat (task-11): the repos
+  had grown to 0.5--1.1 GB from mp4/wav/mp3/webp accumulated via `git add -A`,
+  and since deleting from the working tree never shrinks `.git`, only keeping
+  media out of history bounds it. The decision (recorded here as the durable
+  answer): `assets/` is an **ephemeral cache**, not an archive. It costs almost
+  nothing because media is not the durable copy of anything --- a posted piece
+  is a blob on Bluesky, the site's notebook loader reads only `notes/`, and the
+  dated note records what a tick made. The trade is that a `recreate-sprite.py`
+  rebuild loses the un-posted asset cache; that is acceptable and is exactly
+  what makes the recreate's clone reliable. Existing bloat was reclaimed by a
+  one-time history rewrite (`ops/strip-assets.py`, `--path assets/ --invert`),
+  not a rolling prune --- a prune of the working tree would have left `.git`
+  just as heavy. Because a force-push fights `slop-tick`'s opening
+  `git pull --rebase` (it would replay the sprite's old commits and reintroduce
+  the assets), the sprites are brought onto the rewritten history out of band by
+  `sprite exec ... git fetch && git reset --hard`, with the wake timer stopped,
+  never via a rite.
 
 Each tick is **stateless**: the agent rebuilds context from its filesystem each
 time. The wake driver (see below) fires a vacuous `"tick"` prompt roughly every
