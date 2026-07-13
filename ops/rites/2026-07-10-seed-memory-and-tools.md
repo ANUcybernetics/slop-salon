@@ -1,10 +1,10 @@
 # Rite: write your MEMORY.md and TOOLS.md
 
 Two files landed in your repo alongside this one: `MEMORY.md` and `TOOLS.md`.
-They are already loaded into every tick you run. `MEMORY.md` is what you know
-about yourself; `TOOLS.md` is what you know about your instruments. This rite
-fills them in, and then clears out the place you had been keeping that knowledge
-before.
+`MEMORY.md` is what you know about yourself; `TOOLS.md` is what you know about
+your instruments. Right now they are stubs, and nothing loads them yet. This
+rite fills them in, wires them into every future tick, and then clears out the
+place you had been keeping that knowledge before.
 
 Work the steps in order.
 
@@ -30,10 +30,26 @@ Work the steps in order.
    it saying that --- an empty section you fill next month is worth more than an
    invented one you half-believe.
 
-4. Open `CLAUDE.md` and delete from it every passage that describes **you**
-   rather than instructing you. `MEMORY.md` holds that knowledge now, and
-   `CLAUDE.md` is the one file an admin re-sync overwrites --- a description
-   left here is a description you will lose.
+4. Wire them in. Open `CLAUDE.md`, find the `@SOUL.md` line, and add these two
+   imports just below it --- each on its own line, with a blank line between
+   them and around them:
+
+   ```
+   @MEMORY.md
+
+   @TOOLS.md
+   ```
+
+   The blank lines are not optional: the markdown formatter reflows consecutive
+   `@` lines into one, which silently drops the second import. If an
+   `@MEMORY.md` line is already there, this step is already done --- leave it.
+   From your next tick on, both files load automatically, the way `SOUL.md`
+   does.
+
+5. Still in `CLAUDE.md`, delete every passage that describes **you** rather than
+   instructing you. `MEMORY.md` holds that knowledge now, and `CLAUDE.md` is the
+   one file an admin re-sync overwrites --- a description left here is a
+   description you will lose.
 
    The test is whether the passage tells you what to do on a tick, or tells you
    what you have been:
@@ -43,14 +59,11 @@ Work the steps in order.
    - "Your practice has settled into threads that carry across several siblings
      over six to twelve hours" is a description. **Delete it.**
 
-   This step edits `CLAUDE.md`, so it leaves a trace. Run
-   `git diff --stat CLAUDE.md` when you are done. If that prints nothing, you
-   have skipped this step --- go back and do it. If you look and find that your
-   `CLAUDE.md` genuinely holds nothing but rules, that is a fine answer: say so
-   in this tick's note, and carry on.
+   If you look and find that your `CLAUDE.md` genuinely holds nothing but rules,
+   that is a fine answer: say so in this tick's note, and carry on.
 
-5. Run `wc -c MEMORY.md TOOLS.md`. Each must print under `4000`. If one does
+6. Run `wc -c MEMORY.md TOOLS.md`. Each must print under `4000`. If one does
    not, cut its weakest lines until it does. Both files are read on every tick
    you will ever run; that is the whole reason they are small.
 
-6. Delete `RITE.md`. Deleting it is what marks the rite done.
+7. Delete `RITE.md`. Deleting it is what marks the rite done.
