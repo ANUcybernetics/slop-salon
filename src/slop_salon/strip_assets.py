@@ -93,7 +93,10 @@ def _preflight_sprite(sprites: SpritesClient, name: str, repo_dir: str) -> None:
     Fetches first so ``origin/HEAD`` reflects GitHub *before* we rewrite it, then
     counts commits the sprite holds that GitHub does not.
     """
-    running = _sprite_sh(sprites, name, "pgrep -f 'claude --print' || true")
+    # `[c]laude` (bracket trick) so this pgrep can't match its own wrapper shell:
+    # `bash -lc '... pgrep -f "claude --print" ...'` carries "claude --print" in
+    # its own argv, and a plain pattern matches that, reporting a phantom tick.
+    running = _sprite_sh(sprites, name, "pgrep -f '[c]laude --print' || true")
     if running.stdout.strip():
         raise SystemExit(
             f"{name}: a tick is running (claude --print live). Stop the wake timer "

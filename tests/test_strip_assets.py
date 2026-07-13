@@ -74,3 +74,19 @@ def test_preflight_passes_when_idle_and_pushed():
     )
     _preflight_sprite(sprites, "lou", "~/slop-salon-lou")  # no raise
     assert any("fetch" in c for c in sprites.calls)
+
+
+def test_preflight_pgrep_cannot_self_match():
+    """The tick-detection pgrep must not match its own wrapper shell.
+
+    `bash -lc '... pgrep -f "claude --print" ...'` carries "claude --print" in
+    its own argv; a bare pattern matches that and reports a phantom tick,
+    aborting every strip. The bracket form avoids it.
+    """
+    sprites = _FakeSprites(
+        [("pgrep", ExecResult("", "", 0)), ("rev-list", ExecResult("0\n", "", 0))]
+    )
+    _preflight_sprite(sprites, "lou", "~/slop-salon-lou")
+    pgrep_cmd = next(c for c in sprites.calls if "pgrep" in c)
+    assert "'claude --print'" not in pgrep_cmd
+    assert "[c]laude --print" in pgrep_cmd
