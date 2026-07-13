@@ -6,7 +6,7 @@ title: >-
 status: In Progress
 assignee: []
 created_date: '2026-07-08 22:51'
-updated_date: '2026-07-09 23:07'
+updated_date: '2026-07-10 07:10'
 labels:
   - rollout
   - templates
@@ -175,4 +175,46 @@ ALL SIX first wave-one ticks wrote BOTH now.md and a dated note (monitor FIRST-T
 lou INCIDENT, found while watching the fan-out (own task-8, memory project_lou_push_rejection_blind_spot): lou committed a 116MB video 2026-06-24; GitHub's pre-receive hook rejected every push for 16 days; 689 commits / 1363 notes / 441 assets stranded on the sprite, one wedge away from being destroyed by recreate-sprite.py. lou kept POSTING throughout (that path never touches git), so it looked healthy. Recovered with filter-branch over origin/main..HEAD under the tick flock, then an ordinary push --- the blob was not an ancestor of origin/main, so no force-push. All 696 commits preserved; sprite now ahead=0 behind=0; remote has 2691 notes, 1523 assets.
 
 Ben asked for file-size guidance in the template: added (094e89c) and pushed to all six, additively. Note the additive patch approach WORKS NOW --- after fan-out every agent's file is the reconstructed template + drift, wrapped at 80, so anchors match. It only failed pre-fan-out because their files were unwrapped and lacked wave one.
+
+--- 2026-07-10: wave two drafted + canaried (AC4 in progress) ---
+
+Design (Ben chose all three via quiz): MEMORY.md (self-knowledge) and TOOLS.md
+(instrument manual), BOTH @-imported by CLAUDE.md, both capped at 4000 bytes,
+maintained by numbered step 11. Rite seeds them AND moves self-description out of
+CLAUDE.md (move, not copy). Canary = rahel, not mina: mina's only drift is her
+replicate paragraph (procedure), so she would never have exercised the rite's
+relocation step. Commits 14ee716, d4ca85f, 8a29929.
+
+Fan-out method differs from wave one: PATCH each agent's live CLAUDE.md in place
+rather than re-render. All six now carry wave one and are wrapped to 80 cols, so
+anchors match; patching preserves gert's thread-discipline rule, vita's steps
+4/8/9 and lelia's step-8 exception for free. Verified zero lines removed on all
+six before pushing. Script: scratchpad w2/patch-w2.py + fanout.sh (re-fetches and
+re-patches from origin at push time, aborts if any line would be removed).
+
+CANARY CAUGHT A REAL DEFECT (rite v1). Step 2 said 'move it into MEMORY.md and
+delete it from CLAUDE.md' while MEMORY.md was still a stub to be overwritten in
+step 4. rahel deferred the move to step 4; step 4 only said 'write both files';
+the delete had no step and was silently dropped. She seeded both files well and
+left CLAUDE.md byte-identical -- every other check passed, so fan-out would have
+looked like success. Fix (d4ca85f): deletion is its own numbered step ending in
+'run git diff --stat CLAUDE.md; if it prints nothing you skipped this step', plus
+an escape hatch for agents whose CLAUDE.md holds only rules. Rerun: she deleted
+exactly the 4 self-description blocks, added nothing, kept the imports, kept step
+11, kept her thread rule.
+
+Also caught pre-flight, by the new test_every_claude_md_import_names_a_file_we_ship:
+the markdown formatter reflows consecutive '@import' lines into ONE line. Separate
+them with blank lines. And a MISSING @import is skipped silently (tick exits 0,
+context just absent) -- so the stubs must land in the same commit as the import.
+
+Interrupted by a 5-of-6 sprite wedge storm (see project_sprite_idle_wedge). Healer
+correctly held off auto-recreate (>=3 wedged = platform incident). Nothing stranded:
+a wedged tick fails before slop-tick runs. Recreated lelia as a probe, then the
+other four. All six back, claude pinned 2.1.92.
+
+REMAINING: observation gate on rahel (watching for MEMORY/TOOLS every-tick thrash
+against the cap), then fan out to lou mina gert vita lelia via w2/fanout.sh, then
+commit the admin CLAUDE.md architecture note (currently uncommitted -- it describes
+MEMORY.md/TOOLS.md as fleet-wide, which is not yet true).
 <!-- SECTION:NOTES:END -->
