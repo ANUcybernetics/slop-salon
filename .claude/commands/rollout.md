@@ -63,7 +63,7 @@ for name in lou mina gert vita lelia rahel; do
 done
 ```
 
-`ops/push-template.py` re-renders the template with the agent's name/handle/siblings substituted, clones the agent's repo, writes the file, commits, and pushes. The next tick's `git pull --rebase --autostash` inside the sprite picks it up.
+`ops/push-template.py` re-renders the template with the agent's name/handle/siblings substituted, clones the agent's repo, writes the file, commits, and pushes. The next tick's `git pull --rebase` inside the sprite picks it up.
 
 Substitute the filename for other templates (`SIBLINGS.md`, `slop-tick`, `SOUL.md`).
 

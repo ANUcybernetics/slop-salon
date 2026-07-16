@@ -121,6 +121,39 @@ teardown() {
     [ "$(git log --oneline | wc -l)" -eq "$initial_count" ]
 }
 
+@test "commits pre-tick leftovers before pulling" {
+    # A crashed tick (or a sprite fs rollback to a mid-tick checkpoint) leaves
+    # uncommitted files that would block `git pull` with "untracked working
+    # tree files would be overwritten by merge". Re-wrap git so the pull stub
+    # snapshots the log, proving the leftovers commit lands *before* the pull.
+    cat > "$STUB_DIR/git" <<EOF
+#!/usr/bin/env bash
+if [[ "\$1" == "pull" ]]; then
+    "$REAL_GIT" log --format=%s > "\$HOME/log-at-pull.txt"
+    exit 0
+fi
+if [[ "\$1" == "push" ]]; then
+    exit 0
+fi
+exec "$REAL_GIT" "\$@"
+EOF
+    chmod +x "$STUB_DIR/git"
+
+    cd "$AGENT_DIR"
+    echo "orphaned by a crashed tick" > leftover.txt
+
+    run bash "$SCRIPT" "tick"
+    [ "$status" -eq 0 ]
+
+    grep -q "pre-tick leftovers" "$TEST_HOME/log-at-pull.txt"
+
+    # The leftover file is committed, and the tick's own work still lands as
+    # its own commit afterwards.
+    cd "$AGENT_DIR"
+    [ -z "$("$REAL_GIT" ls-files --others --exclude-standard)" ]
+    "$REAL_GIT" log --format=%s -1 | grep -qv "pre-tick leftovers"
+}
+
 @test "skips commit when nothing changed" {
     cat > "$STUB_DIR/claude" <<'EOF'
 #!/usr/bin/env bash

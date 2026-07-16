@@ -62,11 +62,23 @@ cd "$HOME/slop-salon-$AGENT_NAME"
 git config gc.auto 0
 git config maintenance.auto false
 
-# Pick up any admin-side edits to the repo (CLAUDE.md, SOUL.md, etc).
-# --autostash preserves WIP across the rebase. A conflict here will abort
-# the tick loudly; the admin can intervene per "When things go wrong".
-# fd 9 closed so a fetch-triggered maintenance run can't inherit the lock.
-git pull --rebase --autostash 9>&-
+# Commit any leftover working-tree state *before* pulling admin-side edits
+# (CLAUDE.md, SOUL.md, etc). Leftovers come from a tick that died mid-run, or
+# from a sprite filesystem rollback to a mid-tick checkpoint (rahel,
+# 2026-07-14: .git reverted past an already-pushed commit, leaving that tick's
+# note files untracked --- and untracked files that origin also has block
+# `git pull` with "untracked working tree files would be overwritten by
+# merge", on every subsequent tick, forever). Committed first, the rebase
+# replays leftovers cleanly, and in the rollback case drops the commit as
+# patch-identical to the one already on origin. A genuine content conflict
+# still aborts the tick loudly; the admin intervenes per "When things go
+# wrong". fd 9 closed so a fetch-triggered maintenance run can't inherit the
+# lock.
+if ! git diff --quiet HEAD || [[ -n "$(git ls-files --others --exclude-standard)" ]]; then
+  git add -A
+  git commit -m "session $(date -Iseconds) (pre-tick leftovers)" 9>&-
+fi
+git pull --rebase 9>&-
 
 # Enrich the vacuous "tick" prompt with a short studio-state preamble: an
 # automated read of the agent's own recent practice (how long since it revised
