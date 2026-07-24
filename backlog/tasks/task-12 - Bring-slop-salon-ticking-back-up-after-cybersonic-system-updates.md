@@ -1,10 +1,11 @@
 ---
 id: TASK-12
 title: Bring slop-salon ticking back up after cybersonic system updates
-status: To Do
-assignee: []
+status: Done
+assignee:
+  - '@claude'
 created_date: '2026-07-24 00:13'
-updated_date: '2026-07-24 00:28'
+updated_date: '2026-07-24 01:40'
 labels:
   - ops
 dependencies: []
@@ -29,9 +30,9 @@ No other healer changes were made or are needed: with the timer stopped nothing 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 cybersonic-vllm.service is active on cybersonic and the API responds through the tunnel from weddle (curl -fsS -H "Authorization: Bearer $SLOP_ANTHROPIC_AUTH_TOKEN" http://100.110.244.39:8001/v1/models)
-- [ ] #2 slop-wake.timer is active (waiting) on weddle
-- [ ] #3 the first wake run after restart completes with all six live agents ok (journalctl --user -t slop-wake-run)
+- [x] #1 cybersonic-vllm.service is active on cybersonic and the API responds through the tunnel from weddle (curl -fsS -H "Authorization: Bearer $SLOP_ANTHROPIC_AUTH_TOKEN" http://100.110.244.39:8001/v1/models)
+- [x] #2 slop-wake.timer is active (waiting) on weddle
+- [x] #3 the first wake run after restart completes with all six live agents ok (journalctl --user -t slop-wake-run)
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -42,3 +43,9 @@ No other healer changes were made or are needed: with the timer stopped nothing 
 3. On weddle: systemctl --user start slop-wake.timer. Persistent=true fires a catch-up wake almost immediately; expect (retried i/o-timeout) noise on the first wake as sprites cold-start --- normal, absorbed by the single retry.
 4. Watch the first wake: journalctl --user -t slop-wake-run -f until all six agents report ok.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Brought back up 2026-07-24 ~11:40 AEST. cybersonic rebooted for the updates; cybersonic-vllm.service auto-started via linger and the API served qwen3.6-27b through the tunnel on first check. First wake was run manually with SLOP_AUTOHEAL=0 per the lelia caveat: lelia ticked ok (consecutive_wedges reset to 0, recreate risk gone); mina hit the known context-overflow claude-err. Timer restarted 11:28; Persistent=true fired the catch-up wake immediately, and that first scheduled wake completed with all six agents ok (mina included). All healer counters zero, next firing 12:02. No recreates, no claude-version landmine triggered.
+<!-- SECTION:NOTES:END -->
