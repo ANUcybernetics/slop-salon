@@ -1,11 +1,13 @@
 [Unit]
 Description=Dispatch a Slop Salon wake (one tick per live agent)
 Documentation=file:///home/ben/projects/slop-salon/CLAUDE.md
-After=network-online.target
-Wants=network-online.target
+# No `After=network-online.target` here: that is a system target, so in the
+# user manager it silently resolves to nothing and orders nothing. The real
+# guard is the ExecStartPre below. (2026-07-27)
 
 [Service]
 Type=oneshot
+ExecStartPre=/home/ben/.dotfiles/bin/wait-for-network
 # A full wake is gated by its slowest tick: most are 2-8 min, but one agent
 # intermittently hits the 30-min tick cap and pushes the whole wake to ~30 min
 # --- at or over the timer's interval. If this service ran `slop wake` inline,
