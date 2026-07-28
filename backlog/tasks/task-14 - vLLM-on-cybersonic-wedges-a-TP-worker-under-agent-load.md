@@ -4,6 +4,7 @@ title: vLLM on cybersonic wedges a TP worker under agent load
 status: To Do
 assignee: []
 created_date: '2026-07-28 04:52'
+updated_date: '2026-07-28 10:22'
 labels: []
 dependencies: []
 ordinal: 14000
@@ -30,3 +31,41 @@ Mitigated but not fixed: cybersonic-vllm-health.timer now restarts a hung vLLM w
 - [ ] #2 Root cause identified among the three candidates, or ruled out and documented
 - [ ] #3 cybersonic-vllm/README.md records the finding and the final config
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+PAUSED 2026-07-28 ~20:25 AEST (deliberate, admin-authorised). The crash-loop was
+churning a shared GPU box --- 10 prober restarts --- so everything is stopped
+rather than left thrashing:
+
+  weddle:      systemctl --user stop slop-wake.timer slop-wake-watchdog.timer
+  cybersonic:  systemctl --user stop cybersonic-vllm-health.timer
+               systemctl --user stop cybersonic-vllm.service
+
+All four units are STOPPED but still `enabled`, so this is a pause, not a
+disable --- they will come back on their own if the user manager restarts (reboot
+or re-login). Nothing is watching while paused: the dead-man check is one of the
+things stopped, by design, so it does not file an hourly todo about a planned
+outage. That means an unnoticed resume is the failure mode to watch for here.
+
+Restore, in this order (prober last, so it cannot fight a cold start):
+  cybersonic:  systemctl --user start cybersonic-vllm.service   # ~160-240s warmup
+               curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8001/health
+               systemctl --user start cybersonic-vllm-health.timer
+  weddle:      systemctl --user start slop-wake.timer
+               systemctl --user start slop-wake-watchdog.timer
+
+Two findings from the shutdown itself:
+
+- `systemctl stop` took the full TimeoutStopSec=120 and needed the cgroup
+  SIGKILL. vLLM could not shut down on SIGTERM, which corroborates a genuinely
+  hung TP worker rather than a clean crash --- and is why Restart=always never
+  helped: the supervised process never exited.
+- GPUs 0-3 released fully (1 MiB each). GPU 4 is now running ANOTHER user's vLLM
+  (u9714433, Qwen2.5-14B-Instruct-AWQ, port 8004, ~21.9 GB); it was idle at
+  15:09. So the 'move TP off GPU 2 onto GPU 4' bisect step is no longer free ---
+  it would contend with that job. Re-check occupancy before trying it. Their
+  presence on the same box is also an untested environmental variable for the
+  worker hangs (PCIe/P2P or host-memory contention), not yet ruled in or out.
+<!-- SECTION:NOTES:END -->
