@@ -1,10 +1,25 @@
 [Unit]
 Description=vLLM serving Qwen3.6-35B-A3B-FP8 (TP=4 on cybersonic GPUs 0-3)
-After=network-online.target
-Wants=network-online.target
+Documentation=file:///home/users/u2548636/projects/slop-salon/cybersonic-vllm/README.md
+# No `After=network-online.target` here: this is a *user* unit and that is a
+# system target, so in the user manager it silently resolves to nothing and
+# orders nothing --- the same trap slop-vllm-tunnel.service documents. Rather
+# than reach for a wait-for-network gate, the start path is made not to need
+# the network at all (HF_HUB_OFFLINE / UV_OFFLINE below). (2026-07-28)
+# Never give up restarting: the whole collective is down while this is down,
+# and the failure is usually transient (a GPU not yet ready at boot).
+StartLimitIntervalSec=0
 
 [Service]
-Type=simple
+# Type=exec, not simple: a missing or non-executable launcher is then reported
+# as a failed start instead of a service that "started" and immediately died.
+# Neither type waits for readiness: under Type=exec the unit counts as started
+# the moment the launcher is execed, so TimeoutStartSec bounds only the exec.
+# It is pinned to infinity regardless --- vLLM's cold start (weight load +
+# compile) runs for minutes, and the default 90s must never get the chance to
+# be the thing that kills it.
+Type=exec
+TimeoutStartSec=infinity
 WorkingDirectory=/home/users/u2548636/projects/slop-salon/cybersonic-vllm
 
 # mise shims provide `uv`; HF_HOME / UV_CACHE_DIR pin caches to /data,
@@ -15,16 +30,31 @@ Environment="UV_CACHE_DIR=/data/u2548636/cache/uv"
 # vLLM workers occasionally rely on these.
 Environment="HOME=/home/users/u2548636"
 Environment="XDG_CACHE_HOME=/data/u2548636/cache"
-EnvironmentFile=-/home/users/u2548636/projects/slop-salon/cybersonic-vllm/.env
+
+# Serve strictly from what is already on disk, so a boot-time start cannot
+# depend on DNS, the ANU network, or huggingface.co being up. Both are pins,
+# not optimisations: when you deliberately change MODEL or the Python deps,
+# fetch first by hand (`uv sync`, or one `HF_HUB_OFFLINE=0` run) and only then
+# restart the service.
+Environment="HF_HUB_OFFLINE=1"
+Environment="UV_OFFLINE=1"
+
+# No `-` prefix: the file carries VLLM_API_KEY, and without it vLLM serves
+# unauthenticated on 0.0.0.0:8001 while looking perfectly healthy. A missing
+# or unreadable .env must fail the start, loudly.
+EnvironmentFile=/home/users/u2548636/projects/slop-salon/cybersonic-vllm/.env
 
 ExecStart=/home/users/u2548636/projects/slop-salon/cybersonic-vllm/scripts/launch_vllm.sh
 
-# vLLM cold-start (weight load + compile) can take a while the first time.
-TimeoutStartSec=1800
-Restart=on-failure
+# `always`, not `on-failure`: a fatal condition vLLM reports as a clean exit
+# should still come back.
+Restart=always
 RestartSec=15s
 
 # SIGTERM lets vLLM drain in-flight requests; SIGKILL after the timeout.
+# KillMode=mixed signals the main process only, then kills the whole cgroup
+# (TP=4 workers included) at the timeout --- which is what keeps a restart
+# from racing the old process for :8001 and for GPU memory.
 KillSignal=SIGTERM
 KillMode=mixed
 TimeoutStopSec=120
