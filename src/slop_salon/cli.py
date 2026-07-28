@@ -697,8 +697,12 @@ def usage(
                 if json_out:
                     typer.echo(json.dumps(r))
                 else:
+                    # `calls` is API calls, `blocks` the transcript records they
+                    # were written as (~3x more). Showing both keeps anyone
+                    # reading this from re-deriving the old 3.2x-inflated figure.
                     typer.echo(
-                        f"{agent.name:<8} {r['session']:<10} turns={r['turns']:<3} "
+                        f"{agent.name:<8} {r['session']:<10} calls={r['turns']:<3} "
+                        f"blocks={r.get('blocks', '?'):<4} "
                         f"in_new={r['in_new']:>6} cache_cr={r['cache_create']:>7} "
                         f"cache_rd={r['cache_read']:>8} out={r['output']:>6} "
                         f"${r['cost_usd']:.3f}"

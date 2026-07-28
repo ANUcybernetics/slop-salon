@@ -695,8 +695,10 @@ def test_usage_per_tick_shows_each_session(fake_config_live):
         assert result.exit_code == 0, result.output
         assert "sess0001" in result.output
         assert "sess0002" in result.output
-        assert "turns=10" in result.output
-        assert "turns=20" in result.output
+        # Labelled `calls=`, not `turns=`: a tick's transcript records outnumber
+        # its API calls ~3x, and conflating the two overstated fleet cost by 3.2x.
+        assert "calls=10" in result.output
+        assert "calls=20" in result.output
 
 
 def test_usage_json_output(fake_config_live):

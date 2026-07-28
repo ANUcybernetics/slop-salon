@@ -5,10 +5,17 @@ Sprite-side helper. Reads Claude Code's per-session JSONL transcripts at
 JSON summary line per session. The admin-side `slop usage` command
 fan-outs to each live sprite and aggregates.
 
-Each tick is one Claude Code session (one JSONL file). Within a session,
-many assistant turns share the cache; cache reads within a session are
-cheap. Across ticks, the 5-minute cache TTL means cache_creation is paid
-again on every tick.
+Each tick is one Claude Code session (one JSONL file). One session makes
+several API calls, and each call is written to the transcript as several
+records --- see `tally_session`, which groups them by `message.id`.
+
+Note the cache columns read 0 for the whole fleet: the self-hosted vLLM's
+Anthropic-compatible endpoint doesn't report `cache_creation_input_tokens` or
+`cache_read_input_tokens`, so every prompt token lands in `in_new` at full
+input price. That is a gap in what vLLM *reports*, not evidence that nothing
+is cached (it serves with `--enable-prefix-caching`), so treat these figures
+as an uncached upper bound on what the same workload would cost on an API
+that does report cache hits.
 """
 
 from __future__ import annotations
@@ -44,22 +51,42 @@ def _main() -> None:
     """Force multi-command mode so `slop-usage tally <agent>` works as expected."""
 
 
+_USAGE_FIELDS = {
+    "in_new": "input_tokens",
+    "cache_create": "cache_creation_input_tokens",
+    "cache_read": "cache_read_input_tokens",
+    "output": "output_tokens",
+}
+
+
 def tally_session(path: Path) -> dict:
-    """Sum token usage across all assistant turns in one session JSONL file.
+    """Sum token usage across the API calls in one session JSONL file.
 
     Returns a dict with `session`, `mtime`, `in_new`, `cache_create`,
-    `cache_read`, `output`, `turns`. Malformed JSON lines are skipped.
-    Lines whose `type` isn't `assistant` are ignored.
+    `cache_read`, `output`, `turns` (API calls) and `blocks` (transcript
+    records). Malformed JSON lines are skipped; lines whose `type` isn't
+    `assistant` are ignored.
+
+    **Group by `message.id`.** Claude Code writes one transcript record per
+    *content block*, not per API call --- a single call answering with
+    thinking + text + three tool_use blocks lands as five records, each
+    stamped with that call's full `input_tokens` and only the last carrying
+    its `output_tokens`. Summing per record therefore counted one 30k prompt
+    five times: measured against six of rahel's sessions the old arithmetic
+    overstated input by **3.2x** (and reported 109 "turns" for a tick that
+    made 34 calls), which fed a fleet cost figure that was wrong by the same
+    factor. Every record carries `message.id`, and records sharing one are the
+    same call, so the id is the reliable key --- `stop_reason` also marks the
+    terminal record but is absent on the rest, making it easy to mistake for
+    missing data.
+
+    Per id we take the **max** of each usage field rather than the first or
+    last: `input_tokens` repeats identically across the group while
+    `output_tokens` is 0 on every record but the terminal one, so max recovers
+    both without depending on record order.
     """
-    stats = {
-        "session": path.stem[:8],
-        "mtime": int(path.stat().st_mtime),
-        "in_new": 0,
-        "cache_create": 0,
-        "cache_read": 0,
-        "output": 0,
-        "turns": 0,
-    }
+    calls: dict[str, dict[str, int]] = {}
+    blocks = 0
     with path.open() as fh:
         for line in fh:
             try:
@@ -68,12 +95,24 @@ def tally_session(path: Path) -> dict:
                 continue
             if d.get("type") != "assistant":
                 continue
-            stats["turns"] += 1
-            u = (d.get("message") or {}).get("usage") or {}
-            stats["in_new"] += u.get("input_tokens") or 0
-            stats["cache_create"] += u.get("cache_creation_input_tokens") or 0
-            stats["cache_read"] += u.get("cache_read_input_tokens") or 0
-            stats["output"] += u.get("output_tokens") or 0
+            blocks += 1
+            message = d.get("message") or {}
+            u = message.get("usage") or {}
+            # No id (shouldn't happen, but don't silently drop the tokens):
+            # fall back to a per-record key so it counts as its own call.
+            key = message.get("id") or f"_anon{blocks}"
+            call = calls.setdefault(key, dict.fromkeys(_USAGE_FIELDS, 0))
+            for field, wire in _USAGE_FIELDS.items():
+                call[field] = max(call[field], u.get(wire) or 0)
+
+    stats: dict = {
+        "session": path.stem[:8],
+        "mtime": int(path.stat().st_mtime),
+        "turns": len(calls),
+        "blocks": blocks,
+    }
+    for field in _USAGE_FIELDS:
+        stats[field] = sum(call[field] for call in calls.values())
     return stats
 
 

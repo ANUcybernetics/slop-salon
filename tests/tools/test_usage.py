@@ -59,6 +59,79 @@ def test_tally_session_sums_assistant_usage(tmp_path):
     assert stats["output"] == 80
 
 
+def _block(mid: str, kind: str, in_new: int, output: int, stop: str | None = None) -> dict:
+    """One transcript record: a single content block of the API call `mid`."""
+    return {
+        "type": "assistant",
+        "message": {
+            "id": mid,
+            "stop_reason": stop,
+            "content": [{"type": kind}],
+            "usage": {
+                "input_tokens": in_new,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "output_tokens": output,
+            },
+        },
+    }
+
+
+def test_one_api_call_split_across_blocks_is_counted_once(tmp_path):
+    # The real shape from rahel's transcripts: Claude Code writes one record per
+    # content block, each stamped with the call's full input_tokens and only the
+    # last carrying output_tokens. Summing per record counted this 30k prompt
+    # five times over --- 3.2x too high across the fleet.
+    f = _write_session(
+        tmp_path / "call1.jsonl",
+        [
+            _block("chatcmpl-aaa", "thinking", 30_000, 0),
+            _block("chatcmpl-aaa", "text", 30_000, 0),
+            _block("chatcmpl-aaa", "tool_use", 30_000, 0),
+            _block("chatcmpl-aaa", "tool_use", 30_000, 0),
+            _block("chatcmpl-aaa", "tool_use", 30_000, 159, stop="tool_use"),
+        ],
+    )
+    stats = tally_session(f)
+    assert stats["turns"] == 1, "five blocks are one API call"
+    assert stats["blocks"] == 5, "raw record count stays visible"
+    assert stats["in_new"] == 30_000, "the prompt is billed once, not five times"
+    assert stats["output"] == 159, "max recovers output from the terminal record"
+
+
+def test_distinct_calls_are_summed(tmp_path):
+    f = _write_session(
+        tmp_path / "call2.jsonl",
+        [
+            _block("chatcmpl-aaa", "thinking", 29_579, 0),
+            _block("chatcmpl-aaa", "tool_use", 29_579, 159, stop="tool_use"),
+            _block("chatcmpl-bbb", "text", 30_206, 0),
+            _block("chatcmpl-bbb", "tool_use", 30_206, 236, stop="tool_use"),
+        ],
+    )
+    stats = tally_session(f)
+    assert stats["turns"] == 2
+    assert stats["blocks"] == 4
+    assert stats["in_new"] == 29_579 + 30_206
+    assert stats["output"] == 159 + 236
+
+
+def test_records_without_a_message_id_still_count(tmp_path):
+    # Defensive: an id-less record must not be silently dropped (nor collapsed
+    # together with other id-less records, which would undercount instead).
+    f = _write_session(
+        tmp_path / "noid.jsonl",
+        [
+            {"type": "assistant", "message": {"usage": {"input_tokens": 10, "output_tokens": 1}}},
+            {"type": "assistant", "message": {"usage": {"input_tokens": 20, "output_tokens": 2}}},
+        ],
+    )
+    stats = tally_session(f)
+    assert stats["turns"] == 2
+    assert stats["in_new"] == 30
+    assert stats["output"] == 3
+
+
 def test_tally_session_with_no_assistant_lines(tmp_path):
     f = _write_session(
         tmp_path / "empty.jsonl",
