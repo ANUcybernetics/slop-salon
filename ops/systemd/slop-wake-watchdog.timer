@@ -1,0 +1,15 @@
+[Unit]
+Description=Run the Slop Salon dead-man check hourly
+
+[Timer]
+# Hourly at :47, off the :00/:30 wake boundary so a check never lands in the
+# middle of a wake's own startup.
+OnCalendar=*-*-* *:47:00
+RandomizedDelaySec=2min
+# Fire on resume after downtime. The check is cheap and idempotent, and a laptop
+# that slept through the night should be told immediately that ticks are stale
+# rather than at the next round hour.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

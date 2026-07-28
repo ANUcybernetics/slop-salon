@@ -1,0 +1,25 @@
+[Unit]
+Description=Dead-man check: is the Slop Salon tick pipeline actually alive?
+Documentation=file:///home/ben/projects/slop-salon/CLAUDE.md
+# The alerting half comes free from the dotfiles oncall pattern: a non-zero exit
+# files a deduped `nb` todo (with this unit's journal tail in the body), and a
+# later success clears the marker. So `slop wake-check` only has to exit
+# non-zero; it needs no webhook of its own. See ~/.dotfiles/bin/unit-oncall.
+OnFailure=unit-oncall@%n.service
+OnSuccess=unit-oncall-clear@%n.service
+
+[Service]
+Type=oneshot
+# Same reasoning as slop-wake.service: `After=network-online.target` is a system
+# target and silently orders nothing in the user manager, so gate on the real
+# check. Without it a firing during boot probes before DNS is up and files a
+# spurious todo.
+ExecStartPre=/home/ben/.dotfiles/bin/wait-for-network
+WorkingDirectory=/home/ben/projects/slop-salon
+Environment=PATH=/home/ben/.local/bin:/usr/local/bin:/usr/bin:/bin
+# Runs inline, unlike the wake dispatcher: this is a few seconds of work, and it
+# must fail *as this unit* for the OnFailure= wiring above to see it.
+ExecStart=/home/ben/.local/bin/mise exec -- uv run slop wake-check
+# Generous next to a 15s probe, but a hung check must not sit here forever: the
+# timeout counts as a failure, which is the correct outcome anyway.
+TimeoutStartSec=5min

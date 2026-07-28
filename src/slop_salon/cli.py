@@ -31,7 +31,7 @@ from statistics import mean, median
 import httpx
 import typer
 
-from slop_salon import wake_slots
+from slop_salon import wake_slots, watchdog
 from slop_salon.config import load_config
 from slop_salon.healing import SKIP_BUSY_CODE, claude_failed, heal_wedged, is_wedge
 from slop_salon.provision import (
@@ -429,6 +429,7 @@ def wake(
 
     failed = 0
     deferred: list[str] = []
+    statuses: dict[str, str] = {}
     results: dict[str, ExecResult] = {}
     with ThreadPoolExecutor(max_workers=min(WAKE_CONCURRENCY, len(live))) as pool:
         for agent, result, elapsed, retried in pool.map(_tick, live):
@@ -438,6 +439,7 @@ def wake(
                 # tick outcome to classify, and feeding healing a synthetic one
                 # would corrupt its consecutive-state counters.
                 deferred.append(agent.name)
+                statuses[agent.name] = "deferred"
                 typer.echo(f"{agent.name:12s}  {'deferred':12s}  {elapsed:6.1f}s  (no free slot)")
                 continue
             results[agent.name] = result
@@ -450,6 +452,7 @@ def wake(
                 status = "busy"
             else:
                 status = f"fail({result.exit_code})"
+            statuses[agent.name] = status
             summary = f"{agent.name:12s}  {status:12s}  {elapsed:6.1f}s"
             if retried:
                 summary += "  (retried i/o-timeout)"
@@ -463,8 +466,102 @@ def wake(
 
     _heal_wedged_agents(results)
 
+    # Before the exit code, so a red run still records that a wake completed ---
+    # `slop wake-check` needs to tell "no wake is firing" apart from "wakes fire
+    # and fail", which are different outages with different fixes.
+    try:
+        watchdog.write_stamp(statuses, now=dt.datetime.now(dt.UTC))
+    except OSError as exc:
+        typer.echo(f"[watchdog] could not write wake stamp (ignored): {exc!r}", err=True)
+
     if failed:
         raise typer.Exit(code=1)
+
+
+def _probe_inference(endpoint: str, token: str | None, timeout: float) -> watchdog.Probe:
+    """GET `<endpoint>/health`, classifying the two shapes that mean "down".
+
+    vLLM answers 503 on `EngineDeadError`, which is the zombie state that took
+    the collective down on 2026-07-28 while both boxes' units stayed green. Any
+    non-200 is reported: unlike cybersonic's prober (which *restarts* on a bad
+    probe, so must be conservative) this only files a todo, and a 401 from a
+    rotated key is a real outage worth hearing about.
+    """
+    url = endpoint.rstrip("/") + "/health"
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    try:
+        response = httpx.get(url, headers=headers, timeout=timeout)
+    except httpx.HTTPError as exc:
+        return watchdog.Probe(ok=False, detail=f"{url} unreachable ({type(exc).__name__})")
+    if response.status_code == 200:
+        return watchdog.Probe(ok=True, detail=f"{url} 200")
+    if response.status_code == 503:
+        return watchdog.Probe(
+            ok=False, detail=f"{url} 503 --- vLLM engine is dead (needs a restart)"
+        )
+    return watchdog.Probe(ok=False, detail=f"{url} returned {response.status_code}")
+
+
+def _timer_is_active(timer: str) -> bool:
+    completed = subprocess.run(
+        ["systemctl", "--user", "is-active", "--quiet", timer],
+        check=False,
+        capture_output=True,
+    )
+    return completed.returncode == 0
+
+
+@app.command(name="wake-check")
+def wake_check(
+    max_age: str = typer.Option("90.mins", "--max-age", help="Staleness limit, e.g. '90.mins'"),
+    endpoint: str = typer.Option(
+        None, "--endpoint", help="Inference base URL (default: $SLOP_ANTHROPIC_BASE_URL)"
+    ),
+    timer: str = typer.Option(
+        "slop-wake.timer", "--timer", help="Wake timer unit to require active"
+    ),
+    timeout: float = typer.Option(15.0, "--timeout", help="Inference probe timeout, seconds"),
+):
+    """Dead-man check on the whole tick pipeline. Non-zero if anything is wrong.
+
+    Driven hourly by `slop-wake-watchdog.timer` on weddle, whose
+    `OnFailure=unit-oncall@%n.service` turns a non-zero exit into a deduped `nb`
+    todo (and `OnSuccess=unit-oncall-clear@` clears it on recovery), so this
+    needs no alerting of its own.
+
+    Checks three independent things, because each of the two July outages was
+    invisible to at least one of them: the timer is armed, a wake finished
+    recently, and the model is reachable. See `slop_salon.watchdog`.
+    """
+    base = (
+        endpoint
+        or os.environ.get("SLOP_ANTHROPIC_BASE_URL")
+        or os.environ.get("ANTHROPIC_BASE_URL")
+    )
+    if not base:
+        typer.echo(
+            "error: no inference endpoint --- pass --endpoint or set SLOP_ANTHROPIC_BASE_URL",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
+    token = os.environ.get("SLOP_ANTHROPIC_AUTH_TOKEN") or os.environ.get("ANTHROPIC_AUTH_TOKEN")
+    found = watchdog.problems(
+        stamp=watchdog.read_stamp(),
+        now=dt.datetime.now(dt.UTC),
+        max_age=_parse_duration(max_age),
+        timer_active=_timer_is_active(timer),
+        inference=_probe_inference(base, token, timeout),
+        timer_name=timer,
+    )
+
+    if not found:
+        typer.echo(f"ok: {timer} armed, wake stamp fresh, {base} serving")
+        return
+
+    for problem in found:
+        typer.echo(f"WAKE-CHECK: {problem}", err=True)
+    raise typer.Exit(code=1)
 
 
 def _heal_wedged_agents(results: dict[str, ExecResult]) -> None:
@@ -523,6 +620,20 @@ def _parse_since(s: str | None) -> float | None:
     if unit not in SINCE_UNITS:
         raise typer.BadParameter(f"--since: unknown unit {unit!r} (try hours, days)")
     return time.time() - n * SINCE_UNITS[unit]
+
+
+def _parse_duration(s: str) -> float:
+    """`90.mins` / `3.hours` → seconds. Same `<number>.<unit>` shape as --since."""
+    if "." not in s:
+        raise typer.BadParameter(f"duration must be <number>.<unit>, got {s!r}")
+    num_str, unit = s.split(".", 1)
+    try:
+        n = float(num_str)
+    except ValueError as e:
+        raise typer.BadParameter(f"duration: not a number: {num_str!r}") from e
+    if unit not in SINCE_UNITS:
+        raise typer.BadParameter(f"duration: unknown unit {unit!r} (try mins, hours)")
+    return n * SINCE_UNITS[unit]
 
 
 @app.command()

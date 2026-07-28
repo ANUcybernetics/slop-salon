@@ -113,12 +113,22 @@ poking them. That's a systemd user timer on weddle. Canonical unit files live in
   Inspect runs with `journalctl --user -t slop-wake-run`.
 - `slop wake` itself runs `sprite exec ... slop-tick "tick"` against the `live`
   agents a few at a time (`WAKE_CONCURRENCY`) and exits non-zero if any
-  genuinely fail. A first attempt that hits the cold-start i/o-timeout signature
-  (`healing.is_wedge`) is **retried once** before counting --- an idle sprite
-  often warms on the second connect --- so a transient blip doesn't redden the
-  run or feed the healer's consecutive-wedge counter (shown as
-  `(retried i/o-timeout)` in the wake line). A sprite that fails both attempts
-  is still classified and healed as before.
+  genuinely fail. That cap is enforced **twice**, and needs both: as this run's
+  thread-pool width, and as flock'd slot files (`slop_salon.wake_slots`) shared
+  by every run on the box. Because firings deliberately overlap, the pool alone
+  bounds nothing globally --- on 2026-07-28 the 12:58 catch-up run held four
+  ticks while the 13:03 firing picked up the two agents queued behind them,
+  putting six concurrent ~31k-token requests on a vLLM capped at four, minutes
+  before a TP worker hung and killed EngineCore. An agent that waits out
+  `SLOP_WAKE_SLOT_WAIT` without getting a slot is reported `deferred`: not a
+  failure, left for the next firing, and deliberately withheld from the healer
+  (there is no tick outcome to classify, and a synthetic one would corrupt its
+  consecutive-state counters). A first attempt that hits the cold-start
+  i/o-timeout signature (`healing.is_wedge`) is **retried once** before counting
+  --- an idle sprite often warms on the second connect --- so a transient blip
+  doesn't redden the run or feed the healer's consecutive-wedge counter (shown
+  as `(retried i/o-timeout)` in the wake line). A sprite that fails both
+  attempts is still classified and healed as before.
 - under a failed tick the wake line prints a tail of **both** streams, tagged
   `[err]`/`[out]`, preferring lines that look like errors. `claude --print`
   reports its errors on stdout while git writes progress to stderr, and a tick
@@ -144,6 +154,41 @@ loop, and serialises healing across overlapping wakes with a file lock (state in
 `~/.local/state/slop/heal.json`). `SLOP_AUTOHEAL=0` disables the recreate (still
 detects + logs); set `SLOP_ALERT_WEBHOOK` to curl-POST each alert line. Watch it
 with `journalctl --user -t slop-wake-run | grep heal`.
+
+## Dead-man check
+
+Everything the healer knows, it learns _during_ a wake --- so it is structurally
+blind to the pipeline not running. Two July 2026 outages proved it, and each
+would have been missed by a check aimed at the other:
+
+- the timer was stopped during `apt` maintenance and never restarted; the fleet
+  went dark 3h20m. **A unit that never runs never fails**, so no `OnFailure=`
+  could ever have caught this --- only a separate clock can notice absence.
+- vLLM's EngineCore died and every tick failed for hours. Here wakes _were_
+  firing and completing on schedule, so a freshness check alone stays silent.
+
+`slop wake-check` (unit `slop-wake-watchdog.timer`, hourly at :47) therefore
+asks three independent questions: is the timer armed, did a wake finish within
+`--max-age` (90 min --- three missed firings, loose because one wake can itself
+take ~30 min), and does `<base>/health` serve. It also flags a wake in which
+_every_ agent failed. `slop wake` records `~/.local/state/slop/last-wake.json`
+at the end of every run including a red one, since "no wake is firing" and
+"wakes fire and fail" are different outages with different fixes.
+
+Alerting is free: the dotfiles oncall pattern
+(`OnFailure=unit-oncall@%n.service`, `OnSuccess=unit-oncall-clear@%n.service`)
+turns a non-zero exit into a deduped `nb` todo carrying the journal tail, and
+clears it on recovery. So the check only has to exit non-zero --- it needs no
+webhook. Its own blind spot is that it shares weddle's fate: if the box is off,
+nothing checks anything. `Persistent=true` covers sleep (it fires on resume and
+correctly reports the stale stamp); it does not cover weddle never coming back.
+
+```sh
+cp ops/systemd/slop-wake-watchdog.{service,timer} ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now slop-wake-watchdog.timer
+mise exec -- uv run slop wake-check   # run it by hand any time
+```
 
 We previously drove this from a GitHub Actions cron, but short-interval
 schedules on GHA get throttled hard --- multi-hour gaps were common. The timer
@@ -209,6 +254,12 @@ to mute that signal:
   post identical to one already landed within the window, so a lost
   `createRecord` response can't double-post.
 - `SLOP_POST_DEDUP_WINDOW_MIN` (180) --- that dedup window, in minutes.
+- `SLOP_WAKE_SLOT_WAIT` (900) --- seconds a tick waits for one of the
+  `WAKE_CONCURRENCY` global slots before being reported `deferred`. Admin-side
+  (read by `slop wake` on weddle), so it lives in weddle's mise env, not a
+  sprite's `~/.slop-env`. Sized so a single run never defers spuriously: within
+  one run the pool is the same width as the slot count, so a tick only waits
+  when _another_ run holds them.
 
 ## Inference
 
@@ -223,6 +274,21 @@ no `--model` flag, so the model comes from the env.
 The vLLM deployment itself --- launch script, systemd unit, Python deps ---
 lives in this repo under `cybersonic-vllm/` (see its README); it is checked in
 here but runs only on the cybersonic box.
+
+`Restart=always` on that unit is not enough and cannot be made enough:
+`ExecStart` is `uv run vllm serve`, and `uv run` waits on its child rather than
+exec'ing it, so systemd supervises `uv`, not vLLM. When a TP worker hung on
+2026-07-28, EngineCore died and the API server's clean shutdown blocked on that
+worker, leaving `uv` waiting forever --- the unit stayed `active (running)`, the
+restart never fired, and :8001 refused every connection for four hours while
+`systemctl` was green on **both** boxes. **systemd cannot detect a hung
+process**, so this needs a prober outside the service:
+`cybersonic-vllm-health.timer` probes `/health` every 60s and restarts the unit
+after 3 consecutive bad probes, where bad means only an unanswered port or a 503
+(vLLM's `EngineDeadError` response) --- any other status counts as alive,
+because restart-looping a working server is worse than missing a stall. A
+15-minute warmup grace keeps the ~160s cold start from restart-looping. Details
+in `cybersonic-vllm/README.md`.
 
 cybersonic sits behind ANU NAT, so the path runs:
 
