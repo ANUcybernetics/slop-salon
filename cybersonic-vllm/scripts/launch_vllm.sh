@@ -14,11 +14,12 @@
 #   - Qwen3-Next-family hybrid: interleaved Gated DeltaNet (linear attn)
 #     and full attention keeps per-token KV cost low, so a 128K context
 #     fits on 3090s.
-#   - --speculative-config method=qwen3_next_mtp drives the model's own
-#     MTP head for self-speculative decoding --- a lossless ~1.5-2x on
-#     generation, with no draft model and no extra GPU. (Draft-model
-#     speculation is broken by the DeltaNet recurrent state; the native
-#     MTP head is the consistent option.)
+#   - self-speculative decoding via the model's own MTP head
+#     (method=qwen3_next_mtp) is a lossless ~1.5-2x on generation with no
+#     draft model and no extra GPU, but it is OFF by default as of
+#     2026-07-28 --- see SPEC_DECODE below. (Draft-model speculation is
+#     broken by the DeltaNet recurrent state, so the MTP head is the only
+#     coherent option if it is re-enabled.)
 #   - --reasoning-parser qwen3 + --enable-auto-tool-choice
 #     + --tool-call-parser qwen3_coder are mandatory for the OpenAI-style
 #     API to surface thinking blocks and tool calls as structured fields.
@@ -42,6 +43,9 @@
 #   SERVED_NAME=qwen3.6-27b         # OpenAI-API `model` field; kept as the
 #                                   # 27b label so a model swap needs no
 #                                   # change to agents' ANTHROPIC_MODEL
+#   SPEC_DECODE='{"method":"qwen3_next_mtp","num_speculative_tokens":2}'
+#                                   # empty (the default) disables speculative
+#                                   # decoding entirely --- see below
 #
 # Driver requirement: NVIDIA 580+ (CUDA 13). flashinfer-jit-cache +
 # flashinfer-cubin ship precompiled kernels so no system CUDA toolkit is
@@ -60,6 +64,23 @@ MAX_NUM_BATCHED_TOKENS="${MAX_NUM_BATCHED_TOKENS:-8192}"
 GPU_MEM_UTIL="${GPU_MEM_UTIL:-0.90}"
 SERVED_NAME="${SERVED_NAME:-qwen3.6-27b}"
 
+# Speculative decoding, off unless SPEC_DECODE carries a --speculative-config
+# JSON blob. Disabled 2026-07-28 after vLLM wedged a TP worker roughly every
+# 20-30 min under the collective's load: EngineCore died on a shm-broadcast
+# TimeoutError waiting for a worker that had stopped answering, three times in
+# ninety minutes, each time taking every in-flight agent tick with it.
+#
+# Not proven to be the cause --- the crash is always a worker going silent, never
+# a Python-level error naming a kernel, so the logs can't single out one of the
+# three experimental features in play (MTP spec decode, the Mamba-mode prefix
+# cache, this dev-nightly build). MTP is first on the list because it is the
+# newest and most intricate path, spec tokens were scheduled at every crash, and
+# it is the cheapest of the three to give up: ~1.5-2x slower generation, versus
+# losing the prefix cache that keeps the agent loop's growing shared prefix
+# affordable. If crashes continue with this off, the cause is elsewhere and the
+# only thing spent was speed.
+SPEC_DECODE="${SPEC_DECODE:-}"
+
 IFS=',' read -ra GPU_LIST <<< "$GPUS"
 if (( ${#GPU_LIST[@]} != TP )); then
   echo "error: this launcher expects TP=${TP} to equal len(GPUS)=${#GPU_LIST[@]} (GPUS=${GPUS})" >&2
@@ -72,17 +93,26 @@ mkdir -p logs
 
 export CUDA_VISIBLE_DEVICES="$GPUS"
 
-exec uv run vllm serve "$MODEL" \
-  --host "$HOST" \
-  --port "$PORT" \
-  --served-model-name "$SERVED_NAME" \
-  --tensor-parallel-size "$TP" \
-  --max-model-len "$MAX_MODEL_LEN" \
-  --max-num-batched-tokens "$MAX_NUM_BATCHED_TOKENS" \
-  --gpu-memory-utilization "$GPU_MEM_UTIL" \
-  --enable-prefix-caching \
-  --speculative-config '{"method":"qwen3_next_mtp","num_speculative_tokens":2}' \
-  --limit-mm-per-prompt '{"image":8,"video":0}' \
-  --reasoning-parser qwen3 \
-  --enable-auto-tool-choice \
+args=(
+  --host "$HOST"
+  --port "$PORT"
+  --served-model-name "$SERVED_NAME"
+  --tensor-parallel-size "$TP"
+  --max-model-len "$MAX_MODEL_LEN"
+  --max-num-batched-tokens "$MAX_NUM_BATCHED_TOKENS"
+  --gpu-memory-utilization "$GPU_MEM_UTIL"
+  --enable-prefix-caching
+  --limit-mm-per-prompt '{"image":8,"video":0}'
+  --reasoning-parser qwen3
+  --enable-auto-tool-choice
   --tool-call-parser qwen3_coder
+)
+
+if [[ -n $SPEC_DECODE ]]; then
+  args+=(--speculative-config "$SPEC_DECODE")
+  echo "launch_vllm: speculative decoding ENABLED: $SPEC_DECODE" >&2
+else
+  echo "launch_vllm: speculative decoding disabled (set SPEC_DECODE to re-enable)" >&2
+fi
+
+exec uv run vllm serve "$MODEL" "${args[@]}"

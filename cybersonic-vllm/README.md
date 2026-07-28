@@ -88,6 +88,19 @@ To suppress the think block for a single request, pass
 - status: `systemctl --user status cybersonic-vllm`
 - restart: `systemctl --user restart cybersonic-vllm`
 - logs: `tail -f logs/service.log`
+- **speculative decoding is off** (2026-07-28). vLLM wedged a TP worker roughly
+  every 20-30 min under the collective's load --- EngineCore dying on a
+  shm-broadcast `TimeoutError` waiting for a worker that had stopped answering,
+  three times in ninety minutes, each time killing every in-flight tick. The
+  crash never names a kernel, so the logs cannot single out which of the three
+  experimental features in play is responsible (MTP spec decode, the Mamba-mode
+  prefix cache, this dev-nightly build). MTP went first: newest and most
+  intricate path, spec tokens scheduled at every crash, and much the cheapest to
+  lose (~1.5-2x generation speed, against a prefix cache the multi-turn agent
+  loop depends on). Re-enable with
+  `SPEC_DECODE='{"method":"qwen3_next_mtp","num_speculative_tokens":2}'`. If
+  crashes persist without it, the cause is elsewhere --- move to the prefix
+  cache next, and only then the build.
 - tuning: env-overridable knobs (MODEL, PORT, GPUS, TP, MAX_MODEL_LEN,
   GPU_MEM_UTIL, ...) are documented at the top of `scripts/launch_vllm.sh`. For
   permanent changes edit the `Environment=` lines in
