@@ -1,0 +1,14 @@
+[Unit]
+Description=Probe vLLM and restart it if it has stopped serving
+Documentation=file:///home/users/u2548636/projects/slop-salon/cybersonic-vllm/README.md
+# Deliberately no `Requisite=`/`After=` on cybersonic-vllm.service: the probe
+# checks that unit's state itself and exits 0 when it is not active, so ordering
+# would only add ways for the check to be skipped.
+
+[Service]
+Type=oneshot
+Environment="PATH=/home/users/u2548636/.local/share/mise/shims:/home/users/u2548636/.local/bin:/usr/local/bin:/usr/bin:/bin"
+ExecStart=/home/users/u2548636/projects/slop-salon/cybersonic-vllm/scripts/health_check.sh
+# A probe that hangs must not sit there holding the flock and blocking every
+# later firing --- the failure mode being guarded against is precisely a hang.
+TimeoutStartSec=2min

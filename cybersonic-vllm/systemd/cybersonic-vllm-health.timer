@@ -1,0 +1,12 @@
+[Unit]
+Description=Probe vLLM every minute (restarts it if it stops serving)
+
+[Timer]
+# Relative to the probe finishing, not to a wall clock: a probe that takes 10s
+# (or the 2min timeout) still leaves a full minute of quiet before the next one.
+OnBootSec=5min
+OnUnitInactiveSec=60s
+AccuracySec=10s
+
+[Install]
+WantedBy=timers.target

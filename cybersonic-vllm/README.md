@@ -93,3 +93,43 @@ To suppress the think block for a single request, pass
   permanent changes edit the `Environment=` lines in
   `systemd/cybersonic-vllm.service`, then
   `systemctl --user daemon-reload && systemctl --user restart cybersonic-vllm`.
+
+## Health prober
+
+`Restart=always` on the service is not enough, and cannot be made enough.
+`ExecStart` is `uv run vllm serve`, and `uv run` waits on its child rather than
+exec'ing it, so systemd supervises `uv` --- not vLLM. On 2026-07-28 a TP worker
+hung, EngineCore died on a shm-broadcast `TimeoutError`, and the API server's
+clean shutdown then blocked on that wedged worker. `uv` sat waiting forever, the
+unit stayed `active (running)`, the restart never fired, and :8001 refused every
+connection for four hours while `systemctl` was green on both boxes. **systemd
+cannot detect a hung process**, so this needs a prober outside the service:
+
+- `cybersonic-vllm-health.timer` --- fires `scripts/health_check.sh` every 60s
+  (relative to the last probe finishing, so a slow probe can't stack up).
+- it restarts the unit after `FAILURES_BEFORE_RESTART` (3) consecutive bad
+  probes, i.e. ~3 minutes of continuous failure.
+- a bad probe is **only** an unanswered port or `/health` returning 503 (what
+  vLLM returns on `EngineDeadError`). Any other status --- 401 from an API-key
+  change, 404 from a route rename --- counts as alive on purpose: restarting a
+  working server once a minute is a far worse failure than missing a stall.
+- `WARMUP_SEC` (900) suppresses probing for 15 min after activation. A cold
+  start serves nothing for ~160s, so probing inside that window would
+  restart-loop the service and never let it finish booting.
+- state and log: `~/.local/state/cybersonic-vllm/health-failures`,
+  `logs/health.log` (user-unit journals aren't readable on this box without the
+  `adm` group, so the script tees to a file).
+
+Install (or re-install after edits):
+
+```sh
+cp systemd/cybersonic-vllm-health.{service,timer} ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now cybersonic-vllm-health.timer
+```
+
+Knobs are env overrides, so a one-off can be checked by hand without touching
+the unit --- `WARMUP_SEC=0 scripts/health_check.sh` probes immediately. When
+changing it, verify the restart branch against a throwaway unit
+(`UNIT=some-test.service PORT=9999 FAILURES_BEFORE_RESTART=1`) rather than by
+bouncing vLLM.
