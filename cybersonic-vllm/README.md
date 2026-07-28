@@ -2,14 +2,14 @@
 
 Local vLLM service for `Qwen/Qwen3.6-35B-A3B-FP8` --- a sparse-MoE
 agentic-coding and tool-calling model from the Qwen3.6 family, served
-FP8-quantised --- on cybersonic's 5x RTX 3090. Tensor parallel TP=4
-across GPUs 0-3 (GPU 4 idle), exposed as model id `qwen3.6-27b` (a stable
-label kept across model swaps) at `http://cybersonic:8001/v1` under the
-OpenAI-compatible API. Managed by a user-level systemd unit.
+FP8-quantised --- on cybersonic's 5x RTX 3090. Tensor parallel TP=4 across GPUs
+0-3 (GPU 4 idle), exposed as model id `qwen3.6-27b` (a stable label kept across
+model swaps) at `http://cybersonic:8001/v1` under the OpenAI-compatible API.
+Managed by a user-level systemd unit.
 
-This directory lives in the [slop-salon](../) admin repo --- it is the
-vLLM deployment for the Slop Salon collective --- but runs only on the
-`cybersonic` GPU box.
+This directory lives in the [slop-salon](../) admin repo --- it is the vLLM
+deployment for the Slop Salon collective --- but runs only on the `cybersonic`
+GPU box.
 
 ## Quickstart
 
@@ -29,14 +29,14 @@ systemctl --user enable --now cybersonic-vllm.service
 ```
 
 `VLLM_API_KEY` is the bearer key vLLM enforces; it must match the sprites'
-`ANTHROPIC_AUTH_TOKEN`. The systemd unit's `WorkingDirectory` and
-`ExecStart` paths are absolute --- adjust them to wherever this directory
-sits on cybersonic.
+`ANTHROPIC_AUTH_TOKEN`. The systemd unit's `WorkingDirectory` and `ExecStart`
+paths are absolute --- adjust them to wherever this directory sits on
+cybersonic.
 
 First boot downloads ~37.5 GB of FP8 weights into `$HF_HOME`
 (`/data/$USER/cache/huggingface` on cybersonic). Watch readiness with
-`tail -f logs/service.log` --- the API starts accepting requests once
-the workers finish loading.
+`tail -f logs/service.log` --- the API starts accepting requests once the
+workers finish loading.
 
 ## Use
 
@@ -81,8 +81,7 @@ print("thinking:", (msg.model_extra or {}).get("reasoning"))   # vLLM 0.21+ exte
 ```
 
 To suppress the think block for a single request, pass
-`extra_body={"chat_template_kwargs": {"enable_thinking": False}}` to
-the call.
+`extra_body={"chat_template_kwargs": {"enable_thinking": False}}` to the call.
 
 ## Operations
 
@@ -90,7 +89,7 @@ the call.
 - restart: `systemctl --user restart cybersonic-vllm`
 - logs: `tail -f logs/service.log`
 - tuning: env-overridable knobs (MODEL, PORT, GPUS, TP, MAX_MODEL_LEN,
-  GPU_MEM_UTIL, ...) are documented at the top of
-  `scripts/launch_vllm.sh`. For permanent changes edit the
-  `Environment=` lines in `systemd/cybersonic-vllm.service`, then
+  GPU_MEM_UTIL, ...) are documented at the top of `scripts/launch_vllm.sh`. For
+  permanent changes edit the `Environment=` lines in
+  `systemd/cybersonic-vllm.service`, then
   `systemctl --user daemon-reload && systemctl --user restart cybersonic-vllm`.
