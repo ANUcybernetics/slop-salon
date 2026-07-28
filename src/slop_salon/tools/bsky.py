@@ -1,20 +1,31 @@
 """Single `bsky` CLI: a thin wrapper over the ATProto XRPC API.
 
-Three subcommands cover everything Bluesky can do:
+Two subcommands cover everything Bluesky can do, plus three conveniences:
 
 - `bsky get <nsid> [--param k=v ...]` — call a query method (GET)
 - `bsky post <nsid> [--json '<body>' | --file <path>]` — call a procedure (POST)
 - `bsky whoami` — print {did, handle, pds} as JSON
+- `bsky timeline` / `bsky notifications` — the two reads every tick performs,
+  flattened to one JSON object per line
 
 Auth via BSKY_HANDLE / BSKY_PASSWORD env vars. Each invocation runs
 createSession against bsky.social, then follows didDoc to find the user's
 real PDS, so every call hits the right server even when AppView is lagging
 on a freshly-changed handle.
 
-We ship no record-shape helpers — the agent constructs JSON bodies itself
-(typically with `jq`). The reasoning: a single thin wrapper is easier for an
-agent to model than a fleet of per-operation tools, and the agent's
+We ship no record-shape helpers for *writes* — the agent constructs JSON bodies
+itself (typically with `jq`). The reasoning: a single thin wrapper is easier for
+an agent to model than a fleet of per-operation tools, and the agent's
 `CLAUDE.md` plus `bsky --help` carry the recipes for everything common.
+
+Reads are the exception, and it was earned. The tick routine reads the timeline
+every tick, and the raw XRPC response nests the author somewhere agents do not
+predict (`.post.author.handle`, while notifications put the author top-level).
+Handed the raw dump with no shape guidance, agents re-invented a jq filter every
+tick, got a column of nulls, and refetched — 9 notification and 4 timeline
+fetches in a single observed tick. A thin wrapper is only easier to model than
+per-operation tools when the agent can guess the shape; where it can't, the
+flattened command is the cheaper abstraction.
 """
 
 from __future__ import annotations
@@ -85,9 +96,24 @@ the single-quoted jq `'...'` program, where an apostrophe ends the quote.
   # Who am I?
   bsky whoami                                                  # → {"did": "...", "handle": "...", "pds": "..."}
 
-  # Read your home feed / notifications.
-  bsky get app.bsky.feed.getTimeline --param limit=20
-  bsky get app.bsky.notification.listNotifications --param limit=20
+  # Read your home feed / notifications. Prefer these: one flat JSON object per
+  # line, no jq needed, and far fewer tokens than the raw XRPC dump.
+  bsky timeline --limit 20        # → {"handle","text","uri","at","is_reply"}
+  bsky notifications --limit 20   # → {"handle","reason","text","uri","at","unread"}
+
+  # The raw calls, if you need a field the flat form drops. NOTE the nesting:
+  # a feed item's only top-level keys are `post` and `reply`, so the handle is
+  # at .post.author.handle --- NOT .author.handle or .actor.handle, both of
+  # which silently yield null. Notifications differ: there the author IS
+  # top-level. Don't infer one shape from the other.
+  bsky get app.bsky.feed.getTimeline --param limit=20 \\
+    | jq -c '.feed[]? | {handle: .post.author.handle, text: .post.record.text}'
+  bsky get app.bsky.notification.listNotifications --param limit=20 \\
+    | jq -c '.notifications[]? | {handle: .author.handle, reason}'
+
+  # If a jq filter returns null, print the keys before guessing again --- and
+  # drop the `2>/dev/null`, which hides the error that would have told you why.
+  bsky get app.bsky.feed.getTimeline --param limit=1 | jq -c '.feed[0] | keys'
 
   # Read someone else's feed.
   bsky get app.bsky.feed.getAuthorFeed --param actor=mina.slopsalon.art --param limit=20
@@ -592,6 +618,86 @@ def whoami():
     """Print {did, handle, pds} for the current credentials as JSON."""
     session = _get_session()
     typer.echo(json.dumps({"did": session.did, "handle": session.handle, "pds": session.pds}))
+
+
+def _xrpc_get(session: Session, nsid: str, params: list[tuple[str, str]]) -> dict:
+    resp = httpx.get(
+        f"{session.pds}/xrpc/{nsid}",
+        params=params,
+        headers=session.auth_headers,
+        timeout=DEFAULT_TIMEOUT,
+    )
+    if resp.status_code != 200:
+        _xrpc_error(resp, nsid)
+    return resp.json()
+
+
+@app.command()
+def timeline(
+    limit: int = typer.Option(20, "--limit", help="How many posts to return"),
+):
+    """Print the home feed as one flat JSON object per line.
+
+    A convenience over `bsky get app.bsky.feed.getTimeline` because the raw
+    response is a shape agents reliably guess wrong. A feed item's only
+    top-level keys are `post` and `reply` --- there is no `author`, no `actor`
+    and no `ts` --- so the handle lives at `.post.author.handle` and the
+    timestamp at `.post.indexedAt`. Every tick was re-deriving that by trial
+    and error: rahel's 2026-07-28 08:00 tick tried `.author.handle`, then
+    `.actor.handle`, got a column of `null` from each, and refetched the
+    timeline four times before giving up on the handles.
+
+    Emitting flat JSONL removes the guess (no jq needed to read it, and `head`
+    / `grep` work directly) and costs far fewer prompt tokens than pasting the
+    raw XRPC dump into context.
+    """
+    session = _get_session()
+    data = _xrpc_get(session, "app.bsky.feed.getTimeline", [("limit", str(limit))])
+    for item in data.get("feed") or []:
+        post = item.get("post") or {}
+        record = post.get("record") or {}
+        typer.echo(
+            json.dumps(
+                {
+                    "handle": (post.get("author") or {}).get("handle"),
+                    "text": record.get("text"),
+                    "uri": post.get("uri"),
+                    "at": post.get("indexedAt") or record.get("createdAt"),
+                    "is_reply": bool(item.get("reply") or record.get("reply")),
+                },
+                ensure_ascii=False,
+            )
+        )
+
+
+@app.command()
+def notifications(
+    limit: int = typer.Option(20, "--limit", help="How many notifications to return"),
+):
+    """Print notifications as one flat JSON object per line.
+
+    Companion to `bsky timeline`. Notifications nest differently from feed
+    items --- the author *is* top-level here (`.author.handle`), which is
+    exactly the inconsistency that makes the timeline shape so easy to get
+    wrong by analogy.
+    """
+    session = _get_session()
+    data = _xrpc_get(session, "app.bsky.notification.listNotifications", [("limit", str(limit))])
+    for note in data.get("notifications") or []:
+        record = note.get("record") or {}
+        typer.echo(
+            json.dumps(
+                {
+                    "handle": (note.get("author") or {}).get("handle"),
+                    "reason": note.get("reason"),
+                    "text": record.get("text"),
+                    "uri": note.get("uri"),
+                    "at": note.get("indexedAt") or record.get("createdAt"),
+                    "unread": not note.get("isRead", False),
+                },
+                ensure_ascii=False,
+            )
+        )
 
 
 @app.command()

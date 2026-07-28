@@ -830,3 +830,112 @@ def test_feed_post_dedup_disabled_by_env(bsky_env, session_mock, httpx_mock, mon
     assert result.exit_code == 0, result.output
     assert not any("listRecords" in str(r.url) for r in httpx_mock.get_requests())
     assert _posted_create_record(httpx_mock)
+
+
+# --- Flattened reads -------------------------------------------------------
+#
+# The shapes below are the real ones, verified against a live timeline: a feed
+# item's only top-level keys are `post` and `reply`, so the handle sits at
+# .post.author.handle. Notifications put the author top-level instead. Agents
+# guessing .author.handle / .actor.handle on the timeline got nulls and
+# refetched; these tests pin the nesting so a refactor can't quietly restore
+# that.
+
+TIMELINE_RESPONSE = {
+    "feed": [
+        {
+            "post": {
+                "uri": "at://did:plc:aaa/app.bsky.feed.post/1",
+                "indexedAt": "2026-07-28T08:00:00.000Z",
+                "author": {"handle": "vita.slopsalon.art", "did": "did:plc:aaa"},
+                "record": {"text": "the register empties", "createdAt": "2026-07-28T07:59:00.000Z"},
+            },
+            "reply": {"parent": {"uri": "at://x"}},
+        },
+        {
+            "post": {
+                "uri": "at://did:plc:bbb/app.bsky.feed.post/2",
+                "indexedAt": "2026-07-28T08:05:00.000Z",
+                "author": {"handle": "mina.slopsalon.art", "did": "did:plc:bbb"},
+                "record": {"text": "two readings", "createdAt": "2026-07-28T08:04:00.000Z"},
+            },
+        },
+    ]
+}
+
+
+def test_timeline_flattens_the_nested_post_shape(bsky_env, session_mock, httpx_mock):
+    from slop_salon.tools.bsky import app
+
+    httpx_mock.add_response(
+        method="GET",
+        url=f"{FAKE_PDS}/xrpc/app.bsky.feed.getTimeline?limit=20",
+        json=TIMELINE_RESPONSE,
+    )
+    result = runner.invoke(app, ["timeline"])
+    assert result.exit_code == 0, result.output
+    rows = [json.loads(line) for line in result.output.strip().splitlines()]
+    assert [r["handle"] for r in rows] == ["vita.slopsalon.art", "mina.slopsalon.art"]
+    assert [r["text"] for r in rows] == ["the register empties", "two readings"]
+    assert rows[0]["at"] == "2026-07-28T08:00:00.000Z"
+    assert rows[0]["is_reply"] is True
+    assert rows[1]["is_reply"] is False
+    # The whole point: no null handles. That was the observed failure.
+    assert all(r["handle"] for r in rows)
+
+
+def test_timeline_limit_is_passed_through(bsky_env, session_mock, httpx_mock):
+    from slop_salon.tools.bsky import app
+
+    httpx_mock.add_response(
+        method="GET",
+        url=f"{FAKE_PDS}/xrpc/app.bsky.feed.getTimeline?limit=3",
+        json={"feed": []},
+    )
+    result = runner.invoke(app, ["timeline", "--limit", "3"])
+    assert result.exit_code == 0, result.output
+    assert result.output.strip() == ""
+
+
+def test_timeline_tolerates_missing_fields(bsky_env, session_mock, httpx_mock):
+    from slop_salon.tools.bsky import app
+
+    # A post with no author/record must not crash the whole read.
+    httpx_mock.add_response(
+        method="GET",
+        url=f"{FAKE_PDS}/xrpc/app.bsky.feed.getTimeline?limit=20",
+        json={"feed": [{"post": {}}, {}]},
+    )
+    result = runner.invoke(app, ["timeline"])
+    assert result.exit_code == 0, result.output
+    rows = [json.loads(line) for line in result.output.strip().splitlines()]
+    assert len(rows) == 2
+    assert rows[0]["handle"] is None
+
+
+def test_notifications_flattens_top_level_author(bsky_env, session_mock, httpx_mock):
+    from slop_salon.tools.bsky import app
+
+    httpx_mock.add_response(
+        method="GET",
+        url=f"{FAKE_PDS}/xrpc/app.bsky.notification.listNotifications?limit=20",
+        json={
+            "notifications": [
+                {
+                    "uri": "at://did:plc:ccc/app.bsky.feed.post/9",
+                    "reason": "reply",
+                    "isRead": False,
+                    "indexedAt": "2026-07-28T08:10:00.000Z",
+                    "author": {"handle": "lou.slopsalon.art"},
+                    "record": {"text": "is there a wound to close"},
+                }
+            ]
+        },
+    )
+    result = runner.invoke(app, ["notifications"])
+    assert result.exit_code == 0, result.output
+    row = json.loads(result.output.strip())
+    assert row["handle"] == "lou.slopsalon.art"
+    assert row["reason"] == "reply"
+    assert row["text"] == "is there a wound to close"
+    assert row["unread"] is True

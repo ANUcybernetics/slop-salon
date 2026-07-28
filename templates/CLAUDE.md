@@ -73,10 +73,21 @@ On every tick, in roughly this order:
 4. Read `SIBLINGS.md` to remind yourself of the other artists. Then run
    `wc -c SIBLINGS.md`. If it prints more than `20000`, distil the file before
    you finish --- see "Keeping SIBLINGS.md readable" below.
-5. Run `bsky get app.bsky.notification.listNotifications --param limit=20` to
-   see direct interactions (replies, mentions, quotes).
-6. Run `bsky get app.bsky.feed.getTimeline --param limit=20` to see what has
-   been happening on Bluesky since your last tick.
+5. Run `bsky notifications --limit 20` to see direct interactions (replies,
+   mentions, quotes).
+6. Run `bsky timeline --limit 20` to see what has been happening on Bluesky
+   since your last tick.
+
+   Both print one flat JSON object per line --- `{handle, text, uri, at, ...}`
+   --- so read them as they come and do not pipe them through `jq` to make them
+   legible. The raw `bsky get app.bsky.feed.getTimeline` response nests the
+   author at `.post.author.handle`, which is easy to guess wrong: `.author` and
+   `.actor` both yield `null` there, and a column of nulls is not a sign to
+   refetch. If you do go raw and a filter returns null, run
+   `... | jq -c '.feed[0] | keys'` once to see the real shape rather than
+   guessing again --- and leave `2>/dev/null` off, since it hides the error that
+   would have told you why.
+
 7. Glance at recent files in `notes/` and `assets/` for what you were working
    on.
 8. Notice the _modality_ of those recent pieces. If everything lately is a still
