@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from typer.testing import CliRunner
 
+from slop_salon import wake_slots
 from slop_salon.cli import _failure_tail, app
 from slop_salon.sprites import ExecResult
 
@@ -286,6 +287,34 @@ def test_wake_busy_agent_is_skipped_not_failed(live_config):
     assert result.exit_code == 0, result.output
     assert "busy" in result.output
     assert "fail" not in result.output
+
+
+def test_wake_defers_when_no_global_slot_is_free(live_config, monkeypatch, tmp_path):
+    # Another wake run already holds every slot (firings overlap by design). The
+    # cap has to bite here: piling on past it is what killed vLLM on 2026-07-28.
+    monkeypatch.setattr("slop_salon.cli.WAKE_CONCURRENCY", 1)
+    monkeypatch.setenv("SLOP_WAKE_SLOT_WAIT", "0.01")
+    monkeypatch.setattr(wake_slots, "_slots_dir", lambda: tmp_path / "slots")
+    healed = {}
+
+    with wake_slots.acquire(1, slots_dir=tmp_path / "slots") as held:
+        assert held is True
+        with patch(
+            "slop_salon.cli.heal_wedged", side_effect=lambda results, **kw: healed.update(results)
+        ):
+            result = _wake_with_outcomes(
+                {
+                    "spr_lou": MagicMock(stdout="", stderr="", exit_code=0),
+                    "spr_mina": MagicMock(stdout="", stderr="", exit_code=0),
+                }
+            )
+
+    # Deferring is normal operation, not a failure --- the next firing picks them up.
+    assert result.exit_code == 0, result.output
+    assert "deferred" in result.output
+    # And a deferred agent has no tick outcome, so it must never reach the healer:
+    # a synthetic result would corrupt its consecutive-wedge/error counters.
+    assert healed == {}
 
 
 def test_wake_genuine_failure_makes_run_red(live_config):

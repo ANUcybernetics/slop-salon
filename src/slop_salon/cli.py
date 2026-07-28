@@ -31,6 +31,7 @@ from statistics import mean, median
 import httpx
 import typer
 
+from slop_salon import wake_slots
 from slop_salon.config import load_config
 from slop_salon.healing import SKIP_BUSY_CODE, claude_failed, heal_wedged, is_wedge
 from slop_salon.provision import (
@@ -333,6 +334,12 @@ def talk(
 # How many agents tick concurrently in `wake`. The collective shares one
 # vLLM instance; capping concurrency keeps it saturated without queue thrash.
 # Raise toward saturation, lower for more headroom.
+#
+# Enforced twice, and it needs both: as the thread-pool width within one run,
+# and as a set of file locks (`wake_slots`) shared by every run on the box.
+# Firings deliberately overlap --- the dispatcher spawns each as a transient unit
+# --- so the pool alone bounds nothing globally, and two runs together once put
+# six concurrent ticks on a vLLM capped at four.
 WAKE_CONCURRENCY = 4
 
 
@@ -394,6 +401,11 @@ def wake(
     thrashed. An agent still mid-tick from an overlapping run skips cleanly
     (shown as `busy`, exit SKIP_BUSY_CODE), so only idle agents tick. Exits
     non-zero if any agent genuinely failed, so systemd records a red run.
+
+    Because firings overlap, the cap is enforced globally via `wake_slots`, not
+    just by this run's pool. An agent that waits out `SLOP_WAKE_SLOT_WAIT`
+    without getting a slot is reported `deferred` and left for the next firing:
+    not a failure, and not fed to the healer, since it produced no tick result.
     """
     config = _config(config_path)
     live = [a for a in config.agents.values() if a.live and a.sprite_id]
@@ -403,15 +415,31 @@ def wake(
 
     sprites = SpritesClient()
 
+    slot_wait = wake_slots.slot_wait_from_env()
+
     def _tick(agent):
         start = time.monotonic()
-        result, retried = _exec_tick_with_retry(sprites, agent.sprite_id)
+        # The slot is held for the tick itself, so the global cap counts work in
+        # flight rather than agents enqueued.
+        with wake_slots.acquire(WAKE_CONCURRENCY, wait=slot_wait) as acquired:
+            if not acquired:
+                return agent, None, time.monotonic() - start, False
+            result, retried = _exec_tick_with_retry(sprites, agent.sprite_id)
         return agent, result, time.monotonic() - start, retried
 
     failed = 0
+    deferred: list[str] = []
     results: dict[str, ExecResult] = {}
     with ThreadPoolExecutor(max_workers=min(WAKE_CONCURRENCY, len(live))) as pool:
         for agent, result, elapsed, retried in pool.map(_tick, live):
+            if result is None:
+                # No slot came free: another run is saturating vLLM. Not a
+                # failure and deliberately absent from `results` --- there is no
+                # tick outcome to classify, and feeding healing a synthetic one
+                # would corrupt its consecutive-state counters.
+                deferred.append(agent.name)
+                typer.echo(f"{agent.name:12s}  {'deferred':12s}  {elapsed:6.1f}s  (no free slot)")
+                continue
             results[agent.name] = result
             if result.exit_code == 0:
                 # slop-tick exits 0 even when `claude` itself errored (it still
