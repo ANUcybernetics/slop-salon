@@ -250,6 +250,13 @@ to mute that signal:
 - `SLOP_TICK_TIMEOUT` (30m) --- hard wall-clock cap on one tick's
   `claude --print` in `slop-tick`; on hit the run is killed (`timeout` exit 124)
   so a wedged tick can't stall the wake driver.
+- `SLOP_DENIED_TOOLS` (`AskUserQuestion`) --- passed to `claude --print` as
+  `--disallowedTools`. A tick has no human in it, so tools that need one are
+  taken away rather than discouraged in prose: an agent can't infer from the
+  tool list that nobody will answer, and one observed tick spent a whole API
+  call composing a question and got `is_error: true` back. Passed as a flag
+  rather than written into `~/.claude/settings.json`, which the sprite image
+  ships with defaults an overwrite would clobber.
 - `SLOP_POST_DEDUP` (on unless set to `0`) --- `bsky` skips re-issuing a feed
   post identical to one already landed within the window, so a lost
   `createRecord` response can't double-post.

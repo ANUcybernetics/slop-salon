@@ -17,9 +17,11 @@ setup() {
     STUB_DIR="$(mktemp -d)"
     cat > "$STUB_DIR/claude" <<'EOF'
 #!/usr/bin/env bash
-# Stub: record the prompt claude was invoked with (claude --print "<prompt>",
-# so $2), then write a tick artifact so a commit happens.
-printf '%s' "$2" > "$HOME/claude-prompt.txt"
+# Stub: record the prompt claude was invoked with, then write a tick artifact so
+# a commit happens. Read the LAST argument, not $2: slop-tick also passes flags
+# (--print, --disallowedTools ...) ahead of the prompt, and a positional $2
+# silently captured a flag name the moment one was added.
+printf '%s' "${!#}" > "$HOME/claude-prompt.txt"
 echo "tick-output" > "$PWD/tick-$$.txt"
 EOF
     chmod +x "$STUB_DIR/claude"
@@ -81,6 +83,34 @@ teardown() {
     run bash "$SCRIPT"
     [ "$status" -ne 0 ]
     [[ "$output" == *"usage"* ]]
+}
+
+@test "denies AskUserQuestion, which no --print tick can answer" {
+    # rahel's 08:00 tick spent a whole API call composing a question and got
+    # `is_error: true` back --- there is no human in a tick to answer it.
+    cat > "$STUB_DIR/claude" <<'EOF'
+#!/usr/bin/env bash
+printf '%s' "$*" > "$HOME/claude-argv.txt"
+echo "tick-output" > "$PWD/tick-$$.txt"
+EOF
+    chmod +x "$STUB_DIR/claude"
+
+    run bash "$SCRIPT" "tick"
+    [ "$status" -eq 0 ]
+    grep -q -- "--disallowedTools AskUserQuestion" "$HOME/claude-argv.txt"
+}
+
+@test "SLOP_DENIED_TOOLS overrides the denied-tool list" {
+    cat > "$STUB_DIR/claude" <<'EOF'
+#!/usr/bin/env bash
+printf '%s' "$*" > "$HOME/claude-argv.txt"
+echo "tick-output" > "$PWD/tick-$$.txt"
+EOF
+    chmod +x "$STUB_DIR/claude"
+
+    SLOP_DENIED_TOOLS="AskUserQuestion WebSearch" run bash "$SCRIPT" "tick"
+    [ "$status" -eq 0 ]
+    grep -q -- "--disallowedTools AskUserQuestion WebSearch" "$HOME/claude-argv.txt"
 }
 
 @test "runs claude and creates a commit when files change" {

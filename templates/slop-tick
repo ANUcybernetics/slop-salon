@@ -101,8 +101,20 @@ fi
 # claude's process group). Without a hard cap a single bad tick stalls the
 # wake driver for hours. 30m is ~2x the slowest healthy tick seen so far.
 TICK_TIMEOUT="${SLOP_TICK_TIMEOUT:-30m}"
+
+# A tick has no human in it, so deny the tools that need one. AskUserQuestion is
+# the live case: rahel's 2026-07-28 08:00 tick composed a real question ("Reply
+# to Lelia, or let the register open on its own?"), spent a full API call on it,
+# and got `is_error: true` back --- there is nobody to answer under `--print`.
+# The agent can't discover that from the tool list, so take it away rather than
+# ask it in prose not to use it. Passed as a flag, not written into
+# ~/.claude/settings.json: the sprite image ships that file with defaults we must
+# not clobber, and a tick-scoped restriction belongs on the tick's own command.
+DENIED_TOOLS="${SLOP_DENIED_TOOLS:-AskUserQuestion}"
+
 rc=0
-timeout --kill-after=15 "$TICK_TIMEOUT" claude --print "$PROMPT" 9>&- || rc=$?
+timeout --kill-after=15 "$TICK_TIMEOUT" claude --print \
+  --disallowedTools "$DENIED_TOOLS" "$PROMPT" 9>&- || rc=$?
 if [[ $rc -eq 124 ]]; then
   echo "slop-tick: claude exceeded ${TICK_TIMEOUT}, killed" >&2
 elif [[ $rc -ne 0 ]]; then
