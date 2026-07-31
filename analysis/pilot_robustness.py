@@ -47,12 +47,9 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
 # The six agent repos are cloned (full history) outside both git trees, into
-# the session scratchpad, per the coordinator's instruction not to touch
-# either the papers repo or the slop-salon harness repo with clone data:
-AGENT_REPOS_DIR = Path(
-    "/tmp/claude-1001/-home-ben-projects-research-papers"
-    "/89c40643-6b8f-4177-9498-55c96b682692/scratchpad/agent-repos"
-)
+# analysis/agent-repos/, which is gitignored. Clone the six public agent
+# repos (ANUcybernetics/slop-salon-<name>) there before running:
+AGENT_REPOS_DIR = Path(__file__).parent / "agent-repos"
 
 AGENTS = ["rahel", "vita", "lelia", "mina", "lou", "gert"]
 START = date(2026, 5, 25)

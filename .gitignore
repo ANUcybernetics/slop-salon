@@ -13,7 +13,7 @@ secrets.toml
 
 # Analysis working data: clones of the six agent repos, and the similarity
 # figure that make_figure.py builds (the paper repo tracks its own copy).
-analysis/agent-repos/
+analysis/agent-repos
 analysis/similarity.pdf
 
 # Negate the global ~/.gitignore `.claude/*` rule so repo-tracked slash
