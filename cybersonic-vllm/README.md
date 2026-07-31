@@ -3,9 +3,14 @@
 Local vLLM service for `Qwen/Qwen3.6-35B-A3B-FP8` --- a sparse-MoE
 agentic-coding and tool-calling model from the Qwen3.6 family, served
 FP8-quantised --- on cybersonic's 6x RTX 3090 (24 GB each). Tensor parallel TP=4
-across GPUs 0-3 (GPUs 4 and 5 idle), exposed as model id `qwen3.6-27b` (a stable
-label kept across model swaps) at `http://cybersonic:8001/v1` under the
-OpenAI-compatible API. Managed by a user-level systemd unit.
+across GPUs 0-3, exposed as model id `qwen3.6-27b` (a stable label kept across
+model swaps) at `http://cybersonic:8001/v1` under the OpenAI-compatible API.
+Managed by a user-level systemd unit.
+
+GPUs 4 and 5 sit outside the TP group but are not ours to assume: the box is
+shared, another user's vLLM has occupied GPU 4 (2026-07-28), and 4-5 are
+power-capped to 250 W against 350 W on 0-3. Treat "spare card" plans --- moving
+TP off a suspect GPU, hosting a draft model --- as needing a check first.
 
 At the defaults this lands at 8.8 GiB of weights per card and 8.4 GiB of KV
 cache, which vLLM reports as 861,477 tokens --- 6.57x concurrency at the full
