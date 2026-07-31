@@ -40,13 +40,17 @@ LABEL_W = 200  # left strip carrying the agent name
 FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf"
 HERE = Path(__file__).parent
 
-# cols, rows-per-agent, cell px, output. The dense plate runs two rows per
-# agent so it sits as a top float rather than claiming a page of its own; the
-# paper has six content pages and the argument does not need the third row.
+# cols, rows-per-agent, cell px, transposed, output. The dense plate runs two
+# rows per agent so it sits as a top float rather than claiming a page of its
+# own; the paper has six content pages and the argument does not need the third
+# row. The detail plate is transposed --- agents across, time down one column
+# each --- which turns a tall 6x4 into a wide 4x6 and costs the page far less
+# height at the same tile size.
 LAYOUTS = {
-    "dense": (12, 2, 220, HERE / "mosaic.jpg"),
-    "detail": (4, 1, 600, HERE / "mosaic-detail.jpg"),
+    "dense": (12, 2, 220, False, HERE / "mosaic.jpg"),
+    "detail": (4, 1, 600, True, HERE / "mosaic-detail.jpg"),
 }
+LABEL_H = 90  # top strip carrying the agent name, transposed layout only
 
 
 def all_images(client: httpx.Client, handle: str, cap: int | None = None) -> list[str]:
@@ -112,7 +116,7 @@ def main() -> None:
     # (all six drifted toward technical plots late on), which undersells the
     # individuation the figure is there to show. Pass --recent for that variant.
     spread = "--recent" not in sys.argv
-    cols, rows_per_agent, cell, default_out = LAYOUTS[
+    cols, rows_per_agent, cell, transposed, default_out = LAYOUTS[
         "detail" if "--detail" in sys.argv else "dense"
     ]
     per_agent = cols * rows_per_agent
@@ -120,8 +124,13 @@ def main() -> None:
     out = Path(positional[0]) if positional else default_out
 
     block_h = cell * rows_per_agent
-    width = LABEL_W + cols * cell
-    height = len(AGENTS) * block_h + (len(AGENTS) - 1) * GAP
+    if transposed:
+        # one column per agent, oldest work at the top of each
+        width = len(AGENTS) * cell + (len(AGENTS) - 1) * GAP
+        height = LABEL_H + per_agent * cell
+    else:
+        width = LABEL_W + cols * cell
+        height = len(AGENTS) * block_h + (len(AGENTS) - 1) * GAP
     canvas = Image.new("RGB", (width, height), "white")
     draw = ImageDraw.Draw(canvas)
     font = ImageFont.truetype(FONT, round(width / 55))
@@ -132,20 +141,34 @@ def main() -> None:
             urls = pick(pool, per_agent, spread)
             print(f"{handle}: {len(urls)} of {len(pool)} images", file=sys.stderr)
 
-            top = i * (block_h + GAP)
-            draw.text(
-                (LABEL_W - 24, top + block_h // 2),
-                handle,
-                font=font,
-                fill="#0b0b0b",
-                anchor="rm",
-            )
+            if transposed:
+                left = i * (cell + GAP)
+                draw.text(
+                    (left + cell // 2, LABEL_H - 24),
+                    handle,
+                    font=font,
+                    fill="#0b0b0b",
+                    anchor="ms",
+                )
+            else:
+                top = i * (block_h + GAP)
+                draw.text(
+                    (LABEL_W - 24, top + block_h // 2),
+                    handle,
+                    font=font,
+                    fill="#0b0b0b",
+                    anchor="rm",
+                )
             for j, url in enumerate(urls):
                 resp = client.get(url)
                 resp.raise_for_status()
                 tile = square(Image.open(io.BytesIO(resp.content)).convert("RGB"), cell)
-                x = LABEL_W + (j % cols) * cell
-                y = top + (j // cols) * cell
+                if transposed:
+                    x = i * (cell + GAP)
+                    y = LABEL_H + j * cell
+                else:
+                    x = LABEL_W + (j % cols) * cell
+                    y = top + (j // cols) * cell
                 canvas.paste(tile, (x, y))
 
     canvas.save(out, "JPEG", quality=88, optimize=True)
