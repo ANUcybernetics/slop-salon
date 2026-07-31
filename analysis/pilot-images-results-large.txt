@@ -48,41 +48,41 @@ note: 344 works predate 2026-05-25 (early-deployed agent) and are excluded from 
   2026-07-20     346                0.645
   2026-07-27      27                0.633
 
-=== [DINOv2] (a) leave-one-out agent identification ===
+=== [DINOv3] (a) leave-one-out agent identification ===
   n = 4653 works, 6 agents
-  nearest-centroid accuracy: 0.294
-  5-NN accuracy:            0.396
+  nearest-centroid accuracy: 0.283
+  5-NN accuracy:            0.409
   chance baseline (1/6):       0.167
 
-=== [DINOv2] (b) within- vs between-agent cosine similarity ===
+=== [DINOv3] (b) within- vs between-agent cosine similarity ===
   mean within-agent similarity:  0.199
-  mean between-agent similarity: 0.190
+  mean between-agent similarity: 0.188
 
   pairwise similarity matrix (diagonal = within-agent mean):
          rahel    vita   lelia    mina     lou    gert
-   rahel   0.176   0.179   0.161   0.174   0.184   0.163
-    vita   0.179   0.216   0.187   0.207   0.219   0.196
-   lelia   0.161   0.187   0.166   0.181   0.191   0.171
-    mina   0.174   0.207   0.181   0.203   0.214   0.192
-     lou   0.184   0.219   0.191   0.214   0.229   0.203
-    gert   0.163   0.196   0.171   0.192   0.203   0.187
+   rahel   0.198   0.182   0.170   0.179   0.187   0.167
+    vita   0.182   0.210   0.186   0.200   0.209   0.193
+   lelia   0.170   0.186   0.171   0.181   0.188   0.171
+    mina   0.179   0.200   0.181   0.196   0.205   0.187
+     lou   0.187   0.209   0.188   0.205   0.216   0.197
+    gert   0.167   0.193   0.171   0.187   0.197   0.187
 
-=== [DINOv2] (c) temporal: same-week vs different-week cross-agent similarity ===
-  same-week cross-agent mean similarity:      0.194
-  different-week cross-agent mean similarity: 0.186
+=== [DINOv3] (c) temporal: same-week vs different-week cross-agent similarity ===
+  same-week cross-agent mean similarity:      0.196
+  different-week cross-agent mean similarity: 0.185
 
-  [DINOv2] per-week between-agent curve (image-space analogue of Fig 4a):
+  [DINOv3] per-week between-agent curve (image-space analogue of Fig 4a):
   week             n   between-agent mean
-  2026-05-25     303                0.172
-  2026-06-01     393                0.137
-  2026-06-08     581                0.135
-  2026-06-15     668                0.146
-  2026-06-22     547                0.193
+  2026-05-25     303                0.181
+  2026-06-01     393                0.149
+  2026-06-08     581                0.153
+  2026-06-15     668                0.165
+  2026-06-22     547                0.197
   2026-06-29     643                0.184
-  2026-07-06     440                0.221
-  2026-07-13     361                0.421
-  2026-07-20     346                0.409
-  2026-07-27      27                0.382
+  2026-07-06     440                0.209
+  2026-07-13     361                0.370
+  2026-07-20     346                0.363
+  2026-07-27      27                0.326
 
 === [SigLIP2] (d) zero-shot technical-plot classification (drift check for Fig 3) ===
   prompts: "a scientific plot or chart with labelled axes and text" vs "an abstract artwork or photograph"
@@ -106,4 +106,4 @@ note: 344 works predate 2026-05-25 (early-deployed agent) and are excluded from 
     lou      0.400
     gert     0.376
 
-runtime: 243.5s, device=cuda
+runtime: 93.7s, device=cuda

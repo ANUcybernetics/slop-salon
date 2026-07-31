@@ -1,11 +1,11 @@
 # /// script
-# requires-python = ">=3.12"
+# requires-python = ">=3.14"
 # dependencies = [
 #     "httpx>=0.27",
 #     "pillow>=10",
 #     "numpy>=1.26",
 #     "torch>=2.2",
-#     "transformers>=4.49",
+#     "transformers>=4.56",
 #     "sentencepiece>=0.2",
 #     "protobuf>=4",
 # ]
@@ -22,14 +22,15 @@ each agent has ever posted, embedded locally, no external inference APIs.
 Two embedding spaces, run side by side:
   - SigLIP 2 base (google/siglip2-base-patch16-224) --- text-aligned, so it
     also does the zero-shot technical-plot classification for (d).
-  - DINOv2 base (facebook/dinov2-base) --- purely visual, no text tower. The
+  - DINO (facebook/dinov2-base on the base tier, DINOv3 ViT-L/16 on the large
+    tier) --- purely visual, no text tower. The
     robustness check: if "visual niches" only show up in a text-aligned
     space, that space may be measuring subject matter (what the alt-text-ish
-    content of a work is *about*) rather than visual style. DINOv2 has no
+    content of a work is *about*) rather than visual style. DINO has no
     language grounding at all, so agreement between the two is the stronger
     claim. (ColNomic-style late-interaction retrieval models were considered
     and rejected --- they're built for multi-vector document retrieval, not
-    single-vector image style embedding; DINOv2 is the deliberate substitute
+    single-vector image style embedding; DINO is the deliberate substitute
     for "a second, independent embedding space".)
 
 Pipeline:
@@ -85,16 +86,20 @@ END = date(2026, 7, 27)
 END_CUTOFF = datetime(2026, 7, 27, 23, 59, 59, tzinfo=UTC)
 
 # Model tier: "base" (CPU-friendly) or "large" (current-gen, wants a GPU).
-# DINOv3 would be the current-gen visual-only pick, but its checkpoints are
-# gated on Hugging Face (403 without per-account approval), so the large tier
-# uses DINOv2-giant: same family, ungated, and still a pure-vision encoder.
+# The large tier uses DINOv3 ViT-L/16, the current-gen visual-only pick. Its
+# checkpoints are gated on Hugging Face (403 without per-account approval), so
+# running this tier needs an approved account's token on the machine.
 TIER = os.environ.get("PILOT_IMAGES_TIER", "base")
 if TIER == "large":
     SIGLIP_MODEL = "google/siglip2-so400m-patch16-384"
-    DINO_MODEL = "facebook/dinov2-giant"
+    DINO_MODEL = "facebook/dinov3-vitl16-pretrain-lvd1689m"
 else:
     SIGLIP_MODEL = "google/siglip2-base-patch16-224"
     DINO_MODEL = "facebook/dinov2-base"
+# DINOv2 and DINOv3 differ in preprocessing and in cache/report naming, so
+# derive both from the checkpoint rather than hard-coding "dinov2" downstream.
+DINO_FAMILY = "dinov3" if "dinov3" in DINO_MODEL else "dinov2"
+DINO_LABEL = "DINOv3" if DINO_FAMILY == "dinov3" else "DINOv2"
 TECH_PROMPT = "a scientific plot or chart with labelled axes and text"
 ABSTRACT_PROMPT = "an abstract artwork or photograph"
 
@@ -107,7 +112,7 @@ HF_CACHE_DIR = CACHE_DIR / "hf-weights"
 _SUF = "" if TIER == "base" else f"-{TIER}"
 SIGLIP_EMB_CACHE = CACHE_DIR / f"embeddings-siglip2{_SUF}.npz"
 SIGLIP_MARGIN_CACHE = CACHE_DIR / f"tech-margin-siglip2{_SUF}.npz"
-DINO_EMB_CACHE = CACHE_DIR / f"embeddings-dinov2{_SUF}.npz"
+DINO_EMB_CACHE = CACHE_DIR / f"embeddings-{DINO_FAMILY}{_SUF}.npz"
 
 HERE = Path(__file__).parent
 DATA_JSON = HERE / f"pilot-images-data{_SUF}.json"
@@ -116,11 +121,17 @@ K_NEIGHBOURS = 5
 DOWNLOAD_WORKERS = 12
 BATCH_SIZE = 64
 
-# DINOv2's published preprocessing (resize shortest edge 256, center-crop 224,
-# ImageNet normalisation). Done by hand with PIL/numpy rather than via
-# transformers' AutoImageProcessor, which pulls in torchvision as a hard
-# import-time dependency in current transformers even when unused --- a much
-# heavier and more version-fragile dependency than this ~10-line reimplementation.
+# The DINO checkpoints' published preprocessing, done by hand with PIL/numpy
+# rather than via transformers' AutoImageProcessor, which pulls in torchvision
+# as a hard import-time dependency in current transformers even when unused ---
+# a much heavier and more version-fragile dependency than this reimplementation.
+# The two families normalise identically (ImageNet stats) but resize
+# differently: DINOv2 resizes the shortest edge to 256 and centre-crops 224,
+# while DINOv3's processor config sets size 224x224 with do_center_crop unset,
+# i.e. a straight bilinear resize to square with no crop. Checked against
+# DINOv3ViTImageProcessor on real cached works: same shape, max abs difference
+# ~0.018 in normalised units (about one 8-bit level, PIL vs torchvision
+# resampling).
 DINO_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
 DINO_STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
 
@@ -319,13 +330,16 @@ def open_rgb(work: Work) -> Image.Image | None:
 
 
 def dino_preprocess(im: Image.Image) -> torch.Tensor:
-    w, h = im.size
-    short = min(w, h)
-    scale = 256 / short
-    new_w, new_h = round(w * scale), round(h * scale)
-    im = im.resize((new_w, new_h), Image.BICUBIC)
-    left, top = (new_w - 224) // 2, (new_h - 224) // 2
-    im = im.crop((left, top, left + 224, top + 224))
+    if DINO_FAMILY == "dinov3":
+        im = im.resize((224, 224), Image.BILINEAR)
+    else:
+        w, h = im.size
+        short = min(w, h)
+        scale = 256 / short
+        new_w, new_h = round(w * scale), round(h * scale)
+        im = im.resize((new_w, new_h), Image.BICUBIC)
+        left, top = (new_w - 224) // 2, (new_h - 224) // 2
+        im = im.crop((left, top, left + 224, top + 224))
     arr = (np.asarray(im).astype(np.float32) / 255.0 - DINO_MEAN) / DINO_STD
     return torch.from_numpy(arr.transpose(2, 0, 1))
 
@@ -391,7 +405,7 @@ def embed_dino(works: list[Work], emb_cache: dict[str, np.ndarray], device: str)
 
     missing = [w for w in works if w.url not in emb_cache]
     print(
-        f"  dinov2: embedding {len(missing)} new images "
+        f"  {DINO_FAMILY}: embedding {len(missing)} new images "
         f"({len(works) - len(missing)} already cached)",
         file=sys.stderr,
     )
@@ -420,7 +434,7 @@ def embed_dino(works: list[Work], emb_cache: dict[str, np.ndarray], device: str)
         for w, vec in zip(kept, feats_np, strict=True):
             emb_cache[w.url] = vec
         if bi % 10 == 0 or bi == n_batches - 1:
-            print(f"    dinov2 batch {bi + 1}/{n_batches}", file=sys.stderr)
+            print(f"    {DINO_FAMILY} batch {bi + 1}/{n_batches}", file=sys.stderr)
         if bi % 20 == 19 or bi == n_batches - 1:
             save_vec_cache(DINO_EMB_CACHE, emb_cache)
 
@@ -654,7 +668,7 @@ def main() -> None:
         f"{n_download_failed} skipped (404 or persistent error)"
     )
 
-    print("\nembedding with SigLIP 2 and DINOv2...", file=sys.stderr)
+    print(f"\nembedding with SigLIP 2 and {DINO_LABEL}...", file=sys.stderr)
     siglip_cache = load_vec_cache(SIGLIP_EMB_CACHE)
     siglip_margins = load_margin_cache(SIGLIP_MARGIN_CACHE)
     embed_siglip(flat_works, siglip_cache, siglip_margins, device)
@@ -686,7 +700,7 @@ def main() -> None:
     X_dino = np.stack([dino_cache[w.url] for w in flat_works]).astype(np.float32)
 
     results_siglip = run_space_analyses("SigLIP2", X_siglip, y, weeks, season_mask)
-    results_dino = run_space_analyses("DINOv2", X_dino, y, weeks, season_mask)
+    results_dino = run_space_analyses(DINO_LABEL, X_dino, y, weeks, season_mask)
 
     print("\n=== [SigLIP2] (d) zero-shot technical-plot classification (drift check for Fig 3) ===")
     print(f'  prompts: "{TECH_PROMPT}" vs "{ABSTRACT_PROMPT}"')
@@ -721,7 +735,7 @@ def main() -> None:
         "n_download_failed": n_download_failed,
         "n_before_season_start": n_before_start,
         "siglip2": results_siglip,
-        "dinov2": results_dino,
+        DINO_FAMILY: results_dino,
         "technical_plot_drift_siglip2": plot_drift,
         "runtime_seconds": elapsed,
     }
