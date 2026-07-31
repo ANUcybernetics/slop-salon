@@ -252,7 +252,7 @@ def right(ax) -> None:
     ax.set_ylim(0, 0.68)
     ax.set_xticks([0, 1, 2])
     ax.set_xticklabels(
-        ["siblings\nthis week", "itself\nlast week", "siblings\nother weeks"], fontsize=6.5
+        ["siblings\nthis week", "itself\nlast week", "siblings\nother weeks"], fontsize=7
     )
     ax.set_ylabel("mean cosine similarity")
     ax.set_title("(b) what a week's new writing resembles", fontsize=8, loc="left", pad=6)
@@ -264,8 +264,8 @@ def main() -> None:
     fig, (ax1, ax2) = plt.subplots(
         1,
         2,
-        figsize=(5.5, 2.3),
-        gridspec_kw={"width_ratios": [1.75, 1], "wspace": 0.34},
+        figsize=(5.5, 2.5),
+        gridspec_kw={"width_ratios": [1.45, 1], "wspace": 0.34},
     )
     left(ax1)
     right(ax2)
