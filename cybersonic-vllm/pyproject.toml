@@ -15,9 +15,9 @@ dependencies = []
 # pin to whatever vllm currently resolves (check with
 # `uv pip show flashinfer-python`).
 inference = [
-    "vllm>=0.20",
-    "flashinfer-jit-cache==0.6.11.post2",
-    "flashinfer-cubin",
+  "vllm>=0.20",
+  "flashinfer-jit-cache==0.6.11.post2",
+  "flashinfer-cubin",
 ]
 
 [tool.uv]
