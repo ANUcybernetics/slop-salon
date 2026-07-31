@@ -38,62 +38,67 @@ WEEKS = list(range(11))
 
 # pilot-drift-results.txt (full tracked markdown corpus at each snapshot)
 STOCK_PAIRWISE = [
-    0.942,
-    0.645,
-    0.625,
-    0.623,
-    0.628,
-    0.616,
-    0.622,
-    0.613,
+    0.943,
+    0.644,
+    0.626,
+    0.626,
+    0.630,
     0.618,
-    0.610,
-    0.629,
+    0.628,
+    0.622,
+    0.617,
+    0.611,
+    0.630,
 ]
 STOCK_SELF_PREV = [
     None,
     None,
-    0.899,
-    0.896,
-    0.930,
-    0.912,
-    0.942,
-    0.947,
+    0.897,
+    0.901,
     0.932,
-    0.947,
+    0.912,
+    0.938,
+    0.937,
+    0.946,
+    0.952,
     0.968,
 ]
 
-# pilot-flow-results.txt (added lines only; no seed value; the 2026-07-06
-# snapshot -- week 7 in the paper's 1-indexed convention -- has n=5)
+# pilot-flow-results.txt (added lines only; no seed value). All ten snapshots
+# carry n=6 since the pilots moved to author-date bucketing; the n=5 week in the
+# earlier run was one agent's 16-day push failure, not a quiet week.
 FLOW_PAIRWISE = [
     None,
-    0.603,
-    0.463,
-    0.530,
-    0.565,
+    0.601,
+    0.472,
+    0.533,
+    0.555,
     0.504,
-    0.508,
-    0.571,
-    0.602,
+    0.539,
+    0.558,
+    0.617,
     0.591,
-    0.590,
+    0.587,
 ]
 FLOW_SELF_PREV = [
     None,
     None,
     0.398,
-    0.418,
-    0.443,
-    0.455,
-    0.433,
-    0.466,
-    0.540,
-    0.477,
-    0.533,
+    0.415,
+    0.441,
+    0.449,
+    0.434,
+    0.444,
+    0.513,
+    0.479,
+    0.527,
 ]
 
-SAME_WEEK, CROSS_WEEK = 0.552, 0.391
+# Panel (b): what a week's new writing is closest to. Cross-agent same-week
+# beats an agent's own previous week in all nine comparable weeks, which is the
+# claim the abstract makes and the bars have to show.
+SAME_WEEK, CROSS_WEEK = 0.556, 0.390
+OWN_PREV_WEEK = 0.456
 
 
 def style() -> None:
@@ -189,7 +194,7 @@ def left(ax) -> None:
         color=MUTED,
     )
     ax.annotate(
-        "0.65",
+        "0.64",
         (1, STOCK_PAIRWISE[1]),
         textcoords="offset points",
         xytext=(2, 6),
@@ -203,9 +208,7 @@ def left(ax) -> None:
     ax.set_xticklabels(["seed", "2", "4", "6", "8", "10"])
     ax.set_xlabel("week of season")
     ax.set_ylabel("mean cosine similarity")
-    ax.set_title(
-        "(a) divergence appears early, then holds", fontsize=8, loc="left", pad=6
-    )
+    ax.set_title("(a) divergence appears early, then holds", fontsize=8, loc="left", pad=6)
     # park the legend in the empty band between the two blue series
     ax.legend(
         frameon=False,
@@ -222,16 +225,19 @@ def right(ax) -> None:
     ax.grid(axis="y", color=GRID, linewidth=0.5, zorder=0)
     ax.set_axisbelow(True)
 
+    # Siblings first, own-previous-week second: the gap between bars one and
+    # two is the finding, so they have to sit next to each other.
+    vals = [SAME_WEEK, OWN_PREV_WEEK, CROSS_WEEK]
     bars = ax.bar(
-        [0, 1],
-        [SAME_WEEK, CROSS_WEEK],
+        [0, 1, 2],
+        vals,
         width=0.5,
-        color=FLOW,
+        color=[FLOW, STOCK, FLOW],
         edgecolor="white",
         linewidth=1.0,
         zorder=2,
     )
-    for bar, val in zip(bars, [SAME_WEEK, CROSS_WEEK], strict=True):
+    for bar, val in zip(bars, vals, strict=True):
         ax.annotate(
             f"{val:.2f}",
             (bar.get_x() + bar.get_width() / 2, val),
@@ -242,12 +248,14 @@ def right(ax) -> None:
             color=INK,
         )
 
-    ax.set_xlim(-0.6, 1.6)
+    ax.set_xlim(-0.6, 2.6)
     ax.set_ylim(0, 0.68)
-    ax.set_xticks([0, 1])
-    ax.set_xticklabels(["same\nweek", "different\nweeks"])
+    ax.set_xticks([0, 1, 2])
+    ax.set_xticklabels(
+        ["siblings\nthis week", "itself\nlast week", "siblings\nother weeks"], fontsize=6.5
+    )
     ax.set_ylabel("mean cosine similarity")
-    ax.set_title("(b) cross-agent flow moves in time", fontsize=8, loc="left", pad=6)
+    ax.set_title("(b) what a week's new writing resembles", fontsize=8, loc="left", pad=6)
 
 
 def main() -> None:

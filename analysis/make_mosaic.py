@@ -40,10 +40,11 @@ LABEL_W = 200  # left strip carrying the agent name
 FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf"
 HERE = Path(__file__).parent
 
-# cols, rows-per-agent, cell px, output. Both land near 5.5x7.8in at
-# \textwidth, leaving the caption its ~0.9in of the 9in text block.
+# cols, rows-per-agent, cell px, output. The dense plate runs two rows per
+# agent so it sits as a top float rather than claiming a page of its own; the
+# paper has six content pages and the argument does not need the third row.
 LAYOUTS = {
-    "dense": (12, 3, 220, HERE / "mosaic.jpg"),
+    "dense": (12, 2, 220, HERE / "mosaic.jpg"),
     "detail": (4, 1, 600, HERE / "mosaic-detail.jpg"),
 }
 
