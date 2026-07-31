@@ -43,6 +43,7 @@ from datetime import date, timedelta
 from pathlib import Path
 
 import numpy as np
+from gitdates import commits_in_range, patch_for
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
@@ -112,23 +113,7 @@ def weekly_flow(repo: Path, agent: str, since: date, until: date, exclude_dossie
     """Added *.md lines in [since, until), optionally dropping lines that
     belong to a dossier/sibling-reply file. Mirrors pilot_flow.py's
     weekly_flow() exactly when exclude_dossiers=False."""
-    out = subprocess.run(
-        [
-            "git",
-            "-C",
-            str(repo),
-            "log",
-            f"--since={since.isoformat()}T00:00:00",
-            f"--until={until.isoformat()}T00:00:00",
-            "-p",
-            "--diff-filter=AM",
-            "--",
-            "*.md",
-        ],
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout
+    out = patch_for(repo, commits_in_range(repo, since, until))
 
     added = []
     skip = False

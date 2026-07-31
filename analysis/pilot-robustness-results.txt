@@ -2,27 +2,27 @@
 1. BASELINE (replicates pilot_flow.py exactly)
 ==============================================================================
 week          n  self→prev   pairwise
-2026-05-25    6        nan      0.603
-2026-06-01    6      0.398      0.463
-2026-06-08    6      0.418      0.530
-2026-06-15    6      0.443      0.565
-2026-06-22    6      0.455      0.504
-2026-06-29    6      0.433      0.508
-2026-07-06    5      0.466      0.571
-2026-07-13    6      0.540      0.602
-2026-07-20    6      0.477      0.591
-2026-07-27    6      0.533      0.590
+2026-05-25    6        nan      0.601
+2026-06-01    6      0.398      0.472
+2026-06-08    6      0.415      0.533
+2026-06-15    6      0.441      0.555
+2026-06-22    6      0.449      0.504
+2026-06-29    6      0.434      0.539
+2026-07-06    6      0.444      0.558
+2026-07-13    6      0.513      0.617
+2026-07-20    6      0.479      0.591
+2026-07-27    6      0.527      0.587
 
 final-week flow pairwise matrix:
          rahel    vita   lelia    mina     lou    gert
- rahel       -   0.535   0.614   0.654   0.657   0.552
-  vita   0.535       -   0.543   0.533   0.580   0.490
- lelia   0.614   0.543       -   0.637   0.609   0.629
-  mina   0.654   0.533   0.637       -   0.630   0.640
-   lou   0.657   0.580   0.609   0.630       -   0.545
-  gert   0.552   0.490   0.629   0.640   0.545       -
+ rahel       -   0.531   0.608   0.644   0.656   0.552
+  vita   0.531       -   0.535   0.528   0.572   0.489
+ lelia   0.608   0.535       -   0.633   0.602   0.628
+  mina   0.644   0.528   0.633       -   0.632   0.642
+   lou   0.656   0.572   0.602   0.632       -   0.551
+  gert   0.552   0.489   0.628   0.642   0.551       -
 
-cross-agent similarity: same week 0.552 (n=145) vs different weeks 0.391 (n=1305)
+cross-agent similarity: same week 0.556 (n=150) vs different weeks 0.390 (n=1350)
 
 ==============================================================================
 2-4. CONFOUND-CONTROL VARIANTS
@@ -36,22 +36,22 @@ dossier files excluded per agent (of all git-tracked *.md):
   gert    36
 
 variant                n_docs   same-wk   diff-wk     gap  n_same  n_diff
-BASELINE                   59     0.552     0.391   0.161     145    1305
-NO-DOSSIERS                59     0.547     0.382   0.165     145    1305
-SCRUBBED                   59     0.556     0.392   0.163     145    1305
-NO-DOSSIERS+SCRUBBED       59     0.551     0.384   0.167     145    1305
+BASELINE                   60     0.556     0.390   0.166     150    1350
+NO-DOSSIERS                60     0.553     0.380   0.173     150    1350
+SCRUBBED                   60     0.558     0.392   0.166     150    1350
+NO-DOSSIERS+SCRUBBED       60     0.555     0.383   0.172     150    1350
 
 ==============================================================================
 5. LAG-1 BASELINE (adjacent-week cross-agent pairs vs same-week)
 ==============================================================================
 week1          same-wk     lag-1     gap  n_same  n_lag1
-included         0.552     0.421   0.131     145     260
-excluded         0.546     0.429   0.117     130     230
+included         0.556     0.419   0.137     150     270
+excluded         0.551     0.426   0.125     135     240
 
 ==============================================================================
 6. PERMUTATION TEST (strongest variant: NO-DOSSIERS+SCRUBBED)
 ==============================================================================
-observed same-minus-different gap: 0.1667
-permuted gap mean: 0.0004  std: 0.0060
-permuted gap [min, max]: [-0.0157, 0.0195]
+observed same-minus-different gap: 0.1724
+permuted gap mean: 0.0002  std: 0.0058
+permuted gap [min, max]: [-0.0136, 0.0210]
 p-value (one-sided, permuted >= observed, 1000 perms, +1 smoothing): 0.0010

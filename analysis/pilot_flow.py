@@ -7,11 +7,11 @@
 weekly flow is the cleaner convergence/divergence measure."""
 
 import itertools
-import subprocess
 from datetime import date, timedelta
 from pathlib import Path
 
 import numpy as np
+from gitdates import commits_in_range, patch_for
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
@@ -25,23 +25,7 @@ END = date(2026, 7, 27)
 
 
 def weekly_flow(repo: Path, since: date, until: date) -> str:
-    out = subprocess.run(
-        [
-            "git",
-            "-C",
-            str(repo),
-            "log",
-            f"--since={since.isoformat()}T00:00:00",
-            f"--until={until.isoformat()}T00:00:00",
-            "-p",
-            "--diff-filter=AM",
-            "--",
-            "*.md",
-        ],
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout
+    out = patch_for(repo, commits_in_range(repo, since, until))
     added = [
         line[1:] for line in out.splitlines() if line.startswith("+") and not line.startswith("+++")
     ]

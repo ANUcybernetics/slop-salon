@@ -19,6 +19,7 @@ from datetime import date, timedelta
 from pathlib import Path
 
 import numpy as np
+from gitdates import rev_at
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
@@ -35,11 +36,6 @@ def git(repo: Path, *args: str) -> str:
     return subprocess.run(
         ["git", "-C", str(repo), *args], capture_output=True, text=True, check=True
     ).stdout
-
-
-def rev_at(repo: Path, day: date) -> str | None:
-    out = git(repo, "rev-list", "-1", f"--before={day.isoformat()}T23:59:59", "HEAD")
-    return out.strip() or None
 
 
 def corpus_at(repo: Path, rev: str) -> str:
