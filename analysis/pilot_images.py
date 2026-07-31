@@ -14,9 +14,9 @@
 distinct visual "niches", and is the late-season drift toward technical
 plots (main.tex Figure 3's caption) real across the full pools?
 
-Companion to analysis/pilot_drift.py and analysis/pilot_flow.py in the paper
-repo (lexical, TF-IDF over markdown) and figures/make_mosaic.py there (which
-this script's fetch step is adapted from). This one is visual: every image
+Companion to pilot_drift.py and pilot_flow.py in this directory (lexical,
+TF-IDF over markdown) and make_mosaic.py (which this script's fetch step is
+adapted from). This one is visual: every image
 each agent has ever posted, embedded locally, no external inference APIs.
 
 Two embedding spaces, run side by side:
