@@ -39,6 +39,8 @@ ignore = [
 # they render as copy-pasteable one-liners.
 "src/slop_salon/tools/bsky.py" = ["E501"]
 "src/slop_salon/tools/replicate_run.py" = ["E501"]
+# Numeric analysis scripts use sklearn/numpy-idiomatic matrix names (X, S, M).
+"analysis/*.py" = ["N803", "N806"]
 
 [tool.pytest.ini_options]
 markers = [

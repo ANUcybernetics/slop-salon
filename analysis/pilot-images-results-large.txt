@@ -1,0 +1,109 @@
+
+=== pool sizes (works posted on or before 2026-07-27) ===
+  rahel      819
+  vita       720
+  lelia      462
+  mina       675
+  lou        943
+  gert      1036
+  total     4655
+downloaded/cached 4653 images, 2 skipped (404 or persistent error)
+
+4653 works embedded successfully in both spaces
+note: 344 works predate 2026-05-25 (early-deployed agent) and are excluded from the weekly temporal analyses (c, d) but included in identification and within/between similarity (a, b)
+
+=== [SigLIP2] (a) leave-one-out agent identification ===
+  n = 4653 works, 6 agents
+  nearest-centroid accuracy: 0.283
+  5-NN accuracy:            0.429
+  chance baseline (1/6):       0.167
+
+=== [SigLIP2] (b) within- vs between-agent cosine similarity ===
+  mean within-agent similarity:  0.595
+  mean between-agent similarity: 0.590
+
+  pairwise similarity matrix (diagonal = within-agent mean):
+         rahel    vita   lelia    mina     lou    gert
+   rahel   0.613   0.594   0.593   0.589   0.593   0.576
+    vita   0.594   0.606   0.598   0.598   0.602   0.588
+   lelia   0.593   0.598   0.596   0.593   0.594   0.580
+    mina   0.589   0.598   0.593   0.593   0.596   0.582
+     lou   0.593   0.602   0.594   0.596   0.601   0.585
+    gert   0.576   0.588   0.580   0.582   0.585   0.575
+
+=== [SigLIP2] (c) temporal: same-week vs different-week cross-agent similarity ===
+  same-week cross-agent mean similarity:      0.606
+  different-week cross-agent mean similarity: 0.588
+
+  [SigLIP2] per-week between-agent curve (image-space analogue of Fig 4a):
+  week             n   between-agent mean
+  2026-05-25     303                0.614
+  2026-06-01     393                0.591
+  2026-06-08     581                0.596
+  2026-06-15     668                0.602
+  2026-06-22     547                0.613
+  2026-06-29     643                0.601
+  2026-07-06     440                0.595
+  2026-07-13     361                0.633
+  2026-07-20     346                0.645
+  2026-07-27      27                0.633
+
+=== [DINOv2] (a) leave-one-out agent identification ===
+  n = 4653 works, 6 agents
+  nearest-centroid accuracy: 0.294
+  5-NN accuracy:            0.396
+  chance baseline (1/6):       0.167
+
+=== [DINOv2] (b) within- vs between-agent cosine similarity ===
+  mean within-agent similarity:  0.199
+  mean between-agent similarity: 0.190
+
+  pairwise similarity matrix (diagonal = within-agent mean):
+         rahel    vita   lelia    mina     lou    gert
+   rahel   0.176   0.179   0.161   0.174   0.184   0.163
+    vita   0.179   0.216   0.187   0.207   0.219   0.196
+   lelia   0.161   0.187   0.166   0.181   0.191   0.171
+    mina   0.174   0.207   0.181   0.203   0.214   0.192
+     lou   0.184   0.219   0.191   0.214   0.229   0.203
+    gert   0.163   0.196   0.171   0.192   0.203   0.187
+
+=== [DINOv2] (c) temporal: same-week vs different-week cross-agent similarity ===
+  same-week cross-agent mean similarity:      0.194
+  different-week cross-agent mean similarity: 0.186
+
+  [DINOv2] per-week between-agent curve (image-space analogue of Fig 4a):
+  week             n   between-agent mean
+  2026-05-25     303                0.172
+  2026-06-01     393                0.137
+  2026-06-08     581                0.135
+  2026-06-15     668                0.146
+  2026-06-22     547                0.193
+  2026-06-29     643                0.184
+  2026-07-06     440                0.221
+  2026-07-13     361                0.421
+  2026-07-20     346                0.409
+  2026-07-27      27                0.382
+
+=== [SigLIP2] (d) zero-shot technical-plot classification (drift check for Fig 3) ===
+  prompts: "a scientific plot or chart with labelled axes and text" vs "an abstract artwork or photograph"
+  week           rahel    vita   lelia    mina     lou    gert   overall
+  2026-05-25      0.30    0.16    0.08    0.25    0.16    0.23      0.21
+  2026-06-01      0.16    0.15    0.15    0.11    0.33    0.15      0.17
+  2026-06-08      0.17    0.29    0.00    0.14    0.14    0.14      0.17
+  2026-06-15      0.05    0.24    0.23    0.16    0.14    0.07      0.13
+  2026-06-22      0.07    0.24    0.16    0.32    0.37    0.12      0.22
+  2026-06-29      0.12    0.27    0.26    0.20    0.50    0.14      0.26
+  2026-07-06      0.09    0.40    0.25    0.38    0.75    0.25      0.39
+  2026-07-13      0.00    0.85    0.58    0.62    0.85    0.98      0.83
+  2026-07-20      0.43    0.79    0.56    0.73    0.81    0.82      0.75
+  2026-07-27      0.50    1.00    0.75    0.60    0.75    0.50      0.67
+
+  season-total fraction technical per agent:
+    rahel    0.133
+    vita     0.339
+    lelia    0.266
+    mina     0.313
+    lou      0.400
+    gert     0.376
+
+runtime: 243.5s, device=cuda
