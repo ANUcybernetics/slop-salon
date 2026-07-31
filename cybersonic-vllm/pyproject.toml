@@ -1,7 +1,7 @@
 [project]
 name = "cybersonic-vllm"
 version = "0.1.0"
-description = "vLLM server for Qwen3.6-27B (dense, agentic coding flagship) on cybersonic's 5x RTX 3090."
+description = "vLLM server for Qwen3.6-35B-A3B-FP8 (sparse-MoE, agentic coding flagship) on cybersonic's 6x RTX 3090."
 requires-python = ">=3.12,<3.13"
 dependencies = []
 

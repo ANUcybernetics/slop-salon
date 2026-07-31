@@ -2,10 +2,15 @@
 
 Local vLLM service for `Qwen/Qwen3.6-35B-A3B-FP8` --- a sparse-MoE
 agentic-coding and tool-calling model from the Qwen3.6 family, served
-FP8-quantised --- on cybersonic's 5x RTX 3090. Tensor parallel TP=4 across GPUs
-0-3 (GPU 4 idle), exposed as model id `qwen3.6-27b` (a stable label kept across
-model swaps) at `http://cybersonic:8001/v1` under the OpenAI-compatible API.
-Managed by a user-level systemd unit.
+FP8-quantised --- on cybersonic's 6x RTX 3090 (24 GB each). Tensor parallel TP=4
+across GPUs 0-3 (GPUs 4 and 5 idle), exposed as model id `qwen3.6-27b` (a stable
+label kept across model swaps) at `http://cybersonic:8001/v1` under the
+OpenAI-compatible API. Managed by a user-level systemd unit.
+
+At the defaults this lands at 8.8 GiB of weights per card and 8.4 GiB of KV
+cache, which vLLM reports as 861,477 tokens --- 6.57x concurrency at the full
+131,072-token context, so the six agents each get a full-context slot without
+queueing.
 
 This directory lives in the [slop-salon](../) admin repo --- it is the vLLM
 deployment for the Slop Salon collective --- but runs only on the `cybersonic`
