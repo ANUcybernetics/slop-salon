@@ -43,9 +43,7 @@ def weekly_flow(repo: Path, since: date, until: date) -> str:
         check=True,
     ).stdout
     added = [
-        line[1:]
-        for line in out.splitlines()
-        if line.startswith("+") and not line.startswith("+++")
+        line[1:] for line in out.splitlines() if line.startswith("+") and not line.startswith("+++")
     ]
     return "\n".join(added)
 
@@ -86,9 +84,7 @@ def main() -> None:
             [s((a, label), (b, label)) for a, b in itertools.combinations(present, 2)]
         )
         selfprev = (
-            np.mean(
-                [s((a, label), (a, prev)) for a in present if prev and (a, prev) in idx]
-            )
+            np.mean([s((a, label), (a, prev)) for a in present if prev and (a, prev) in idx])
             if prev
             else float("nan")
         )
@@ -100,9 +96,7 @@ def main() -> None:
     print("\nfinal-week flow pairwise matrix:")
     print("        " + "  ".join(f"{a:>6}" for a in present))
     for a in present:
-        row = "  ".join(
-            f"{s((a, last), (b, last)):>6.3f}" if a != b else "     -" for b in present
-        )
+        row = "  ".join(f"{s((a, last), (b, last)):>6.3f}" if a != b else "     -" for b in present)
         print(f"{a:>6}  {row}")
 
     # cross-agent same-week vs cross-week baseline: is same-week flow more

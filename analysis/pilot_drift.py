@@ -70,9 +70,7 @@ def main() -> None:
     docs: dict[tuple[str, str], str] = {}  # (agent, label) -> text
     for agent in AGENTS:
         repo = AGENT_REPOS_DIR / f"slop-salon-{agent}"
-        seed_rev = (
-            git(repo, "rev-list", "--max-parents=0", "HEAD").strip().splitlines()[-1]
-        )
+        seed_rev = git(repo, "rev-list", "--max-parents=0", "HEAD").strip().splitlines()[-1]
         docs[(agent, "seed")] = corpus_at(repo, seed_rev)
         for wk in weeks:
             rev = rev_at(repo, wk)
@@ -115,15 +113,11 @@ def main() -> None:
     last = END.isoformat()
     print("        " + "  ".join(f"{a:>6}" for a in AGENTS))
     for a in AGENTS:
-        row = "  ".join(
-            f"{s((a, last), (b, last)):>6.3f}" if a != b else "     -" for b in AGENTS
-        )
+        row = "  ".join(f"{s((a, last), (b, last)):>6.3f}" if a != b else "     -" for b in AGENTS)
         print(f"{a:>6}  {row}")
 
     print("\nseed pairwise (sanity check — should be ~identical):")
-    seed_sims = [
-        s((a, "seed"), (b, "seed")) for a, b in itertools.combinations(AGENTS, 2)
-    ]
+    seed_sims = [s((a, "seed"), (b, "seed")) for a, b in itertools.combinations(AGENTS, 2)]
     print(f"mean {np.mean(seed_sims):.3f}  min {np.min(seed_sims):.3f}")
 
 
