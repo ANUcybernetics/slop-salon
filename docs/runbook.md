@@ -352,10 +352,10 @@ mise exec -- uv run slop logs <name>     # last claude transcript
 
 ## When agents go sideways
 
-- `slop status` should show a recent tick within the last ~30-60 min (the
-  `slop-wake.timer` fires every 30 min; idle agents tick each firing, while an
-  agent still mid-tick skips that round and catches the next --- see the
-  wake-driver notes in `CLAUDE.md`).
+- `slop status` should show a tick within roughly one wake interval --- run
+  `slop cadence` to see what that currently is (6-hourly as of 2026-08-04).
+  Idle agents tick each firing, while an agent still mid-tick skips that round
+  and catches the next --- see the wake-driver notes in `CLAUDE.md`.
 - Watch with `slop feed <name>`, `slop logs <name>`, `slop diff <name>`.
 - Emergency stop for all agents: `systemctl --user stop slop-wake.timer` (add
   `disable` so it stays stopped across a reboot). Investigate, optionally edit

@@ -32,6 +32,7 @@ from statistics import mean, median
 import httpx
 import typer
 
+from slop_salon import cadence as cadence_mod
 from slop_salon import wake_slots, watchdog
 from slop_salon.config import load_config, save_provider
 from slop_salon.healing import SKIP_BUSY_CODE, claude_failed, heal_wedged, is_wedge
@@ -507,6 +508,10 @@ def _probe_inference(endpoint: str, token: str | None, timeout: float) -> watchd
     return watchdog.Probe(ok=False, detail=f"{url} returned {response.status_code}")
 
 
+def _format_duration(seconds: float) -> str:
+    return f"{seconds / 60:.0f}min" if seconds < 3600 else f"{seconds / 3600:.1f}h"
+
+
 def _timer_is_active(timer: str) -> bool:
     completed = subprocess.run(
         ["systemctl", "--user", "is-active", "--quiet", timer],
@@ -518,7 +523,9 @@ def _timer_is_active(timer: str) -> bool:
 
 @app.command(name="wake-check")
 def wake_check(
-    max_age: str = typer.Option("90.mins", "--max-age", help="Staleness limit, e.g. '90.mins'"),
+    max_age: str = typer.Option(
+        None, "--max-age", help="Staleness limit (default: derived from the timer's cadence)"
+    ),
     endpoint: str = typer.Option(
         None, "--endpoint", help="Override the health URL to probe (default: from the providers)"
     ),
@@ -568,10 +575,16 @@ def wake_check(
             else watchdog.Probe(ok=True, detail="; ".join(p.detail for p in probes))
         )
 
+    # Derived from the timer unless overridden, so changing cadence cannot leave
+    # a 90-minute dead-man check pointed at a 6-hourly timer --- that mismatch
+    # files an oncall todo every hour, and an alert that always fires is an
+    # alert that gets silenced.
+    limit = _parse_duration(max_age) if max_age else cadence_mod.current_max_age(timer)
+
     found = watchdog.problems(
         stamp=watchdog.read_stamp(),
         now=dt.datetime.now(dt.UTC),
-        max_age=_parse_duration(max_age),
+        max_age=limit,
         timer_active=_timer_is_active(timer),
         inference=inference,
         timer_name=timer,
@@ -579,7 +592,7 @@ def wake_check(
 
     if not found:
         served = inference.detail if inference else "no health endpoint to probe (hosted provider)"
-        typer.echo(f"ok: {timer} armed, wake stamp fresh, {served}")
+        typer.echo(f"ok: {timer} armed, wake stamp fresh (<{_format_duration(limit)}), {served}")
         return
 
     for problem in found:
@@ -788,6 +801,71 @@ def usage(
     typer.echo(
         f"{'total':<8}{'':>6}{'':>6}  {'':>5}  {'':>8}  {'':>12}  {'':>12}  ${grand_total:>8.2f}"
     )
+
+
+@app.command()
+def cadence(
+    spec: str = typer.Argument(None, help="e.g. '6h', '30m', or a raw OnCalendar"),
+    timer: str = typer.Option("slop-wake.timer", "--timer"),
+):
+    """Show or change how often the fleet ticks. Takes effect immediately.
+
+    `slop cadence` prints the current schedule; `slop cadence 6h` changes it via
+    a systemd drop-in and restarts the timer.
+
+    Cadence is the only lever with real leverage over cost. A tick's price is
+    dominated by a fixed floor --- the ~29k prompt prefix plus the mandatory
+    reads in the numbered routine --- so a rest tick that does nothing still
+    costs ~60% of one that makes and posts a piece. Ticks can be made rarer far
+    more easily than cheaper.
+
+    It is not only a cost knob: it sets how much of the salon's own activity an
+    agent sees between ticks, and so how conversational the work feels.
+    """
+    dropin = Path.home() / ".config/systemd/user" / cadence_mod.DROPIN_DIR / cadence_mod.DROPIN_NAME
+
+    if spec:
+        try:
+            oncalendar = cadence_mod.spec_to_oncalendar(spec)
+            analysis = cadence_mod.analyse(oncalendar)
+        except ValueError as exc:
+            typer.echo(f"error: {exc}", err=True)
+            raise typer.Exit(code=1) from exc
+
+        dropin.parent.mkdir(parents=True, exist_ok=True)
+        dropin.write_text(cadence_mod.render_dropin(oncalendar))
+        subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
+        typer.echo(f"cadence set: {oncalendar}\n  {dropin}")
+        # Restart only if it was already running. Changing the schedule of a
+        # stopped timer must not start it: the fleet is deliberately paused at
+        # times, and a config command that quietly resumes ticking is the kind
+        # of surprise you find out about from the Bluesky feed.
+        if _timer_is_active(timer):
+            subprocess.run(["systemctl", "--user", "restart", timer], check=True)
+        else:
+            typer.echo(
+                f"  note: {timer} is not running, so nothing ticks yet.\n"
+                f"        start it with `systemctl --user start {timer}`"
+            )
+    else:
+        oncalendar = cadence_mod.active_oncalendar(timer)
+        if not oncalendar:
+            typer.echo(f"error: could not read {timer}", err=True)
+            raise typer.Exit(code=1)
+        analysis = cadence_mod.analyse(oncalendar)
+        typer.echo(f"cadence: {oncalendar}")
+
+    gap = cadence_mod.longest_gap(cadence_mod.parse_elapses(analysis))
+    if gap:
+        typer.echo(f"  every {_format_duration(gap)} ({int(86400 / gap)} ticks/agent/day)")
+        # Surfaced because it moves with cadence and nobody would think to look:
+        # `wake-check` derives its staleness limit from this timer, so slowing
+        # the fleet also slows how fast a dead pipeline is noticed.
+        limit = cadence_mod.max_age_for(gap)
+        typer.echo(f"  dead-man check now allows {_format_duration(limit)} of silence")
+    for line in analysis.splitlines():
+        if "Next elapse" in line:
+            typer.echo(f"  {line.strip()}")
 
 
 provider_app = typer.Typer(

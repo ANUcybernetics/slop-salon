@@ -2,8 +2,10 @@
 Description=Run the Slop Salon dead-man check hourly
 
 [Timer]
-# Hourly at :47, off the :00/:30 wake boundary so a check never lands in the
-# middle of a wake's own startup.
+# Hourly at :47, off the round-hour wake boundary so a check never lands in the
+# middle of a wake's own startup. Stays hourly whatever the wake cadence is: how
+# often we *look* is independent of how often the fleet ticks, and `wake-check`
+# derives how much silence to tolerate from the timer itself.
 OnCalendar=*-*-* *:47:00
 RandomizedDelaySec=2min
 # Fire on resume after downtime. The check is cheap and idempotent, and a laptop

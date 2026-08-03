@@ -203,3 +203,53 @@ def test_main_prints_nothing_without_agent_name(monkeypatch, capsys):
     monkeypatch.delenv("AGENT_NAME", raising=False)
     studio.main()
     assert capsys.readouterr().out == ""
+
+
+# --- list_assets_by_mtime ---
+#
+# The media-mix nudge used to read `git log -- assets`, but assets/ has been
+# gitignored since task-11, so the list froze at whatever was committed before
+# that and could never see a new piece. On 2026-08-04 lelia's cue told her "your
+# last 4 committed pieces are all still images", naming files from 2026-07-20,
+# on the tick right after she posted a video.
+
+
+def test_assets_are_listed_newest_first(tmp_path):
+    import os
+
+    from slop_salon.tools.studio import list_assets_by_mtime
+
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    for i, name in enumerate(["old.png", "middle.wav", "newest.mp4"]):
+        p = assets / name
+        p.write_text("x")
+        os.utime(p, (1_700_000_000 + i * 100, 1_700_000_000 + i * 100))
+
+    assert list_assets_by_mtime(assets) == ["newest.mp4", "middle.wav", "old.png"]
+
+
+def test_missing_assets_dir_is_empty_not_an_error(tmp_path):
+    """A fresh sprite has made nothing yet; the cue must stay silent, not crash."""
+    from slop_salon.tools.studio import list_assets_by_mtime
+
+    assert list_assets_by_mtime(tmp_path / "nope") == []
+
+
+def test_recent_media_sees_uncommitted_work(tmp_path):
+    """The regression itself: a video in assets/ must count even though git can't see it."""
+    import subprocess
+
+    from slop_salon.tools.studio import _recent_media
+
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    (tmp_path / ".gitignore").write_text("assets/\n")
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "piece.mp4").write_text("x")
+    (assets / "cover.png").write_text("x")
+
+    counts, total = _recent_media(tmp_path)
+    assert total == 2
+    assert counts["video"] == 1
+    assert counts["image"] == 1

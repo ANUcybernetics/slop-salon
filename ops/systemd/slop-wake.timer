@@ -1,8 +1,17 @@
 [Unit]
-Description=Trigger slop-wake every 30 minutes
+Description=Trigger slop-wake on the configured cadence
 
 [Timer]
-OnCalendar=*-*-* *:00,30:00
+# The installed default. Change it live with `slop cadence 6h` rather than by
+# editing here --- that writes a drop-in (slop-wake.timer.d/cadence.conf) which
+# overrides this line, and `slop wake-check` derives its staleness limit from
+# whatever is actually in force, so the dead-man check follows automatically.
+#
+# 6-hourly, down from every 30 minutes (2026-08-04). A tick's cost is dominated
+# by a fixed floor --- the ~29k prompt prefix plus the routine's mandatory reads
+# --- so a rest tick still costs ~60% of a productive one. Ticks are far easier
+# to make rarer than cheaper.
+OnCalendar=*-*-* 00/6:00:00
 RandomizedDelaySec=300
 Persistent=true
 Unit=slop-wake.service

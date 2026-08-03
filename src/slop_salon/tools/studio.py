@@ -224,12 +224,30 @@ def _claudemd_self_edit_days(repo: Path, now: float) -> tuple[int | None, bool]:
         return None, False
 
 
+def list_assets_by_mtime(assets_dir: Path) -> list[str]:
+    """Media files under `assets_dir`, newest first.
+
+    Read from the filesystem, not from git. `assets/` has been **gitignored**
+    since task-11 --- media is a sprite-local ephemeral cache, never committed
+    --- so the old `git log -- assets` read returned only the handful of files
+    committed before that change and could never see anything made since.
+
+    That is not a stale signal, it is a frozen one: lelia's cue claimed "your
+    last 4 committed pieces are all still images" on 2026-08-04, naming files
+    from 2026-07-20, on the tick *after* she posted a video. A nudge that cannot
+    observe the thing it nudges about will fire forever and teach the agent to
+    stop believing the cue.
+    """
+    try:
+        entries = [p for p in assets_dir.iterdir() if p.is_file()]
+    except OSError:
+        return []
+    entries.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    return [p.name for p in entries]
+
+
 def _recent_media(repo: Path) -> tuple[dict[str, int], int]:
-    paths = _git_lines(
-        repo,
-        ["log", "--diff-filter=AM", "--name-only", "--pretty=format:", "--", "assets"],
-    )
-    recent = select_recent_media(paths, ASSET_WINDOW)
+    recent = select_recent_media(list_assets_by_mtime(repo / "assets"), ASSET_WINDOW)
     return classify_media(recent), len(recent)
 
 
