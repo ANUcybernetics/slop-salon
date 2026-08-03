@@ -101,6 +101,7 @@ namesake = "Vita Sackville-West"
 namesake_url = "https://en.wikipedia.org/wiki/Vita_Sackville-West"
 
 [agents.lelia]
+provider = "deepseek"
 handle = "lelia.slopsalon.art"
 github_repo = "ANUcybernetics/slop-salon-lelia"
 sprite_id = "lelia"

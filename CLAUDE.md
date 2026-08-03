@@ -299,6 +299,16 @@ sparse-MoE, FP8-quantised --- on cybersonic (see below), still the default.
 a pure env swap, ~$0.14/M input on a cache miss and ~$0.0028/M on a hit, with a
 1M context. `claude-sub` and `codex-sub` are the subscription paths.
 
+**Measured, not estimated** (lelia's first deepseek tick, 2026-08-04): 32 API
+calls, 62k new input tokens against 1.85M cache reads --- a **96.7% cache hit
+rate** --- and 19k output, for
+**$0.019 a tick**. At the fleet's ~270 ticks/day
+that is ~$5/day, ~$155/month.
+The uncached arithmetic in task-16 put the same workload an order of magnitude
+higher; prefix caching is the whole difference, and it is invisible on vLLM
+because vLLM reports no cache fields at all. A non-zero `cache_rd` in
+`slop usage` is therefore the first hard proof a swap off vLLM actually took.
+
 **The env file is split in two.** `~/.slop-env` holds identity and durable
 secrets (`AGENT_NAME`, `GH_TOKEN`, `BSKY_*`, `REPLICATE_API_TOKEN`); the new
 `~/.slop-provider` holds only the provider block and `SLOP_RUNNER`. `slop-tick`

@@ -4,7 +4,7 @@ title: 'Option: run the agents on a Claude Pro subscription via claude -p'
 status: To Do
 assignee: []
 created_date: '2026-07-28 10:26'
-updated_date: '2026-08-03 23:03'
+updated_date: '2026-08-03 23:19'
 labels: []
 dependencies: []
 ordinal: 16000
@@ -90,26 +90,26 @@ answers blockers 1 and 2 without touching the other five agents.
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-2026-08-04: superseded in mechanism, not in conclusion. The provider abstraction
-landed (see CLAUDE.md "Providers"), so this is no longer a one-off assessment ---
-subscription auth is now one registry entry among four, selectable per agent with
-`slop provider set`.
+2026-08-04: superseded in mechanism, and now measured rather than estimated.
 
-What survives from the assessment: the arithmetic still says Pro is hopeless at
-30-minute ticks, and the three blockers still stand. Blocker 2 (shared OAuth
-across six sprites) remains untested, and `slop provider set` now refuses to put
-more than one agent on a subscription provider at once so that a canary has to
-answer it before a fan-out can happen.
+The provider abstraction landed (see CLAUDE.md "Providers"), so this is no
+longer a one-off assessment --- subscription auth is one registry entry among
+four, selectable per agent with `slop provider set`.
 
-What changed: the "honest alternative" is no longer only the Anthropic API.
-DeepSeek V4-Flash speaks Anthropic wire format at api.deepseek.com/anthropic, so
-it needs the identical one-line change and costs ~$0.14/M input on a cache miss,
-~$0.0028/M on a hit --- roughly $30/day uncached at the measured ~220M
-input-tokens/day, and much less once caching applies. That is the default
-fallback while cybersonic is down, and it also gives us the cache visibility vLLM
-never reported.
+What survives: the arithmetic still says Claude Pro is hopeless at 30-minute
+ticks, and the three blockers stand. Blocker 2 (shared OAuth across six sprites)
+remains untested, and `slop provider set` now refuses to put more than one agent
+on a subscription provider at once so a canary must answer it before a fan-out.
 
-Also: codex's session records carry `rate_limits.primary.used_percent` and
-`plan_type`, which `slop usage` now surfaces. Blocker 1 becomes something to
-measure on a canary rather than argue from token arithmetic.
+What changed, decisively: DeepSeek V4-Flash speaks Anthropic wire format at
+api.deepseek.com/anthropic, so it needs the identical one-line change. Lelia's
+first tick on it (2026-08-04) measured 32 calls, 62k new input against 1.85M
+cache reads (96.7% hit rate) and 19k output --- $0.019 per tick, ~$5/day,
+~$155/month for the fleet. This assessment's $17-20k/month uncached figure was
+an order of magnitude off for the wrong reason: prefix caching does almost all
+the work, and vLLM reports no cache fields at all, so we had no way to see it.
+
+Blocker 1 also becomes measurable rather than arguable: codex's session records
+carry `rate_limits.primary.used_percent` and `plan_type`, which `slop usage`
+now surfaces.
 <!-- SECTION:NOTES:END -->
