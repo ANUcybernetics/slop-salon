@@ -128,7 +128,13 @@ claude)
   # defaults we must not clobber, and a tick-scoped restriction belongs on the
   # tick's own command.
   DENIED_TOOLS="${SLOP_DENIED_TOOLS:-AskUserQuestion}"
-  RUNNER_CMD=(claude --print --disallowedTools "$DENIED_TOOLS" "$PROMPT")
+  # `--disallowedTools=<value>`, not `--disallowedTools <value>`. The flag is
+  # variadic (`<tools...>`), so the separated form keeps eating arguments and
+  # swallows the prompt as a second tool name --- claude then exits 1 with
+  # "Input must be provided either through stdin or as a prompt argument".
+  # The `=` form binds exactly one value, and since the flag takes a comma- or
+  # space-separated list, a multi-tool SLOP_DENIED_TOOLS still works as one arg.
+  RUNNER_CMD=(claude --print "--disallowedTools=$DENIED_TOOLS" "$PROMPT")
   ;;
 codex)
   # Codex has no `@` import syntax, so CLAUDE.md's SOUL/MEMORY/TOOLS imports

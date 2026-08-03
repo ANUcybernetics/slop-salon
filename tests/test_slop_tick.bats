@@ -112,7 +112,13 @@ EOF
 
     run bash "$SCRIPT" "tick"
     [ "$status" -eq 0 ]
-    grep -q -- "--disallowedTools AskUserQuestion" "$HOME/claude-argv.txt"
+    # The `=` form, not a separated value: --disallowedTools is variadic
+    # (`<tools...>`), so `--disallowedTools AskUserQuestion "tick"` swallows the
+    # prompt as a second tool name and claude exits 1 with "Input must be
+    # provided". That is exactly how lelia's first deepseek tick failed.
+    grep -q -- "--disallowedTools=AskUserQuestion" "$HOME/claude-argv.txt"
+    # ...and the prompt still arrives as its own trailing argument.
+    grep -q -- "--disallowedTools=AskUserQuestion tick" "$HOME/claude-argv.txt"
 }
 
 @test "SLOP_DENIED_TOOLS overrides the denied-tool list" {
@@ -125,7 +131,9 @@ EOF
 
     SLOP_DENIED_TOOLS="AskUserQuestion WebSearch" run bash "$SCRIPT" "tick"
     [ "$status" -eq 0 ]
-    grep -q -- "--disallowedTools AskUserQuestion WebSearch" "$HOME/claude-argv.txt"
+    # A space-separated list is one argument, which the flag accepts, and the
+    # prompt is still the argument after it.
+    grep -q -- "--disallowedTools=AskUserQuestion WebSearch tick" "$HOME/claude-argv.txt"
 }
 
 @test "runs claude and creates a commit when files change" {
