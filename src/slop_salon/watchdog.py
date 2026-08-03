@@ -97,7 +97,7 @@ def problems(
     now: dt.datetime,
     max_age: float,
     timer_active: bool,
-    inference: Probe,
+    inference: Probe | None,
     timer_name: str = "slop-wake.timer",
 ) -> list[str]:
     """Everything wrong right now, as printable lines. Empty means healthy."""
@@ -141,7 +141,11 @@ def problems(
                 broken = ", ".join(f"{n}={s}" for n, s in sorted(statuses.items()))
                 found.append(f"every agent failed in the last wake: {broken}")
 
-    if not inference.ok:
+    # `None` means no provider in use declares a health endpoint --- a hosted API
+    # has nothing to probe. Not a problem, and deliberately not faked into a
+    # green probe: the ok line says the check was skipped, so nobody reads this
+    # as three questions answered when only two were asked.
+    if inference is not None and not inference.ok:
         found.append(f"inference endpoint unhealthy: {inference.detail}")
 
     return found

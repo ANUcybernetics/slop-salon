@@ -234,3 +234,132 @@ def test_cli_tally_emits_jsonl(tmp_path, monkeypatch):
         assert line["agent"] == "lou"
         assert "cost_usd" in line
         assert line["turns"] == 1
+
+
+# --- codex runner ---------------------------------------------------------
+#
+# Record shape verified against a real ~/.codex/sessions rollout file, not
+# guessed: `payload.type == "token_count"` carrying `info.total_token_usage`
+# (cumulative over the session) and `info.last_token_usage` (that one request).
+
+
+def _token_count(total: dict, last: dict | None = None, rate: dict | None = None) -> dict:
+    payload = {"type": "token_count", "info": {"total_token_usage": total}}
+    if last is not None:
+        payload["info"]["last_token_usage"] = last
+    if rate is not None:
+        payload["rate_limits"] = rate
+    return {"type": "event_msg", "payload": payload}
+
+
+def _totals(inp: int, cached: int, out: int, write: int = 0) -> dict:
+    return {
+        "input_tokens": inp,
+        "cached_input_tokens": cached,
+        "cache_write_input_tokens": write,
+        "output_tokens": out,
+        "total_tokens": inp + out,
+    }
+
+
+def test_codex_tally_takes_the_last_total_not_a_sum(tmp_path):
+    """The totals are cumulative, so summing counts the session once per request.
+
+    Same class of error as the message.id overcount on the claude path, and just
+    as plausible-looking in a table: three requests here, 300 input tokens, not
+    600.
+    """
+    from slop_salon.tools.usage import tally_codex_session
+
+    f = _write_session(
+        tmp_path / "rollout-2026-08-01T10-00-00-abc12345.jsonl",
+        [
+            {"type": "session_meta", "payload": {"type": "session_meta"}},
+            _token_count(_totals(100, 0, 10), last=_totals(100, 0, 10)),
+            _token_count(_totals(200, 0, 20), last=_totals(100, 0, 10)),
+            _token_count(_totals(300, 0, 30), last=_totals(100, 0, 10)),
+        ],
+    )
+    stats = tally_codex_session(f)
+    assert stats["in_new"] == 300
+    assert stats["output"] == 30
+    assert stats["turns"] == 3
+    assert stats["runner"] == "codex"
+
+
+def test_codex_input_tokens_are_inclusive_of_cached(tmp_path):
+    """Codex reports total-plus-how-much-was-cached; claude reports disjoint buckets.
+
+    Without the subtraction a cache-heavy session looks like it paid full price
+    for the same tokens twice --- the real fleet ratio is ~40M cached of ~42M.
+    """
+    from slop_salon.tools.usage import tally_codex_session
+
+    f = _write_session(
+        tmp_path / "rollout-x-deadbeef.jsonl",
+        [_token_count(_totals(1000, 900, 50, write=25), last=_totals(1000, 900, 50))],
+    )
+    stats = tally_codex_session(f)
+    assert stats["in_new"] == 100
+    assert stats["cache_read"] == 900
+    assert stats["cache_create"] == 25
+
+
+def test_codex_tally_surfaces_subscription_headroom(tmp_path):
+    """The number that actually decides whether one plan can carry six agents."""
+    from slop_salon.tools.usage import tally_codex_session
+
+    f = _write_session(
+        tmp_path / "rollout-y-cafe1234.jsonl",
+        [
+            _token_count(
+                _totals(10, 0, 1),
+                last=_totals(10, 0, 1),
+                rate={
+                    "primary": {"used_percent": 44.0, "window_minutes": 10080},
+                    "plan_type": "team",
+                },
+            )
+        ],
+    )
+    stats = tally_codex_session(f)
+    assert stats["limit_pct"] == 44.0
+    assert stats["plan_type"] == "team"
+
+
+def test_codex_tally_survives_a_session_with_no_usage(tmp_path):
+    from slop_salon.tools.usage import tally_codex_session
+
+    f = _write_session(
+        tmp_path / "rollout-z-00000000.jsonl", [{"payload": {"type": "session_meta"}}]
+    )
+    stats = tally_codex_session(f)
+    assert stats["turns"] == 0
+    assert stats["in_new"] == 0
+    assert "limit_pct" not in stats
+
+
+def test_tally_dir_reads_both_runners(tmp_path):
+    """A provider swap must not blank the usage table either side of the change.
+
+    tally_dir detects from disk rather than SLOP_RUNNER: `slop usage` runs via a
+    bare `sprite exec`, which never sources ~/.slop-provider.
+    """
+    import os
+
+    proj = tmp_path / "claude" / "-home-sprite-slop-salon-lou"
+    proj.mkdir(parents=True)
+    a = _write_session(proj / "aaaa1111.jsonl", [_assistant(5, 0, 0, 5)])
+
+    codex = tmp_path / "codex" / "2026" / "08" / "01"
+    codex.mkdir(parents=True)
+    b = _write_session(
+        codex / "rollout-2026-08-01T10-00-00-bbbb2222.jsonl",
+        [_token_count(_totals(7, 0, 7), last=_totals(7, 0, 7))],
+    )
+    os.utime(a, (1_700_000_000, 1_700_000_000))
+    os.utime(b, (1_700_000_100, 1_700_000_100))
+
+    rows = tally_dir("lou", root=tmp_path / "claude", codex_root=tmp_path / "codex")
+    assert [r["runner"] for r in rows] == ["claude", "codex"]
+    assert [r["in_new"] for r in rows] == [5, 7]

@@ -5,6 +5,65 @@
 # The Python loader (`src/slop_salon/config.py`) ignores unknown fields, so
 # adding this here is backward-compatible.
 
+# --- Intelligence providers -------------------------------------------------
+#
+# Where an agent's thinking comes from. Two separable things per provider: which
+# agent CLI runs the tick (`runner`), and how that CLI reaches a model (`env` +
+# `secret_env`, or an OAuth profile via `credentials_*`).
+#
+# NO SECRETS HERE. `secret_env` maps a sprite-side var name to the *name* of the
+# admin-side env var holding the value. This file is tracked, and is inlined
+# verbatim into the public site bundle by `site/src/lib/agents.ts`.
+#
+# An agent takes `default_provider` unless its own block sets `provider = "..."`.
+# Swap one live agent with `slop provider set <agent> <id>`; it rewrites
+# ~/.slop-provider in the sprite and the next tick picks it up.
+#
+# Still "vllm" while the fleet is on cybersonic. Flipping this line is how the
+# whole salon moves once a canary has proved another provider out --- deliberate
+# and one line, rather than a silent consequence of adding the table.
+default_provider = "vllm"
+
+[providers.vllm]
+# Self-hosted Qwen3.6-35B-A3B on cybersonic, reached over the tailnet. The
+# claude pin is load-bearing: 2.1.168 sends the Skills list as a system-role
+# message inside `messages`, which vLLM 400s (it cost lelia 3.5 days once).
+runner = "claude"
+claude_version = "2.1.92"
+health_url = "http://100.110.244.39:8001/health"
+env = { ANTHROPIC_BASE_URL = "http://100.110.244.39:8001", ANTHROPIC_MODEL = "qwen3.6-27b", ANTHROPIC_SMALL_FAST_MODEL = "qwen3.6-27b", API_TIMEOUT_MS = "1800000" }
+secret_env = { ANTHROPIC_AUTH_TOKEN = "SLOP_ANTHROPIC_AUTH_TOKEN" }
+
+[providers.deepseek]
+# DeepSeek V4-Flash. Speaks Anthropic wire format, so it runs under the same
+# `claude` binary --- a pure env swap. 1M context (so the context-overflow 500s
+# of task-13 should stop), and metered: ~$0.14/M input on a cache miss,
+# ~$0.0028/M on a hit. No health endpoint, so wake-check skips the probe.
+runner = "claude"
+env = { ANTHROPIC_BASE_URL = "https://api.deepseek.com/anthropic", ANTHROPIC_MODEL = "deepseek-v4-flash", ANTHROPIC_SMALL_FAST_MODEL = "deepseek-v4-flash", API_TIMEOUT_MS = "600000" }
+secret_env = { ANTHROPIC_API_KEY = "DEEPSEEK_API_TOKEN" }
+
+[providers.claude-sub]
+# Ben's Claude subscription. Sets no env at all, on purpose: Claude Code
+# resolves ANTHROPIC_API_KEY -> ANTHROPIC_AUTH_TOKEN -> the OAuth profile, and
+# only reaches the profile when neither var is set. UNPROVEN ACROSS SPRITES ---
+# refresh tokens rotate on use, so two sprites sharing one profile may
+# deauthenticate each other. Canary a single agent before any second one.
+runner = "claude"
+credentials_dest = "~/.claude/.credentials.json"
+credentials_source_env = "SLOP_CLAUDE_CREDENTIALS_PATH"
+
+[providers.codex-sub]
+# Ben's ChatGPT subscription, via `codex exec`. A different runner, not just a
+# different backend: codex reads AGENTS.md (generated per tick from CLAUDE.md),
+# has no PostToolUse hook so ambient-recall is lost, and writes its own
+# transcript format. Same untested refresh-token risk as claude-sub.
+runner = "codex"
+credentials_dest = "~/.codex/auth.json"
+credentials_source_env = "SLOP_CODEX_AUTH_PATH"
+
+# --- Agents -----------------------------------------------------------------
+
 [agents.lou]
 handle = "lou.slopsalon.art"
 github_repo = "ANUcybernetics/slop-salon-lou"

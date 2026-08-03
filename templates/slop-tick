@@ -17,6 +17,15 @@ if [[ -f "$HOME/.slop-env" ]]; then
   source "$HOME/.slop-env"
 fi
 
+# The provider block (which runner, which model, which endpoint) is a separate
+# file so `slop provider set` can swap it without touching the agent's secrets.
+# Sourced *second*: it unsets the inference vars a pre-split ~/.slop-env still
+# exports, then exports its own, so it wins whatever is underneath.
+# shellcheck disable=SC1090
+if [[ -f "$HOME/.slop-provider" ]]; then
+  source "$HOME/.slop-provider"
+fi
+
 if [[ -z "${AGENT_NAME:-}" ]]; then
   echo "error: AGENT_NAME not set (is ~/.slop-env in place?)" >&2
   exit 1
@@ -95,33 +104,59 @@ if [[ "$PROMPT" == "tick" ]]; then
   fi
 fi
 
-# Model and API endpoint come from the ANTHROPIC_* vars in ~/.slop-env.
-# Bound the worst case: claude can wedge with orphan BashTool persistent
-# shells (they make themselves session leaders, so they don't die with
-# claude's process group). Without a hard cap a single bad tick stalls the
+# Bound the worst case: an agent CLI can wedge with orphan BashTool persistent
+# shells (they make themselves session leaders, so they don't die with the
+# runner's process group). Without a hard cap a single bad tick stalls the
 # wake driver for hours. 30m is ~2x the slowest healthy tick seen so far.
 TICK_TIMEOUT="${SLOP_TICK_TIMEOUT:-30m}"
 
-# A tick has no human in it, so deny the tools that need one. AskUserQuestion is
-# the live case: rahel's 2026-07-28 08:00 tick composed a real question ("Reply
-# to Lelia, or let the register open on its own?"), spent a full API call on it,
-# and got `is_error: true` back --- there is nobody to answer under `--print`.
-# The agent can't discover that from the tool list, so take it away rather than
-# ask it in prose not to use it. Passed as a flag, not written into
-# ~/.claude/settings.json: the sprite image ships that file with defaults we must
-# not clobber, and a tick-scoped restriction belongs on the tick's own command.
-DENIED_TOOLS="${SLOP_DENIED_TOOLS:-AskUserQuestion}"
+# Which agent CLI drives this tick. Set by ~/.slop-provider; defaults to claude
+# so a sprite that predates the provider split keeps working untouched.
+RUNNER="${SLOP_RUNNER:-claude}"
+
+case "$RUNNER" in
+claude)
+  # Model and API endpoint come from the ANTHROPIC_* vars in ~/.slop-provider.
+  #
+  # A tick has no human in it, so deny the tools that need one. AskUserQuestion
+  # is the live case: rahel's 2026-07-28 08:00 tick composed a real question
+  # ("Reply to Lelia, or let the register open on its own?"), spent a full API
+  # call on it, and got `is_error: true` back --- there is nobody to answer
+  # under `--print`. The agent can't discover that from the tool list, so take
+  # it away rather than ask it in prose not to use it. Passed as a flag, not
+  # written into ~/.claude/settings.json: the sprite image ships that file with
+  # defaults we must not clobber, and a tick-scoped restriction belongs on the
+  # tick's own command.
+  DENIED_TOOLS="${SLOP_DENIED_TOOLS:-AskUserQuestion}"
+  RUNNER_CMD=(claude --print --disallowedTools "$DENIED_TOOLS" "$PROMPT")
+  ;;
+codex)
+  # Codex has no `@` import syntax, so CLAUDE.md's SOUL/MEMORY/TOOLS imports
+  # would silently drop out of the prompt. Render them into a flat AGENTS.md
+  # (gitignored, rewritten every tick) before the run. Fail-open: a stale
+  # AGENTS.md beats no tick.
+  slop-prompt agents-md --root "$PWD" 2>/dev/null || true
+  # The sprite is itself the sandbox --- the agent has sudo and is expected to
+  # apt-install and render media --- so codex's own sandbox only gets in the
+  # way. No --ephemeral: it skips session persistence, and those session files
+  # are what `slop usage` reads to tally the tick.
+  RUNNER_CMD=(codex exec --sandbox danger-full-access -C "$PWD" "$PROMPT")
+  ;;
+*)
+  echo "slop-tick: unknown SLOP_RUNNER '$RUNNER' (want claude or codex)" >&2
+  exit 1
+  ;;
+esac
 
 rc=0
-timeout --kill-after=15 "$TICK_TIMEOUT" claude --print \
-  --disallowedTools "$DENIED_TOOLS" "$PROMPT" 9>&- || rc=$?
+timeout --kill-after=15 "$TICK_TIMEOUT" "${RUNNER_CMD[@]}" 9>&- || rc=$?
 if [[ $rc -eq 124 ]]; then
-  echo "slop-tick: claude exceeded ${TICK_TIMEOUT}, killed" >&2
+  echo "slop-tick: $RUNNER exceeded ${TICK_TIMEOUT}, killed" >&2
 elif [[ $rc -ne 0 ]]; then
-  echo "slop-tick: claude exited $rc" >&2
+  echo "slop-tick: $RUNNER exited $rc" >&2
 fi
 
-# Reap any orphan BashTool persistent shells claude left behind.
+# Reap any orphan BashTool persistent shells the runner left behind.
 pkill -f "shell-snapshots/snapshot-zsh" 2>/dev/null || true
 
 if ! git diff --quiet HEAD || [[ -n "$(git ls-files --others --exclude-standard)" ]]; then

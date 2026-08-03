@@ -16,6 +16,7 @@ replicate = "slop_salon.tools.replicate_run:app"
 slop-usage = "slop_salon.tools.usage:app"
 slop-recall = "slop_salon.tools.recall:app"
 slop-studio = "slop_salon.tools.studio:app"
+slop-prompt = "slop_salon.tools.prompt:app"
 
 [dependency-groups]
 dev = ["pytest>=8", "pytest-httpx>=0.30", "ruff>=0.5"]

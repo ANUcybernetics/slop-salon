@@ -9,6 +9,7 @@ Subcommands:
     talk           one-shot stateless prompt to an agent
     wake           fire a tick at every live agent in parallel
     usage          per-tick token and cost tally across live agents
+    provider       show or swap an agent's intelligence provider
     new            provision a new agent (see provision.py)
     sync-siblings  backfill missing sibling entries in live SIBLINGS.md
 """
@@ -32,7 +33,7 @@ import httpx
 import typer
 
 from slop_salon import wake_slots, watchdog
-from slop_salon.config import load_config
+from slop_salon.config import load_config, save_provider
 from slop_salon.healing import SKIP_BUSY_CODE, claude_failed, heal_wedged, is_wedge
 from slop_salon.provision import (
     SLOP_SALON_REPO,
@@ -40,6 +41,8 @@ from slop_salon.provision import (
     _build_template_files,
     _interpolate,
     _render_sibling_block,
+    missing_provider_secrets,
+    provider_steps,
     provision_agent,
     resolve_secrets,
 )
@@ -487,7 +490,9 @@ def _probe_inference(endpoint: str, token: str | None, timeout: float) -> watchd
     probe, so must be conservative) this only files a todo, and a 401 from a
     rotated key is a real outage worth hearing about.
     """
-    url = endpoint.rstrip("/") + "/health"
+    # `endpoint` is a full health URL (from the provider's `health_url`), not a
+    # base to append to --- providers differ in where, or whether, they expose one.
+    url = endpoint
     headers = {"Authorization": f"Bearer {token}"} if token else {}
     try:
         response = httpx.get(url, headers=headers, timeout=timeout)
@@ -515,12 +520,13 @@ def _timer_is_active(timer: str) -> bool:
 def wake_check(
     max_age: str = typer.Option("90.mins", "--max-age", help="Staleness limit, e.g. '90.mins'"),
     endpoint: str = typer.Option(
-        None, "--endpoint", help="Inference base URL (default: $SLOP_ANTHROPIC_BASE_URL)"
+        None, "--endpoint", help="Override the health URL to probe (default: from the providers)"
     ),
     timer: str = typer.Option(
         "slop-wake.timer", "--timer", help="Wake timer unit to require active"
     ),
     timeout: float = typer.Option(15.0, "--timeout", help="Inference probe timeout, seconds"),
+    config_path: str = typer.Option(None, "--config"),
 ):
     """Dead-man check on the whole tick pipeline. Non-zero if anything is wrong.
 
@@ -533,30 +539,47 @@ def wake_check(
     invisible to at least one of them: the timer is armed, a wake finished
     recently, and the model is reachable. See `slop_salon.watchdog`.
     """
-    base = (
-        endpoint
-        or os.environ.get("SLOP_ANTHROPIC_BASE_URL")
-        or os.environ.get("ANTHROPIC_BASE_URL")
-    )
-    if not base:
-        typer.echo(
-            "error: no inference endpoint --- pass --endpoint or set SLOP_ANTHROPIC_BASE_URL",
-            err=True,
+    # Probe only what the providers in use actually expose. A self-hosted vLLM
+    # has /health; a hosted API has nothing to probe, and inventing a green
+    # probe for it would quietly turn this into a two-question check that still
+    # claims to ask three.
+    config = _config(config_path)
+    if endpoint:
+        health_urls = [endpoint]
+    else:
+        health_urls = sorted(
+            {
+                config.provider_for(name).health_url
+                for name, agent in config.agents.items()
+                if agent.live and config.provider_for(name).health_url
+            }
         )
-        raise typer.Exit(code=2)
 
     token = os.environ.get("SLOP_ANTHROPIC_AUTH_TOKEN") or os.environ.get("ANTHROPIC_AUTH_TOKEN")
+    probes = [_probe_inference(url, token, timeout) for url in health_urls]
+    # Collapse to one verdict: any unhealthy endpoint is a problem, and the
+    # detail names which.
+    inference = None
+    if probes:
+        bad = [p for p in probes if not p.ok]
+        inference = (
+            watchdog.Probe(ok=False, detail="; ".join(p.detail for p in bad))
+            if bad
+            else watchdog.Probe(ok=True, detail="; ".join(p.detail for p in probes))
+        )
+
     found = watchdog.problems(
         stamp=watchdog.read_stamp(),
         now=dt.datetime.now(dt.UTC),
         max_age=_parse_duration(max_age),
         timer_active=_timer_is_active(timer),
-        inference=_probe_inference(base, token, timeout),
+        inference=inference,
         timer_name=timer,
     )
 
     if not found:
-        typer.echo(f"ok: {timer} armed, wake stamp fresh, {base} serving")
+        served = inference.detail if inference else "no health endpoint to probe (hosted provider)"
+        typer.echo(f"ok: {timer} armed, wake stamp fresh, {served}")
         return
 
     for problem in found:
@@ -765,6 +788,180 @@ def usage(
     typer.echo(
         f"{'total':<8}{'':>6}{'':>6}  {'':>5}  {'':>8}  {'':>12}  {'':>12}  ${grand_total:>8.2f}"
     )
+
+
+provider_app = typer.Typer(
+    add_completion=False,
+    help="Show or swap an agent's intelligence provider.",
+    no_args_is_help=True,
+)
+app.add_typer(provider_app, name="provider")
+
+# Anything not on this list is treated as a secret and never printed. An
+# allowlist rather than a denylist: a new provider adding a differently-named
+# key must not leak it just because nobody remembered to add a pattern.
+PROVIDER_PUBLIC_VARS = (
+    "SLOP_RUNNER",
+    "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_MODEL",
+    "ANTHROPIC_SMALL_FAST_MODEL",
+    "API_TIMEOUT_MS",
+)
+
+
+def _read_live_provider(sprites: SpritesClient, sprite_id: str) -> dict[str, str]:
+    """Read back the sprite's `~/.slop-provider`, secrets redacted.
+
+    What is actually running, as opposed to what the registry says should be ---
+    the two diverge the moment a swap half-fails, and that gap is exactly what
+    is worth seeing.
+    """
+    result = sprites.exec(sprite_id, ["bash", "-lc", "cat ~/.slop-provider 2>/dev/null || true"])
+    live: dict[str, str] = {}
+    for line in result.stdout.splitlines():
+        line = line.strip()
+        if not line.startswith("export "):
+            continue
+        key, _, value = line.removeprefix("export ").partition("=")
+        live[key] = value.strip("'\"") if key in PROVIDER_PUBLIC_VARS else "<set>"
+    return live
+
+
+@provider_app.command("list")
+def provider_list(config_path: str = typer.Option(None, "--config")):
+    """The provider registry, and who runs on what."""
+    config = _config(config_path)
+    if not config.providers:
+        typer.echo("no [providers.*] blocks; every agent falls back to the built-in vllm provider")
+        return
+
+    users: dict[str, list[str]] = {}
+    for name in config.agents:
+        users.setdefault(config.provider_for(name).name, []).append(name)
+
+    for pid, provider in config.providers.items():
+        default = " (default)" if pid == config.default_provider else ""
+        auth = "subscription" if provider.is_subscription else "api key"
+        model = provider.env.get("ANTHROPIC_MODEL", "-")
+        typer.echo(f"{pid}{default}")
+        typer.echo(f"  runner={provider.runner}  auth={auth}  model={model}")
+        if provider.claude_version:
+            typer.echo(f"  claude pinned to {provider.claude_version}")
+        missing = missing_provider_secrets(provider)
+        if missing:
+            typer.echo(f"  UNUSABLE: missing admin env {missing}")
+        typer.echo(f"  agents: {', '.join(users.get(pid, [])) or '(none)'}")
+
+
+@provider_app.command("show")
+def provider_show(
+    name: str = typer.Argument(None, help="Agent name (omit for all)"),
+    live: bool = typer.Option(False, "--live", help="Also read ~/.slop-provider off each sprite"),
+    config_path: str = typer.Option(None, "--config"),
+):
+    """What provider each agent is configured for --- and, with --live, running."""
+    config = _config(config_path)
+    if name and name not in config.agents:
+        typer.echo(f"error: unknown agent {name!r}", err=True)
+        raise typer.Exit(code=1)
+    targets = [config.agents[name]] if name else list(config.agents.values())
+
+    sprites = SpritesClient() if live else None
+    for agent in targets:
+        provider = config.provider_for(agent.name)
+        source = "explicit" if agent.provider else "default"
+        typer.echo(f"{agent.name:<8} {provider.name:<12} runner={provider.runner:<7} ({source})")
+        if not (live and agent.sprite_id):
+            continue
+        try:
+            running = _read_live_provider(sprites, agent.sprite_id)
+        except Exception as exc:  # noqa: BLE001 --- a dead sprite must not abort the sweep
+            typer.echo(f"         live: unreachable ({type(exc).__name__})")
+            continue
+        if not running:
+            typer.echo("         live: no ~/.slop-provider (pre-split sprite, using ~/.slop-env)")
+            continue
+        summary = "  ".join(f"{k}={v}" for k, v in sorted(running.items()))
+        typer.echo(f"         live: {summary}")
+
+
+@provider_app.command("set")
+def provider_set(
+    name: str = typer.Argument(..., help="Agent name, or 'all' for every live agent"),
+    provider_id: str = typer.Argument(..., help="Provider id from the registry"),
+    config_path: str = typer.Option(None, "--config"),
+):
+    """Swap an agent onto another provider, live. Takes effect next tick.
+
+    Rewrites `~/.slop-provider` in the sprite and records the choice in
+    slop_salon.toml. Nothing is restarted and nothing else in the sprite is
+    touched: ticks are stateless, so the next wake simply reads the new file.
+
+    A swap and a fresh provision run the same `provider_steps`, so the state
+    they leave behind is identical --- a swapped sprite is not a special case
+    anyone has to reason about later.
+    """
+    config = _config(config_path)
+    if provider_id not in config.providers:
+        known = ", ".join(config.providers) or "(none defined)"
+        typer.echo(f"error: unknown provider {provider_id!r}; known: {known}", err=True)
+        raise typer.Exit(code=1)
+    provider = config.providers[provider_id]
+
+    if name == "all":
+        targets = [a for a in config.agents.values() if a.live and a.sprite_id]
+    elif name in config.agents:
+        targets = [config.agents[name]]
+    else:
+        typer.echo(f"error: unknown agent {name!r}", err=True)
+        raise typer.Exit(code=1)
+
+    if not targets:
+        typer.echo("no matching agents with a sprite", err=True)
+        raise typer.Exit(code=1)
+
+    # Resolve once, before touching anything: either every target can be swapped
+    # or none should be, so a missing token doesn't leave the fleet split across
+    # two providers mid-command.
+    try:
+        steps = provider_steps(provider)
+    except RuntimeError as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    if provider.is_subscription and len(targets) > 1:
+        typer.echo(
+            f"refusing to put {len(targets)} agents on {provider_id!r} at once: "
+            "subscription OAuth profiles rotate refresh tokens on use, and whether "
+            "two sprites sharing one profile deauthenticate each other is untested. "
+            "Canary a single agent first.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    sprites = SpritesClient()
+    failed = []
+    for agent in targets:
+        if not agent.sprite_id:
+            typer.echo(f"{agent.name}: no sprite_id, skipping")
+            continue
+        typer.echo(f"{agent.name} -> {provider_id}")
+        try:
+            for label, command in steps:
+                result = sprites.exec(agent.sprite_id, ["bash", "-lc", command])
+                if result.exit_code != 0:
+                    raise RuntimeError(f"{label} failed (exit={result.exit_code}): {result.stderr}")
+                typer.echo(f"  ok: {label}")
+        except Exception as exc:  # noqa: BLE001
+            typer.echo(f"  FAILED: {exc}", err=True)
+            failed.append(agent.name)
+            continue
+        save_provider(config, agent.name, provider_id)
+
+    if failed:
+        typer.echo(f"\nfailed: {', '.join(failed)}", err=True)
+        raise typer.Exit(code=1)
+    typer.echo("\nDone. Takes effect on each agent's next tick.")
 
 
 DRIFT_DEFAULT_FILES = ("SOUL.md", "CLAUDE.md", "slop-tick")

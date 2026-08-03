@@ -34,8 +34,12 @@ replicate_api_token = "lou-replicate"
     assert env["BSKY_PASSWORD"] == "lou-pw"
     assert env["REPLICATE_API_TOKEN"] == "lou-replicate"
     assert env["GH_TOKEN"] == "ghp_shared"
-    assert env["ANTHROPIC_BASE_URL"] == "https://proxy"
     assert "SPRITES_API_TOKEN" not in env
+    # Inference config belongs to the provider, not the agent: it lands in
+    # ~/.slop-provider so a provider swap rewrites one small file and cannot
+    # drop BSKY_PASSWORD on the way past. Leaking it here would also break
+    # subscription auth, which works precisely by having no key var set.
+    assert "ANTHROPIC_BASE_URL" not in env
 
 
 def test_resolve_secrets_excludes_other_agents_from_file(monkeypatch, tmp_path):
@@ -117,14 +121,30 @@ def test_apt_install_cmd_uses_required_packages():
 
 
 def test_claude_pin_cmd_installs_explicit_known_good_version():
-    from slop_salon.provision import CLAUDE_VERSION, _build_claude_pin_cmd
+    from slop_salon.config import LEGACY_PROVIDER
+    from slop_salon.provision import _build_claude_pin_cmd
 
-    cmd = _build_claude_pin_cmd()
-    assert cmd == f"claude install {CLAUDE_VERSION} --force"
+    version = LEGACY_PROVIDER.claude_version
+    assert _build_claude_pin_cmd(version) == f"claude install {version} --force"
     # Must be an explicit version, never a moving channel: a recreate off a newer
     # base image must not drift onto a build whose Skills injection vLLM rejects.
-    assert CLAUDE_VERSION not in ("latest", "stable")
-    assert CLAUDE_VERSION[0].isdigit()
+    assert version not in ("latest", "stable")
+    assert version[0].isdigit()
+
+
+def test_vllm_provider_pins_claude_but_hosted_providers_do_not():
+    """The pin exists for vLLM's sake, so it should not follow us elsewhere.
+
+    vLLM 400s on the system-role Skills message newer claude builds send, which
+    is why the fleet is held at 2.1.92. A provider that accepts those messages
+    should get whatever the base image ships --- carrying a months-old pin onto
+    an endpoint that never needed it is how a workaround outlives its cause.
+    """
+    from slop_salon.config import load_config
+
+    config = load_config("slop_salon.toml")
+    assert config.providers["vllm"].claude_version
+    assert not config.providers["deepseek"].claude_version
 
 
 def test_uv_install_cmd_installs_uv_and_slop_salon():
@@ -341,15 +361,18 @@ siblings = ["other"]
     assert not any("crontab" in cmd for cmd in exec_commands)
 
     # claude ships in the base image but its version drifts with the image, so
-    # provisioning pins it to a known-good build via the native `claude install`
-    # subcommand (never the curl installer).
-    from slop_salon.provision import CLAUDE_VERSION
+    # provisioning pins it to the version its provider asks for via the native
+    # `claude install` subcommand (never the curl installer).
+    from slop_salon.config import LEGACY_PROVIDER
 
-    assert any(f"claude install {CLAUDE_VERSION}" in cmd for cmd in exec_commands)
+    version = LEGACY_PROVIDER.claude_version
+    assert any(f"claude install {version}" in cmd for cmd in exec_commands)
     assert not any("claude.ai/install.sh" in cmd for cmd in exec_commands)
 
-    # The env file is written inside the sprite (the REST `env` field is ignored).
+    # The env file is written inside the sprite (the REST `env` field is ignored),
+    # and the provider block goes to its own file beside it.
     assert any("~/.slop-env" in cmd for cmd in exec_commands)
+    assert any("~/.slop-provider" in cmd for cmd in exec_commands)
     # create_sprite no longer takes env_vars (the API ignored them anyway).
     assert sprites.create_sprite.call_args.kwargs == {"name": "lou"} or (
         sprites.create_sprite.call_args.args == ("lou",)

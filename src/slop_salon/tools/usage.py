@@ -9,13 +9,20 @@ Each tick is one Claude Code session (one JSONL file). One session makes
 several API calls, and each call is written to the transcript as several
 records --- see `tally_session`, which groups them by `message.id`.
 
-Note the cache columns read 0 for the whole fleet: the self-hosted vLLM's
-Anthropic-compatible endpoint doesn't report `cache_creation_input_tokens` or
-`cache_read_input_tokens`, so every prompt token lands in `in_new` at full
-input price. That is a gap in what vLLM *reports*, not evidence that nothing
-is cached (it serves with `--enable-prefix-caching`), so treat these figures
-as an uncached upper bound on what the same workload would cost on an API
-that does report cache hits.
+Both runners are read (see `tally_dir`), because which one an agent uses is a
+per-agent provider choice that can change between ticks.
+
+The cache columns read 0 for any agent on the **vllm** provider: the self-hosted
+endpoint doesn't report `cache_creation_input_tokens` or
+`cache_read_input_tokens`, so every prompt token lands in `in_new` at full input
+price. That is a gap in what vLLM *reports*, not evidence that nothing is cached
+(it serves with `--enable-prefix-caching`), so treat those figures as an uncached
+upper bound. A hosted provider does report hits, so a non-zero `cache_read` after
+a provider swap is the first sign the swap actually took.
+
+Dollar figures stay notional Sonnet-equivalents on every runner, deliberately:
+they are an effort proxy that makes ticks comparable across agents, models and
+time, not a bill. Real spend lives with the provider.
 """
 
 from __future__ import annotations
@@ -38,6 +45,7 @@ PRICE_CACHE_CREATE = 3.75
 PRICE_CACHE_READ = 0.30
 
 SPRITE_PROJECTS_ROOT = Path("/home/sprite/.claude/projects")
+SPRITE_CODEX_SESSIONS_ROOT = Path("/home/sprite/.codex/sessions")
 
 app = typer.Typer(
     add_completion=False,
@@ -110,17 +118,97 @@ def tally_session(path: Path) -> dict:
         "mtime": int(path.stat().st_mtime),
         "turns": len(calls),
         "blocks": blocks,
+        "runner": "claude",
     }
     for field in _USAGE_FIELDS:
         stats[field] = sum(call[field] for call in calls.values())
     return stats
 
 
-def tally_dir(agent: str, root: Path | None = None) -> list[dict]:
-    """Tally every session for one agent. Sorted by mtime ascending."""
+def tally_codex_session(path: Path) -> dict:
+    """Sum token usage across one codex rollout file.
+
+    Codex records usage in `payload.type == "token_count"` events carrying an
+    `info.total_token_usage` (cumulative over the session) and an
+    `info.last_token_usage` (that one request). Two traps, both the mirror of
+    the `message.id` overcount in `tally_session` above:
+
+    **Take the last total, never a sum.** The totals are cumulative, so adding
+    them up counts the whole session once per request --- an order-of-magnitude
+    error that looks entirely plausible in a table.
+
+    **`input_tokens` already includes `cached_input_tokens`.** Claude reports
+    them as disjoint buckets; codex reports the total plus how much of it was
+    cached. Subtract, or a cached-heavy session appears to have paid full price
+    for the same tokens twice.
+
+    Returns the same shape as `tally_session` so both runners share the table.
+    `turns` counts requests (token_count events with a per-request delta).
+    """
+    totals: dict[str, int] = {}
+    turns = 0
+    blocks = 0
+    rate: dict = {}
+    with path.open() as fh:
+        for line in fh:
+            try:
+                d = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            blocks += 1
+            payload = d.get("payload") or {}
+            if payload.get("type") != "token_count":
+                continue
+            info = payload.get("info") or {}
+            total = info.get("total_token_usage") or {}
+            if total:
+                totals = total  # cumulative: last one wins
+            if info.get("last_token_usage"):
+                turns += 1
+            if payload.get("rate_limits"):
+                rate = payload["rate_limits"]
+
+    cached = totals.get("cached_input_tokens") or 0
+    stats: dict = {
+        "session": path.stem[-8:],
+        "mtime": int(path.stat().st_mtime),
+        "turns": turns,
+        "blocks": blocks,
+        "runner": "codex",
+        # input_tokens is inclusive of cached; max(0, ...) guards a malformed
+        # pair rather than reporting a negative token count.
+        "in_new": max(0, (totals.get("input_tokens") or 0) - cached),
+        "cache_create": totals.get("cache_write_input_tokens") or 0,
+        "cache_read": cached,
+        "output": totals.get("output_tokens") or 0,
+    }
+    # Subscription headroom, which is the number that actually decides whether a
+    # plan can carry six agents --- task-16 could only argue it from token
+    # arithmetic. Codex reports it directly, so pass it through.
+    primary = (rate or {}).get("primary") or {}
+    if primary.get("used_percent") is not None:
+        stats["limit_pct"] = primary["used_percent"]
+        stats["limit_window_min"] = primary.get("window_minutes")
+    if (rate or {}).get("plan_type"):
+        stats["plan_type"] = rate["plan_type"]
+    return stats
+
+
+def tally_dir(agent: str, root: Path | None = None, codex_root: Path | None = None) -> list[dict]:
+    """Tally every session for one agent, both runners. Sorted by mtime ascending.
+
+    Detected from what is on disk rather than from `SLOP_RUNNER`: this runs via
+    a bare `sprite exec`, which does not source `~/.slop-provider`, so the env
+    is not available here. Reading both also means the ticks either side of a
+    provider swap stay visible in one table.
+    """
     base = (root or SPRITE_PROJECTS_ROOT) / f"-home-sprite-slop-salon-{agent}"
-    files = sorted(map(Path, glob.glob(str(base / "*.jsonl"))), key=lambda p: p.stat().st_mtime)
-    return [tally_session(p) for p in files]
+    rows = [(p, tally_session) for p in map(Path, glob.glob(str(base / "*.jsonl")))]
+    codex_base = codex_root or SPRITE_CODEX_SESSIONS_ROOT
+    if codex_base.exists():
+        rows += [(p, tally_codex_session) for p in codex_base.rglob("rollout-*.jsonl")]
+    rows.sort(key=lambda pair: pair[0].stat().st_mtime)
+    return [fn(p) for p, fn in rows]
 
 
 def session_cost(stats: dict) -> float:

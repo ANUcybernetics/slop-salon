@@ -15,7 +15,6 @@ import time
 from .config import load_config
 from .provision import (
     _build_apt_install_cmd,
-    _build_claude_pin_cmd,
     _build_clone_and_symlink_cmd,
     _build_git_config_cmd,
     _build_install_ambient_hook_cmd,
@@ -23,6 +22,7 @@ from .provision import (
     _build_tailscale_join_cmd,
     _build_uv_and_slop_install_cmd,
     _build_write_env_file_cmd,
+    provider_steps,
     resolve_secrets,
 )
 from .sprites import SpritesClient
@@ -43,14 +43,17 @@ def recreate(
         raise SystemExit(f"agent {name!r} missing from {config_path}")
     agent = config.agents[name]
 
+    # Resolve the provider first: this runs unattended from the wake driver's
+    # self-heal, so a misconfigured provider must fail before the old sprite is
+    # destroyed, not after.
+    provider = config.provider_for(name)
+    provider_plan = provider_steps(provider)
+
     env = resolve_secrets(name, list(config.agents.keys()))
-    missing = [
-        k for k in ("GH_TOKEN", "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN") if not env.get(k)
-    ]
-    if missing:
+    if not env.get("GH_TOKEN"):
         raise SystemExit(
-            f"missing {missing} in resolved env; check "
-            f"~/.config/mise/config.local.toml for the SLOP_* equivalents"
+            "missing GH_TOKEN in resolved env; check "
+            "~/.config/mise/config.local.toml for SLOP_GH_TOKEN"
         )
     env["BSKY_HANDLE"] = agent.handle
     gh_token = env["GH_TOKEN"]
@@ -84,17 +87,22 @@ def recreate(
     print("[5/11] Apt install (imagemagick, ffmpeg, sox)")
     _exec("apt", _build_apt_install_cmd())
 
-    # Pin Claude Code: the fresh sprite comes off whatever base image is current,
-    # which may ship a newer claude that 400s against our vLLM. Without this, a
-    # self-heal recreate can turn a transient idle-wedge into a permanent outage.
-    print("[6/11] Pinning Claude Code to the known-good version")
-    _exec("claude pin", _build_claude_pin_cmd())
+    # Install the provider (env file, any OAuth profile, any claude pin). The pin
+    # matters here specifically: a fresh sprite comes off whatever base image is
+    # current, which may ship a newer claude that 400s against vLLM --- without
+    # it a self-heal recreate turns a transient idle-wedge into a real outage.
+    print(f"[6/11] Installing provider {provider.name!r} (runner: {provider.runner})")
+    for label, command in provider_plan:
+        _exec(label, command)
 
     print("[7/11] uv tool install slop-salon")
     _exec("uv install", _build_uv_and_slop_install_cmd())
 
-    print("[8/11] Installing ambient-recall hook + Claude Code settings")
-    _exec("ambient hook", _build_install_ambient_hook_cmd())
+    if provider.runner == "claude":
+        print("[8/11] Installing ambient-recall hook + Claude Code settings")
+        _exec("ambient hook", _build_install_ambient_hook_cmd())
+    else:
+        print(f"[8/11] Skipping ambient-recall hook (runner {provider.runner!r} has no hooks)")
 
     print("[9/11] Cloning agent repo from GH (preserves drift)")
     repo_url = f"https://{gh_token}@github.com/{agent.github_repo}.git"

@@ -1,6 +1,11 @@
 # Claude Code session state (transient; per-tick)
 .claude/
 
+# Generated from CLAUDE.md by `slop-prompt agents-md` before every codex tick
+# (codex reads AGENTS.md and has no `@` import syntax). A build artifact, not a
+# source of truth --- CLAUDE.md is the file to edit.
+AGENTS.md
+
 # Python
 __pycache__/
 *.pyc

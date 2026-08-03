@@ -7,6 +7,65 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
+# The agent CLIs we know how to drive. `slop-tick` dispatches on this.
+RUNNERS = ("claude", "codex")
+
+
+@dataclass
+class Provider:
+    """One intelligence provider --- where an agent's thinking comes from.
+
+    A provider is two separable things: which agent CLI runs the tick
+    (`runner`), and how that CLI reaches a model (`env` + `secret_env`, or an
+    on-disk OAuth profile via `credentials_*`). Subscription auth is the case
+    that makes the split worth having: it sets no env at all, because Claude
+    Code resolves ANTHROPIC_API_KEY -> ANTHROPIC_AUTH_TOKEN -> the credentials
+    file, and only falls through to the file when neither var is set.
+
+    `secret_env` maps a *sprite-side* var name to the name of an admin-side env
+    var holding the value (e.g. ANTHROPIC_API_KEY <- DEEPSEEK_API_TOKEN). The
+    value never appears here: slop_salon.toml is tracked, and is inlined
+    verbatim into the public site bundle by `site/src/lib/agents.ts`.
+    """
+
+    name: str
+    runner: str = "claude"
+    # Literal, non-secret env for the sprite (base URL, model, timeouts).
+    env: dict[str, str] = field(default_factory=dict)
+    # sprite var name -> admin env var name holding its value.
+    secret_env: dict[str, str] = field(default_factory=dict)
+    # Pin the in-sprite Claude Code to this version. Empty means "leave it".
+    claude_version: str = ""
+    # Optional liveness probe for `slop wake-check`. Hosted APIs have none.
+    health_url: str = ""
+    # OAuth profile to drop into the sprite, and the admin-side path to read it
+    # from. Both or neither.
+    credentials_dest: str = ""
+    credentials_source_env: str = ""
+
+    @property
+    def is_subscription(self) -> bool:
+        return bool(self.credentials_dest)
+
+
+# Fallback when slop_salon.toml carries no [providers] table --- an unmigrated
+# config keeps working, and keeps working *the way it did*: self-hosted vLLM
+# over the tailnet, with the pinned claude. Only the bearer token is a secret;
+# everything else about that endpoint is already public in docs/runbook.md.
+LEGACY_PROVIDER = Provider(
+    name="vllm",
+    runner="claude",
+    env={
+        "ANTHROPIC_BASE_URL": "http://100.110.244.39:8001",
+        "ANTHROPIC_MODEL": "qwen3.6-27b",
+        "ANTHROPIC_SMALL_FAST_MODEL": "qwen3.6-27b",
+        "API_TIMEOUT_MS": "1800000",
+    },
+    secret_env={"ANTHROPIC_AUTH_TOKEN": "SLOP_ANTHROPIC_AUTH_TOKEN"},
+    claude_version="2.1.92",
+    health_url="http://100.110.244.39:8001/health",
+)
+
 
 @dataclass
 class Agent:
@@ -18,12 +77,50 @@ class Agent:
     namesake: str = ""
     namesake_url: str = ""
     live: bool = False
+    # Provider id, or "" to take the registry default.
+    provider: str = ""
 
 
 @dataclass
 class Config:
     path: Path
     agents: dict[str, Agent]
+    providers: dict[str, Provider] = field(default_factory=dict)
+    default_provider: str = ""
+
+    def provider_for(self, agent_name: str) -> Provider:
+        """The provider agent `agent_name` runs on.
+
+        Precedence: the agent's own `provider`, then the registry
+        `default_provider`, then `LEGACY_PROVIDER`.
+        """
+        if agent_name not in self.agents:
+            raise KeyError(f"unknown agent {agent_name!r}")
+        chosen = self.agents[agent_name].provider or self.default_provider
+        if not chosen:
+            return LEGACY_PROVIDER
+        return self.providers[chosen]
+
+
+def _parse_provider(name: str, fields: dict) -> Provider:
+    runner = fields.get("runner", "claude")
+    if runner not in RUNNERS:
+        raise ValueError(f"provider {name!r}: unknown runner {runner!r} (want one of {RUNNERS})")
+    provider = Provider(
+        name=name,
+        runner=runner,
+        env={k: str(v) for k, v in fields.get("env", {}).items()},
+        secret_env=dict(fields.get("secret_env", {})),
+        claude_version=fields.get("claude_version", ""),
+        health_url=fields.get("health_url", ""),
+        credentials_dest=fields.get("credentials_dest", ""),
+        credentials_source_env=fields.get("credentials_source_env", ""),
+    )
+    if bool(provider.credentials_dest) != bool(provider.credentials_source_env):
+        raise ValueError(
+            f"provider {name!r}: credentials_dest and credentials_source_env must be set together"
+        )
+    return provider
 
 
 def load_config(path: Path | str = "slop_salon.toml") -> Config:
@@ -34,8 +131,18 @@ def load_config(path: Path | str = "slop_salon.toml") -> Config:
     with p.open("rb") as f:
         data = tomllib.load(f)
 
+    providers = {
+        name: _parse_provider(name, fields) for name, fields in data.get("providers", {}).items()
+    }
+    default_provider = data.get("default_provider", "")
+    if default_provider and default_provider not in providers:
+        raise ValueError(f"default_provider {default_provider!r} has no [providers.*] block in {p}")
+
     agents = {}
     for name, fields in data.get("agents", {}).items():
+        provider = fields.get("provider", "")
+        if provider and provider not in providers:
+            raise ValueError(f"agent {name!r}: provider {provider!r} has no [providers.*] block")
         agents[name] = Agent(
             name=name,
             handle=fields["handle"],
@@ -45,30 +152,45 @@ def load_config(path: Path | str = "slop_salon.toml") -> Config:
             namesake=fields.get("namesake", ""),
             namesake_url=fields.get("namesake_url", ""),
             live=bool(fields.get("live", False)),
+            provider=provider,
         )
-    return Config(path=p, agents=agents)
+    return Config(
+        path=p,
+        agents=agents,
+        providers=providers,
+        default_provider=default_provider,
+    )
 
 
-def save_sprite_id(config: Config, agent_name: str, sprite_id: str) -> None:
-    """Update slop_salon.toml in place to record a freshly-provisioned sprite ID.
+def _set_agent_field(config: Config, agent_name: str, key: str, value: str) -> None:
+    """Set `key = "value"` inside the `[agents.<agent_name>]` block, in place.
 
-    If the agent block already has a `sprite_id = "..."` line, that value is
-    replaced. If not, a new line is appended immediately after the
-    `[agents.<name>]` header.
+    Rewrites the TOML textually rather than round-tripping it, so comments and
+    layout survive. If the key is already there its value is replaced; if not,
+    the line is inserted right after the section header.
     """
     text = config.path.read_text()
     replace_pattern = re.compile(
-        rf"(\[agents\.{re.escape(agent_name)}\][^\[]*sprite_id\s*=\s*)\"[^\"]*\"",
+        rf"(\[agents\.{re.escape(agent_name)}\][^\[]*{re.escape(key)}\s*=\s*)\"[^\"]*\"",
         re.DOTALL,
     )
-    new_text, n = replace_pattern.subn(rf'\1"{sprite_id}"', text)
+    new_text, n = replace_pattern.subn(rf'\1"{value}"', text)
     if n == 1:
         config.path.write_text(new_text)
         return
 
-    # No existing sprite_id field; append after the agent header.
     insert_pattern = re.compile(rf"(\[agents\.{re.escape(agent_name)}\]\n)")
-    new_text, n = insert_pattern.subn(rf'\1sprite_id = "{sprite_id}"\n', text)
+    new_text, n = insert_pattern.subn(rf'\1{key} = "{value}"\n', text)
     if n != 1:
         raise ValueError(f"could not find [agents.{agent_name}] section in {config.path}")
     config.path.write_text(new_text)
+
+
+def save_sprite_id(config: Config, agent_name: str, sprite_id: str) -> None:
+    """Update slop_salon.toml in place to record a freshly-provisioned sprite ID."""
+    _set_agent_field(config, agent_name, "sprite_id", sprite_id)
+
+
+def save_provider(config: Config, agent_name: str, provider: str) -> None:
+    """Update slop_salon.toml in place to record an agent's provider."""
+    _set_agent_field(config, agent_name, "provider", provider)

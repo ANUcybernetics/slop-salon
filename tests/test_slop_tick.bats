@@ -61,6 +61,21 @@ exit 0
 EOF
     chmod +x "$STUB_DIR/pkill"
 
+    # Codex runner stubs. `codex` records its full argv the same way the claude
+    # stub does; `slop-prompt` records that it was asked to render AGENTS.md.
+    cat > "$STUB_DIR/codex" <<'EOF'
+#!/usr/bin/env bash
+printf '%s' "$*" > "$HOME/codex-argv.txt"
+echo "tick-output" > "$PWD/tick-$$.txt"
+EOF
+    chmod +x "$STUB_DIR/codex"
+
+    cat > "$STUB_DIR/slop-prompt" <<'EOF'
+#!/usr/bin/env bash
+printf '%s' "$*" > "$HOME/slop-prompt-argv.txt"
+EOF
+    chmod +x "$STUB_DIR/slop-prompt"
+
     export PATH="$STUB_DIR:$PATH"
     export HOME="$TEST_HOME"
     export AGENT_NAME
@@ -246,4 +261,122 @@ EOF
     run bash "$SCRIPT" "tick"
     [ "$status" -eq 0 ]
     [ "$(cat "$TEST_HOME/claude-prompt.txt")" = "tick" ]
+}
+
+# --- runner dispatch ------------------------------------------------------
+#
+# Which agent CLI drives the tick is a per-agent provider choice, carried in
+# ~/.slop-provider as SLOP_RUNNER. The default must stay `claude`, because a
+# sprite provisioned before the provider split has no such file.
+
+@test "defaults to the claude runner when SLOP_RUNNER is unset" {
+    run bash "$SCRIPT" "tick"
+    [ "$status" -eq 0 ]
+    [ -f "$HOME/claude-prompt.txt" ]
+    [ ! -f "$HOME/codex-argv.txt" ]
+}
+
+@test "sources ~/.slop-provider, and it wins over a stale ~/.slop-env" {
+    # The whole point of the split: swapping provider rewrites one small file,
+    # and what it says overrides whatever inference config the older, bigger
+    # file still exports.
+    cat > "$HOME/.slop-env" <<EOF
+export AGENT_NAME=$AGENT_NAME
+export ANTHROPIC_MODEL=stale-qwen
+EOF
+    cat > "$HOME/.slop-provider" <<'EOF'
+unset ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_MODEL
+export SLOP_RUNNER=claude
+export ANTHROPIC_MODEL=deepseek-v4-flash
+EOF
+    cat > "$STUB_DIR/claude" <<'EOF'
+#!/usr/bin/env bash
+printf '%s' "$ANTHROPIC_MODEL" > "$HOME/claude-model.txt"
+echo "tick-output" > "$PWD/tick-$$.txt"
+EOF
+    chmod +x "$STUB_DIR/claude"
+
+    run bash "$SCRIPT" "tick"
+    [ "$status" -eq 0 ]
+    [ "$(cat "$HOME/claude-model.txt")" = "deepseek-v4-flash" ]
+}
+
+@test "a subscription provider leaves no inference key set" {
+    # claude resolves ANTHROPIC_API_KEY -> ANTHROPIC_AUTH_TOKEN -> the OAuth
+    # profile, so subscription auth works only if the unset actually clears what
+    # a pre-split ~/.slop-env exports.
+    cat > "$HOME/.slop-env" <<EOF
+export AGENT_NAME=$AGENT_NAME
+export ANTHROPIC_AUTH_TOKEN=stale-vllm-token
+export ANTHROPIC_BASE_URL=http://tailnet:8001
+EOF
+    cat > "$HOME/.slop-provider" <<'EOF'
+unset ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_MODEL ANTHROPIC_SMALL_FAST_MODEL API_TIMEOUT_MS
+export SLOP_RUNNER=claude
+EOF
+    cat > "$STUB_DIR/claude" <<'EOF'
+#!/usr/bin/env bash
+printf '%s|%s' "${ANTHROPIC_AUTH_TOKEN:-unset}" "${ANTHROPIC_BASE_URL:-unset}" > "$HOME/claude-auth.txt"
+echo "tick-output" > "$PWD/tick-$$.txt"
+EOF
+    chmod +x "$STUB_DIR/claude"
+
+    run bash "$SCRIPT" "tick"
+    [ "$status" -eq 0 ]
+    [ "$(cat "$HOME/claude-auth.txt")" = "unset|unset" ]
+}
+
+@test "SLOP_RUNNER=codex runs codex exec, not claude" {
+    cat > "$HOME/.slop-provider" <<'EOF'
+export SLOP_RUNNER=codex
+EOF
+    run bash "$SCRIPT" "tick"
+    [ "$status" -eq 0 ]
+    [ -f "$HOME/codex-argv.txt" ]
+    [ ! -f "$HOME/claude-prompt.txt" ]
+    grep -q -- "exec" "$HOME/codex-argv.txt"
+    # The sprite is itself the sandbox (the agent has sudo and renders media),
+    # so codex's own sandbox only gets in the way.
+    grep -q -- "--sandbox danger-full-access" "$HOME/codex-argv.txt"
+    # --ephemeral would skip the session files `slop usage` tallies.
+    ! grep -q -- "--ephemeral" "$HOME/codex-argv.txt"
+    # The prompt still reaches it.
+    grep -q -- "tick" "$HOME/codex-argv.txt"
+}
+
+@test "codex ticks render AGENTS.md first; claude ticks do not" {
+    # Codex has no `@` import syntax, so CLAUDE.md's SOUL/MEMORY/TOOLS imports
+    # would silently vanish from the prompt --- the same quiet failure as the
+    # oversize SIBLINGS.md that broke a tick step on all six agents for weeks.
+    cat > "$HOME/.slop-provider" <<'EOF'
+export SLOP_RUNNER=codex
+EOF
+    run bash "$SCRIPT" "tick"
+    [ "$status" -eq 0 ]
+    grep -q -- "agents-md" "$HOME/slop-prompt-argv.txt"
+
+    rm -f "$HOME/slop-prompt-argv.txt" "$HOME/.slop-provider"
+    run bash "$SCRIPT" "tick"
+    [ "$status" -eq 0 ]
+    [ ! -f "$HOME/slop-prompt-argv.txt" ]
+}
+
+@test "an unknown runner fails loudly rather than guessing" {
+    cat > "$HOME/.slop-provider" <<'EOF'
+export SLOP_RUNNER=gemini
+EOF
+    run bash "$SCRIPT" "tick"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"unknown SLOP_RUNNER"* ]]
+}
+
+@test "a missing slop-prompt does not block a codex tick" {
+    # Fail-open: a stale AGENTS.md beats no tick at all.
+    rm -f "$STUB_DIR/slop-prompt"
+    cat > "$HOME/.slop-provider" <<'EOF'
+export SLOP_RUNNER=codex
+EOF
+    run bash "$SCRIPT" "tick"
+    [ "$status" -eq 0 ]
+    [ -f "$HOME/codex-argv.txt" ]
 }

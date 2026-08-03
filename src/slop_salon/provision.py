@@ -19,7 +19,7 @@ from pathlib import Path
 
 import typer
 
-from slop_salon.config import load_config, save_sprite_id
+from slop_salon.config import Provider, load_config, save_sprite_id
 from slop_salon.sprites import SpritesClient
 
 SPRITE_HOME = "/home/sprite"
@@ -27,14 +27,22 @@ SPRITE_HOME = "/home/sprite"
 # rust, gh, plus claude/gemini/codex CLIs. Only media tooling is missing.
 APT_PACKAGES = "imagemagick ffmpeg sox"
 SLOP_SALON_REPO = "git+https://github.com/ANUcybernetics/slop-salon"
-# Pin the in-sprite Claude Code. The base image ships whatever version was
-# current when it was built and we keep autoUpdates off, so a sprite created
-# from a newer image lands on a newer claude. Newer builds (seen on 2.1.168)
-# surface the available-Skills list as a `system`-role message *inside*
-# `messages`; the self-hosted vLLM only allows user/assistant there and 400s
-# every tick, silently killing the agent (slop-tick still exits 0). Pinning to
-# a version the fleet runs cleanly keeps recreate/provision off that landmine.
-CLAUDE_VERSION = "2.1.92"
+
+# Env vars that belong to the provider, not to the agent. Kept out of
+# ~/.slop-env entirely and written to ~/.slop-provider instead, so swapping
+# provider rewrites one small file and can never drop the bsky password. They
+# are also `unset` at the top of that file: sprites provisioned before the split
+# still carry these in ~/.slop-env, and a subscription provider only works when
+# *no* key var is set (claude resolves ANTHROPIC_API_KEY -> ANTHROPIC_AUTH_TOKEN
+# -> the OAuth profile, reaching the profile only if both are absent).
+PROVIDER_OWNED_ENV = (
+    "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_MODEL",
+    "ANTHROPIC_SMALL_FAST_MODEL",
+    "API_TIMEOUT_MS",
+)
 
 
 def resolve_secrets(
@@ -58,7 +66,13 @@ def resolve_secrets(
     env: dict[str, str] = {}
     for k, v in os.environ.items():
         if k.startswith("SLOP_") and not k.startswith(agent_prefixes):
-            env[k.removeprefix("SLOP_")] = v
+            stripped = k.removeprefix("SLOP_")
+            # Inference config is the provider's, not the agent's --- it goes to
+            # ~/.slop-provider so a swap touches nothing else. See
+            # PROVIDER_OWNED_ENV.
+            if stripped in PROVIDER_OWNED_ENV:
+                continue
+            env[stripped] = v
 
     p = Path(secrets_path)
     if p.exists():
@@ -68,6 +82,41 @@ def resolve_secrets(
         for k, v in agent_secrets.items():
             if v:  # skip empty placeholders
                 env[k.upper()] = v
+    return env
+
+
+def missing_provider_secrets(
+    provider: Provider,
+    environ: dict[str, str] | None = None,
+) -> list[str]:
+    """Admin-side env vars the provider references but that are unset.
+
+    Returned as the *admin* names (e.g. `DEEPSEEK_API_TOKEN`), which is what the
+    operator has to go and set. Checked before any write, so a half-configured
+    provider fails on the admin box rather than on the next tick.
+    """
+    src = os.environ if environ is None else environ
+    missing = [admin for admin in provider.secret_env.values() if not src.get(admin)]
+    if provider.credentials_source_env and not src.get(provider.credentials_source_env):
+        missing.append(provider.credentials_source_env)
+    return missing
+
+
+def resolve_provider_env(
+    provider: Provider,
+    environ: dict[str, str] | None = None,
+) -> dict[str, str]:
+    """The env block for `~/.slop-provider`: literal config plus resolved secrets.
+
+    `SLOP_RUNNER` is always present --- `slop-tick` dispatches on it, and a
+    provider file without it would silently fall back to the claude runner.
+    """
+    src = os.environ if environ is None else environ
+    env: dict[str, str] = {"SLOP_RUNNER": provider.runner, **provider.env}
+    for sprite_var, admin_var in provider.secret_env.items():
+        value = src.get(admin_var)
+        if value:
+            env[sprite_var] = value
     return env
 
 
@@ -104,14 +153,22 @@ def _build_apt_install_cmd() -> str:
     return f"sudo apt-get update && sudo apt-get install -y {APT_PACKAGES}"
 
 
-def _build_claude_pin_cmd() -> str:
-    """Pin the in-sprite Claude Code to `CLAUDE_VERSION`.
+def _build_claude_pin_cmd(version: str) -> str:
+    """Pin the in-sprite Claude Code to `version`.
 
     `claude install <version>` repoints the ~/.local/bin/claude launcher at the
     requested native build; `--force` reinstalls even though the base image
     always ships some version already.
+
+    Only some providers need this. The base image ships whatever version was
+    current when it was built, and newer builds (seen on 2.1.168) surface the
+    available-Skills list as a `system`-role message *inside* `messages` --- the
+    self-hosted vLLM only allows user/assistant there and 400s every tick,
+    silently killing the agent (slop-tick still exits 0). Against a provider
+    that accepts those messages the pin is just dead weight, so it is declared
+    per-provider (`claude_version`) rather than fleet-wide.
     """
-    return f"claude install {shlex.quote(CLAUDE_VERSION)} --force"
+    return f"claude install {shlex.quote(version)} --force"
 
 
 def _build_uv_and_slop_install_cmd() -> str:
@@ -160,6 +217,43 @@ def _build_write_env_file_cmd(env: dict[str, str]) -> str:
     body = "\n".join(f"export {k}={shlex.quote(v)}" for k, v in sorted(env.items()))
     encoded = base64.b64encode(body.encode()).decode()
     return f"umask 077 && echo {encoded} | base64 -d > ~/.slop-env && chmod 600 ~/.slop-env"
+
+
+def _build_write_provider_file_cmd(env: dict[str, str]) -> str:
+    """Write the provider block to `~/.slop-provider` (mode 600) in the sprite.
+
+    Separate from `~/.slop-env` so a provider swap rewrites one small file and
+    cannot drop BSKY_PASSWORD or GH_TOKEN on the way past. `slop-tick` sources
+    this file *after* `~/.slop-env`, so it wins on collision.
+
+    The leading `unset` is load-bearing, not hygiene: sprites provisioned before
+    the split still export the old inference vars from `~/.slop-env`, and a
+    subscription provider (which sets no key at all, so claude falls through to
+    the OAuth profile) would otherwise keep using whatever stale token that file
+    still carries.
+    """
+    lines = [f"unset {' '.join(PROVIDER_OWNED_ENV)}"]
+    lines += [f"export {k}={shlex.quote(v)}" for k, v in sorted(env.items())]
+    encoded = base64.b64encode("\n".join(lines).encode()).decode()
+    return (
+        f"umask 077 && echo {encoded} | base64 -d > ~/.slop-provider && chmod 600 ~/.slop-provider"
+    )
+
+
+def _build_install_credentials_cmd(dest: str, content: str) -> str:
+    """Drop an OAuth profile (claude's or codex's) into the sprite, mode 600.
+
+    `dest` is a sprite-side path that may be `~`-relative; it is rewritten to
+    `$HOME/...` so the whole thing can be quoted rather than relying on tilde
+    expansion surviving the quoting.
+    """
+    path = dest.replace("~/", "$HOME/", 1) if dest.startswith("~/") else dest
+    quoted = f'"{path}"' if path.startswith("$HOME/") else shlex.quote(path)
+    encoded = base64.b64encode(content.encode()).decode()
+    return (
+        f'umask 077 && mkdir -p "$(dirname {quoted})" && '
+        f"echo {encoded} | base64 -d > {quoted} && chmod 600 {quoted}"
+    )
 
 
 AMBIENT_HOOK_SCRIPT = """#!/bin/bash
@@ -324,6 +418,51 @@ def _build_template_files(
     return files
 
 
+def provider_steps(
+    provider: Provider,
+    environ: dict[str, str] | None = None,
+) -> list[tuple[str, str]]:
+    """(label, bash command) pairs that put `provider` in place on a sprite.
+
+    The single definition of "install this provider", shared by `slop new`,
+    `recreate`, and `slop provider set` --- a hot swap and a fresh provision
+    must land byte-identical state, or the swap becomes a second thing to debug.
+
+    Raises if a referenced admin-side secret is unset, so the failure lands on
+    the admin box rather than as a dead tick half an hour later.
+    """
+    missing = missing_provider_secrets(provider, environ)
+    if missing:
+        raise RuntimeError(
+            f"provider {provider.name!r} needs {missing} in the admin env; "
+            f"check ~/.config/mise/config.local.toml"
+        )
+
+    steps = [
+        (
+            "write ~/.slop-provider",
+            _build_write_provider_file_cmd(resolve_provider_env(provider, environ)),
+        )
+    ]
+    if provider.credentials_dest:
+        src = (os.environ if environ is None else environ)[provider.credentials_source_env]
+        content = Path(src).expanduser().read_text()
+        steps.append(
+            (
+                f"install {provider.credentials_dest}",
+                _build_install_credentials_cmd(provider.credentials_dest, content),
+            )
+        )
+    if provider.claude_version:
+        steps.append(
+            (
+                f"pin claude {provider.claude_version}",
+                _build_claude_pin_cmd(provider.claude_version),
+            )
+        )
+    return steps
+
+
 # --- Orchestrator ---
 
 
@@ -339,6 +478,11 @@ def provision_agent(
     if name not in config.agents:
         raise typer.BadParameter(f"agent {name!r} not in {config.path}")
     agent = config.agents[name]
+
+    provider = config.provider_for(name)
+    # Resolve the provider before anything is created: a missing DEEPSEEK_API_TOKEN
+    # should cost nothing, not a half-built sprite.
+    provider_plan = provider_steps(provider)
 
     env = resolve_secrets(name, list(config.agents.keys()))
     gh_token = env.get("GH_TOKEN")
@@ -403,20 +547,32 @@ def provision_agent(
     typer.echo("[5/14] Writing ~/.slop-env in sprite (secrets + AGENT_NAME)")
     _exec(_build_write_env_file_cmd({"AGENT_NAME": name, **env}))
 
+    # Unconditional, whatever the provider: the tailnet is what a later swap
+    # *to* vllm needs, and joining it after the fact would mean a second visit.
     typer.echo("[6/14] Installing Tailscale and joining the tailnet")
     _exec(_build_tailscale_join_cmd(name))
 
     typer.echo("[7/14] Apt install (imagemagick, ffmpeg, sox)")
     _exec(_build_apt_install_cmd())
 
-    typer.echo(f"[8/14] Pinning Claude Code to {CLAUDE_VERSION}")
-    _exec(_build_claude_pin_cmd())
+    typer.echo(f"[8/14] Installing provider {provider.name!r} (runner: {provider.runner})")
+    for label, command in provider_plan:
+        typer.echo(f"  -> {label}")
+        _exec(command)
 
     typer.echo("[9/14] uv tool install slop-salon")
     _exec(_build_uv_and_slop_install_cmd())
 
-    typer.echo("[10/14] Installing ambient-recall hook + Claude Code settings")
-    _exec(_build_install_ambient_hook_cmd())
+    # Claude Code only --- the hook is a PostToolUse entry in ~/.claude/settings.json
+    # and codex has no equivalent, so on the codex runner the agent ticks without
+    # ambient recall. Documented in docs/runbook.md rather than faked.
+    if provider.runner == "claude":
+        typer.echo("[10/14] Installing ambient-recall hook + Claude Code settings")
+        _exec(_build_install_ambient_hook_cmd())
+    else:
+        typer.echo(
+            f"[10/14] Skipping ambient-recall hook (runner {provider.runner!r} has no hooks)"
+        )
 
     typer.echo("[11/14] Cloning agent repo + symlinking slop-tick into ~/.local/bin")
     repo_url = f"https://{gh_token}@github.com/{agent.github_repo}.git"
