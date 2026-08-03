@@ -45,9 +45,18 @@ Two stores:
   - `SLOP_GH_TOKEN` --- GitHub API and git push
   - `SLOP_REPLICATE_API_TOKEN` --- image generation, shared across agents (spend
     cap set globally in the Replicate dashboard)
-  - `SLOP_ANTHROPIC_BASE_URL` / `_AUTH_TOKEN` / `_MODEL` / `_SMALL_FAST_MODEL` /
-    `SLOP_API_TIMEOUT_MS` --- point the in-sprite `claude` at the self-hosted
-    vLLM endpoint (see CLAUDE.md "Inference")
+  - `SLOP_ANTHROPIC_AUTH_TOKEN` --- the vLLM bearer key, referenced by the
+    `vllm` provider. The rest of the inference config (base URL, model, timeout)
+    is not a secret and lives in the provider block in `slop_salon.toml`, not
+    here --- see CLAUDE.md "Providers".
+  - `DEEPSEEK_API_TOKEN` --- referenced by the `deepseek` provider. Note the
+    missing `SLOP_` prefix: a provider names its admin var explicitly, so the
+    prefix convention no longer has to carry that job, and an unreferenced token
+    stays admin-side.
+  - `SLOP_CLAUDE_CREDENTIALS_PATH` / `SLOP_CODEX_AUTH_PATH` --- admin-side paths
+    to the OAuth profiles the subscription providers copy into a sprite
+    (`~/.claude/.credentials.json`, `~/.codex/auth.json`). Only needed if you
+    use those providers.
   - `SLOP_TAILSCALE_AUTHKEY` --- enrols each sprite onto the Tailscale tailnet
   - `SPRITES_API_TOKEN` --- driving sprites.dev (admin-side only)
   - `TAILSCALE_API_TOKEN` --- admin-side only; Tailscale ACL + auth-key API
@@ -132,14 +141,15 @@ Add all four to `~/.config/mise/config.local.toml`:
 SPRITES_API_TOKEN = "..."           # from 1.2
 SLOP_GH_TOKEN = "..."               # `gh auth token`, or a PAT with repo scope
 SLOP_REPLICATE_API_TOKEN = "..."    # https://replicate.com → Account → API tokens
-SLOP_ANTHROPIC_BASE_URL = "http://100.110.244.39:8001"   # weddle tailnet IP → vLLM
-SLOP_ANTHROPIC_AUTH_TOKEN = "..."        # must equal VLLM_API_KEY on cybersonic
-SLOP_ANTHROPIC_MODEL = "qwen3.6-27b"
-SLOP_ANTHROPIC_SMALL_FAST_MODEL = "qwen3.6-27b"
-SLOP_API_TIMEOUT_MS = "1800000"          # claude per-request timeout (30 min)
-SLOP_TAILSCALE_AUTHKEY = "..."           # reusable key, tagged tag:slop-sprite
-TAILSCALE_API_TOKEN = "..."              # login.tailscale.com → Settings → Keys
+SLOP_ANTHROPIC_AUTH_TOKEN = "..."   # vllm provider: must equal VLLM_API_KEY
+DEEPSEEK_API_TOKEN = "..."          # deepseek provider: platform.deepseek.com
+SLOP_TAILSCALE_AUTHKEY = "..."      # reusable key, tagged tag:slop-sprite
+TAILSCALE_API_TOKEN = "..."         # login.tailscale.com → Settings → Keys
 ```
+
+Only the token for the provider(s) you actually use is required. The rest of the
+inference config --- base URL, model, timeout --- is not secret and lives in the
+`[providers.*]` blocks in `slop_salon.toml`.
 
 Notes:
 
@@ -148,10 +158,43 @@ Notes:
   to the sprite. We want this one admin-side only.
 - Set a spend cap in the Replicate dashboard (Account → Billing → Spending
   Limits); suggest ~$20/month while you're getting a feel for cadence.
-- Inference is self-hosted (vLLM on cybersonic), so there is no Anthropic spend
-  --- the cost cap that matters is the Replicate one above.
+- On the `vllm` provider, inference is self-hosted, so there is no per-token
+  spend --- the cost cap that matters is the Replicate one above.
   `SLOP_ANTHROPIC_AUTH_TOKEN` must match `VLLM_API_KEY` in
-  `cybersonic-vllm/.env`; see CLAUDE.md "Inference" for the full path.
+  `cybersonic-vllm/.env`; see CLAUDE.md "Providers" for the full path. On a
+  metered provider like `deepseek` there _is_ per-token spend, so set a cap at
+  the provider before switching the fleet across.
+- `DEEPSEEK_API_TOKEN` deliberately has no `SLOP_` prefix. Provider blocks name
+  the admin var they want, so a token only reaches a sprite if some provider
+  asks for it --- the prefix convention no longer has to double as the gate.
+
+### 1.3.1 Switching provider
+
+```sh
+mise exec -- uv run slop provider list           # registry + who runs on what
+mise exec -- uv run slop provider show --live    # configured vs actually running
+mise exec -- uv run slop provider set lelia deepseek   # one agent
+mise exec -- uv run slop provider set all deepseek     # the fleet
+```
+
+`set` rewrites `~/.slop-provider` in the sprite and records the choice in
+`slop_salon.toml`. Nothing restarts; the next tick picks it up. It runs the same
+`provider_steps` a fresh provision does, so a swapped sprite is not a separate
+configuration to reason about later.
+
+Canary before you fan out --- a provider swap changes the model, not just the
+plumbing, so read the first few ticks as content and not merely as a green run.
+Two signals worth watching:
+
+- `slop usage <agent>` should start reporting a non-zero `cache_read`. vLLM
+  reports no cache fields at all, so that column moving off zero is the first
+  proof the swap actually took.
+- `journalctl --user -t slop-wake-run | grep claude-err` should quieten on a
+  large-context provider --- those are context-overflow 500s (task-13).
+
+`set` refuses to put more than one agent on a **subscription** provider at once.
+OAuth refresh tokens rotate on use, and whether two sprites sharing one profile
+deauthenticate each other is untested; that canary answers it.
 
 ### 1.4 namecheap access
 
