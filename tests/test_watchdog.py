@@ -18,15 +18,34 @@ def _stamp(*, minutes_ago: float, statuses: dict[str, str] | None = None) -> dic
     }
 
 
-def _problems(**kwargs):
-    base = {
-        "stamp": _stamp(minutes_ago=5),
-        "now": NOW,
-        "max_age": MAX_AGE,
-        "timer_active": True,
-        "inference": OK,
-    }
-    return watchdog.problems(**{**base, **kwargs})
+# A wake that finished five minutes ago with every agent green. Module-level so
+# it can be a real default argument; `NOW` is fixed, so it never varies.
+_HEALTHY_STAMP = _stamp(minutes_ago=5)
+
+
+def _problems(
+    *,
+    stamp: dict | None = _HEALTHY_STAMP,
+    now: dt.datetime = NOW,
+    max_age: float = MAX_AGE,
+    timer_active: bool = True,
+    inference: watchdog.Probe | None = OK,
+    timer_name: str = "slop-wake.timer",
+) -> list[str]:
+    """`watchdog.problems` with a healthy baseline, so each test names only its defect.
+
+    Spelled out rather than merged from a dict of overrides: a `**{**base, **kw}`
+    unpack hides which argument a test is actually varying, and defeats any check
+    that the override matches the parameter it lands on.
+    """
+    return watchdog.problems(
+        stamp=stamp,
+        now=now,
+        max_age=max_age,
+        timer_active=timer_active,
+        inference=inference,
+        timer_name=timer_name,
+    )
 
 
 def test_healthy_pipeline_reports_nothing():

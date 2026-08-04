@@ -297,10 +297,18 @@ def _get_session() -> Session:
     return Session(did=data["did"], handle=data["handle"], access_jwt=data["accessJwt"], pds=pds)
 
 
-def _parse_params(items: list[str]) -> list[tuple[str, str]]:
+# Ordered query pairs, as a tuple rather than a list. Both express "same key may
+# repeat", but httpx types `params` over `tuple[tuple[str, PrimitiveData], ...]`
+# among others, and only the tuple form is covariant --- a `list[tuple[str, str]]`
+# is not assignable to `list[tuple[str, PrimitiveData]]`, so the list spelling
+# cannot be passed without a cast.
+QueryPairs = tuple[tuple[str, str], ...]
+
+
+def _parse_params(items: list[str]) -> QueryPairs:
     """Parse repeatable `--param k=v` into ordered (key, value) pairs.
 
-    Kept as a list rather than a dict so the same key can appear more than
+    Ordered pairs rather than a dict so the same key can appear more than
     once (e.g. `--param uris=at://x --param uris=at://y` for getPosts,
     which takes an array per ATProto's URL-encoding convention).
     """
@@ -311,7 +319,7 @@ def _parse_params(items: list[str]) -> list[tuple[str, str]]:
             raise typer.Exit(code=1)
         key, value = item.split("=", 1)
         pairs.append((key, value))
-    return pairs
+    return tuple(pairs)
 
 
 def _mime_of(path: Path) -> str:
@@ -620,7 +628,7 @@ def whoami():
     typer.echo(json.dumps({"did": session.did, "handle": session.handle, "pds": session.pds}))
 
 
-def _xrpc_get(session: Session, nsid: str, params: list[tuple[str, str]]) -> dict:
+def _xrpc_get(session: Session, nsid: str, params: QueryPairs) -> dict:
     resp = httpx.get(
         f"{session.pds}/xrpc/{nsid}",
         params=params,
@@ -652,7 +660,7 @@ def timeline(
     raw XRPC dump into context.
     """
     session = _get_session()
-    data = _xrpc_get(session, "app.bsky.feed.getTimeline", [("limit", str(limit))])
+    data = _xrpc_get(session, "app.bsky.feed.getTimeline", (("limit", str(limit)),))
     for item in data.get("feed") or []:
         post = item.get("post") or {}
         record = post.get("record") or {}
@@ -682,7 +690,7 @@ def notifications(
     wrong by analogy.
     """
     session = _get_session()
-    data = _xrpc_get(session, "app.bsky.notification.listNotifications", [("limit", str(limit))])
+    data = _xrpc_get(session, "app.bsky.notification.listNotifications", (("limit", str(limit)),))
     for note in data.get("notifications") or []:
         record = note.get("record") or {}
         typer.echo(

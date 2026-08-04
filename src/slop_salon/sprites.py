@@ -21,6 +21,7 @@ from __future__ import annotations
 import os
 import subprocess
 from dataclasses import dataclass
+from typing import Protocol
 
 import httpx
 
@@ -35,6 +36,19 @@ class ExecResult:
     stdout: str
     stderr: str
     exit_code: int
+
+
+class SpriteExecutor(Protocol):
+    """The only thing most callers need from a sprite client: run a command.
+
+    Provisioning wants the full `SpritesClient`, but the read-only helpers ---
+    repo pre-flight, reading back `~/.slop-provider` --- only ever shell out.
+    Naming that seam lets them be tested against a scripted double that the
+    type checker accepts on its own merits, instead of a fake that satisfies an
+    annotation it does not actually implement.
+    """
+
+    def exec(self, sprite_id: str, command: list[str]) -> ExecResult: ...
 
 
 class SpritesClient:

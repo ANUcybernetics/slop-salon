@@ -43,7 +43,7 @@ from pathlib import Path
 
 from .config import load_config
 from .provision import resolve_secrets
-from .sprites import SpritesClient
+from .sprites import SpriteExecutor, SpritesClient
 
 
 def _run(cmd: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
@@ -80,14 +80,14 @@ def _human(nbytes: int) -> str:
     return f"{size:.1f}GiB"
 
 
-def _sprite_sh(sprites: SpritesClient, name: str, script: str) -> subprocess.CompletedProcess[str]:
+def _sprite_sh(sprites: SpriteExecutor, name: str, script: str) -> subprocess.CompletedProcess[str]:
     result = sprites.exec(name, ["bash", "-lc", script])
     return subprocess.CompletedProcess(
         args=script, returncode=result.exit_code, stdout=result.stdout, stderr=result.stderr
     )
 
 
-def _preflight_sprite(sprites: SpritesClient, name: str, repo_dir: str) -> None:
+def _preflight_sprite(sprites: SpriteExecutor, name: str, repo_dir: str) -> None:
     """Abort unless the sprite is idle and fully pushed to GitHub.
 
     Fetches first so ``origin/HEAD`` reflects GitHub *before* we rewrite it, then

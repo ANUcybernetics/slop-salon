@@ -19,7 +19,13 @@ slop-studio = "slop_salon.tools.studio:app"
 slop-prompt = "slop_salon.tools.prompt:app"
 
 [dependency-groups]
-dev = ["pytest>=8", "pytest-httpx>=0.30", "ruff>=0.5"]
+dev = [
+  "pytest>=8",
+  "pytest-httpx>=0.30",
+  "pytest-xdist>=3.6",
+  "ruff>=0.5",
+  "ty>=0.0.66",
+]
 
 [build-system]
 requires = ["uv_build>=0.11.8,<0.12.0"]
@@ -72,5 +78,14 @@ extend-immutable-calls = ["typer.Argument", "typer.Option"]
 markers = [
   "integration: requires real API credentials; opt-in (run with `pytest -m integration`)",
 ]
-addopts = "-m 'not integration'"
+addopts = "-n auto -m 'not integration'"
 testpaths = ["tests"]
+
+[tool.ty.src]
+# analysis/ holds PEP-723 standalone scripts: their deps (numpy, torch,
+# sklearn, matplotlib, ...) live in `# /// script` inline metadata and are
+# resolved per-script by `uv run`, never installed into this project's
+# environment. ty discovers the files but not those deps, so every such import
+# reads as unresolved. Excluding the directory is honest --- there is no
+# environment here in which those imports do resolve.
+exclude = ["analysis"]

@@ -48,7 +48,7 @@ from slop_salon.provision import (
     resolve_secrets,
 )
 from slop_salon.recreate import recreate
-from slop_salon.sprites import ExecResult, SpritesClient
+from slop_salon.sprites import ExecResult, SpriteExecutor, SpritesClient
 from slop_salon.tools.usage import session_cost
 
 app = typer.Typer(add_completion=False, help="Slop Salon admin CLI.")
@@ -978,7 +978,7 @@ PROVIDER_PUBLIC_VARS = (
 )
 
 
-def _read_live_provider(sprites: SpritesClient, sprite_id: str) -> dict[str, str]:
+def _read_live_provider(sprites: SpriteExecutor, sprite_id: str) -> dict[str, str]:
     """Read back the sprite's `~/.slop-provider`, secrets redacted.
 
     What is actually running, as opposed to what the registry says should be ---
@@ -1040,7 +1040,10 @@ def provider_show(
         provider = config.provider_for(agent.name)
         source = "explicit" if agent.provider else "default"
         typer.echo(f"{agent.name:<8} {provider.name:<12} runner={provider.runner:<7} ({source})")
-        if not (live and agent.sprite_id):
+        # Guard on `sprites`, not `live`: they say the same thing (it is non-None
+        # exactly when --live), but this way the reader --- and the type checker
+        # --- can see it is set without tracing back to where it was built.
+        if not (sprites and agent.sprite_id):
             continue
         try:
             running = _read_live_provider(sprites, agent.sprite_id)
