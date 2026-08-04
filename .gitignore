@@ -11,10 +11,14 @@ build/
 # Per-agent secrets — copy secrets.example.toml and fill in.
 secrets.toml
 
-# Analysis working data: clones of the six agent repos, and the similarity
-# figure that make_figure.py builds (the paper repo tracks its own copy).
+# Analysis working data: clones of the six agent repos, and the figures the
+# analysis scripts build (the paper repo tracks its own copies). All are
+# regenerable from analysis/agent-repos, and the mosaics are 1.2-1.3 MB each ---
+# binary that git can never really let go of once it is in history.
 analysis/agent-repos
 analysis/similarity.pdf
+analysis/mosaic.jpg
+analysis/mosaic-detail.jpg
 
 # Negate the global ~/.gitignore `.claude/*` rule so repo-tracked slash
 # commands (and any future skills/agents) ship with the project.
