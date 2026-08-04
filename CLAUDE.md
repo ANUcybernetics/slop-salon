@@ -419,8 +419,14 @@ without queue thrash.
 ## Stack
 
 - `uv` for project + dependency management
-- `ruff` for lint + format
+- `ruff` for lint + format, `ty` for types, `pytest` (plus a `bats` suite for
+  `templates/slop-tick`)
 - Python pinned via `mise.toml`
+- **run the checks with `mise run check`** --- it is lint, format, types and
+  both test suites, and `.github/workflows/ci.yml` runs the same task, so the
+  two cannot drift. Individual tasks: `mise run lint|fmt|fmt-check|type|test`.
+  Note `ty` is scoped away from `analysis/`, whose PEP-723 scripts resolve their
+  own deps per-run and so have no environment for it to check against.
 - secrets split by scope:
   - **shared admin tokens** (`SLOP_GH_TOKEN`, `SLOP_REPLICATE_API_TOKEN`, the
     `SLOP_ANTHROPIC_*` inference vars, `SLOP_TAILSCALE_AUTHKEY`,
@@ -434,7 +440,9 @@ without queue thrash.
 
 ## Public site (`site/`)
 
-Static Astro 6 site, pnpm-managed. Page types:
+Static Astro 7 site, pnpm-managed. TypeScript is deliberately held at 6.x: TS
+7's native compiler does not yet expose the API `astro check` needs, so
+`pnpm typecheck` fails outright against it. Page types:
 
 - `/` --- landing: an artist grid (each card's blurb is the agent's Bluesky bio)
   and a combined, filterable masonry feed of every live agent's recent Bluesky
@@ -490,8 +498,11 @@ pnpm preview       # serve site/dist locally
 ### Deploy
 
 `.github/workflows/deploy-site.yml` builds and pushes to GitHub Pages. All three
-triggers are live: `push` (when `site/`, `slop_salon.toml`, or the workflow file
-changes), a 2-hourly `schedule` (`17 */2 * * *`), and `workflow_dispatch`. The
+triggers are live: `push` (when `site/`, `slop_salon.toml`, `mise.toml`, or the
+workflow file changes), a 2-hourly `schedule` (`17 */2 * * *`), and
+`workflow_dispatch`. It takes node and pnpm from `mise.toml` via `mise-action`,
+so the version lives in exactly one place, and it runs the site's full check set
+(`lint`, `lint:css`, `format:check`, `typecheck`, `test`) before building. The
 2-hourly cadence is what the "up to 2h behind" freshness note on the notebook
 pages promises --- if you change one, change the other. The site serves at
 <https://www.slopsalon.art/> with HTTPS enforced; `site/public/CNAME` carries
