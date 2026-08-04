@@ -692,13 +692,22 @@ def usage(
     json_out: bool = typer.Option(False, "--json", help="Emit JSON instead of a table"),
     config_path: str = typer.Option(None, "--config"),
 ):
-    """Per-tick token usage and notional cost across live agents.
+    """Per-tick token usage and cost across live agents.
 
     Fans out to each live sprite, runs `slop-usage tally <name>` in-sprite to
     read its Claude Code session transcripts, and aggregates the results.
-    Dollar figures are notional API-equivalents (Sonnet pricing as of
-    2026-05) --- inference is self-hosted vLLM, so nothing is actually
-    billed; they're an effort proxy. See `slop_salon.tools.usage`.
+    Dollar figures come from the provider registry's `pricing` block, so on a
+    metered provider they are real money, not an effort proxy; an unmetered
+    provider reports `--` rather than a made-up number.
+
+    COVERAGE: the tally counts transcripts that still exist on the sprite, not
+    ticks that happened. A recreated sprite starts from an empty transcript
+    directory, so its lifetime row understates by however much history it lost
+    --- gert and lelia read as near-idle next to vita in August 2026 for exactly
+    this reason, while their commit counts were in line with the fleet. The
+    `from` column is where each agent's data actually starts; compare agents
+    only inside an explicit `--since` window that postdates every `from`.
+    See `slop_salon.tools.usage`.
     """
     config = _config(config_path)
     if name:
@@ -775,10 +784,17 @@ def usage(
         out = []
         for agent, rows, err in results:
             non_empty = [r for r in rows if r["turns"] > 0]
+            mtimes = [r["mtime"] for r in rows if r.get("mtime")]
             entry = {
                 "agent": agent.name,
                 "ticks": len(non_empty),
                 "empty": len(rows) - len(non_empty),
+                # Same caveat as the table's `from` column: a consumer summing
+                # `total_cost_usd` across agents needs to know the rows cover
+                # different spans. See this command's docstring.
+                "covers_from": (
+                    dt.datetime.fromtimestamp(min(mtimes)).isoformat() if mtimes else None
+                ),
             }
             if err:
                 entry["error"] = err
@@ -806,10 +822,11 @@ def usage(
 
     typer.echo(
         f"{'agent':<8}{'ticks':>6}{'empty':>6}  {'turns':>5}  {'output':>8}  "
-        f"{'med $/tick':>12}  {'p95 $/tick':>12}  {'total $':>10}"
+        f"{'med $/tick':>12}  {'p95 $/tick':>12}  {'total $':>10}  {'from':>10}"
     )
-    typer.echo("-" * 76)
+    typer.echo("-" * 88)
     grand_total = 0.0
+    coverage: dict[str, float] = {}
     for agent, rows, err in results:
         if err:
             typer.echo(f"{agent.name:<8}  ERROR: {err[:60]}")
@@ -829,12 +846,34 @@ def usage(
         grand_total += total or 0.0
         med_turns = sorted(r["turns"] for r in non_empty)[len(non_empty) // 2]
         med_out = sorted(r["output"] for r in non_empty)[len(non_empty) // 2]
+        # Where this agent's data starts. Without it a row that lost its history
+        # is indistinguishable from an agent that barely ticked.
+        mtimes = [r["mtime"] for r in rows if r.get("mtime")]
+        oldest = min(mtimes) if mtimes else None
+        if oldest is not None:
+            coverage[agent.name] = oldest
+        since_str = dt.datetime.fromtimestamp(oldest).strftime("%Y-%m-%d") if oldest else "?"
         typer.echo(
             f"{agent.name:<8}{len(non_empty):>6}{empty:>6}  {med_turns:>5}  "
-            f"{med_out:>8}  {_money(med, 12)}  {_money(p95, 12)}  {_money(total, 10)}"
+            f"{med_out:>8}  {_money(med, 12)}  {_money(p95, 12)}  {_money(total, 10)}  "
+            f"{since_str:>10}"
         )
     blanks = f"{'':>6}{'':>6}  {'':>5}  {'':>8}  {'':>12}  {'':>12}"
     typer.echo(f"{'total':<8}{blanks}  {_money(grand_total, 10)}")
+    # A total summed over uneven coverage is a floor, not a bill, and the
+    # per-agent split is not a ranking. Say so rather than leaving the reader to
+    # notice the `from` column disagrees with itself.
+    if (
+        cutoff is None
+        and len(coverage) > 1
+        and max(coverage.values()) - min(coverage.values()) > 86400
+    ):
+        newest = dt.datetime.fromtimestamp(max(coverage.values())).strftime("%Y-%m-%d")
+        typer.echo(
+            f"\nuneven coverage: transcripts survive from {newest} for the newest agent "
+            f"and earlier for others, so this total is a floor and the rows are not\n"
+            f"comparable. For a like-for-like read: --since a window starting after {newest}."
+        )
     unpriced = sorted(
         {
             config.provider_for(a.name).name

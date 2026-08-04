@@ -665,6 +665,48 @@ def test_usage_aggregates_across_live_agents(fake_config_live):
         _ = _json  # silence unused
 
 
+def test_usage_flags_uneven_transcript_coverage(fake_config_live):
+    """A recreated sprite reads as near-idle; the table must say so.
+
+    gert lost its transcripts around 2026-07-28 and showed 11 ticks against
+    vita's 859, which looked like a broken agent but was only a shorter
+    surviving history. The `from` column and the footnote exist so nobody reads
+    a truncated row as a quiet agent, or the grand total as a bill.
+    """
+    import time as _time
+
+    now = int(_time.time())
+    sprite_outputs = {
+        # lou goes back a fortnight; mina only two hours (a fresh sprite).
+        "spr_lou": "\n".join(
+            [
+                _usage_line("lou", "aaaa0001", now - 14 * 86400),
+                _usage_line("lou", "aaaa0002", now - 600),
+            ]
+        ),
+        "spr_mina": _usage_line("mina", "bbbb0001", now - 7200),
+    }
+
+    def fake_exec(sprite_id, _cmd):
+        return MagicMock(stdout=sprite_outputs[sprite_id], stderr="", exit_code=0)
+
+    with patch("slop_salon.cli.SpritesClient") as mock_class:
+        instance = MagicMock()
+        instance.exec.side_effect = fake_exec
+        mock_class.return_value = instance
+
+        result = runner.invoke(app, ["usage"])
+        assert result.exit_code == 0, result.output
+        assert "from" in result.output
+        assert "uneven coverage" in result.output
+
+        # An explicit window makes the rows comparable, so the warning would be
+        # noise --- and the spans it compares are the window's, not the sprite's.
+        windowed = runner.invoke(app, ["usage", "--since", "1.day"])
+        assert windowed.exit_code == 0, windowed.output
+        assert "uneven coverage" not in windowed.output
+
+
 def test_usage_single_agent(fake_config_live):
     with patch("slop_salon.cli.SpritesClient") as mock_class:
         instance = MagicMock()
