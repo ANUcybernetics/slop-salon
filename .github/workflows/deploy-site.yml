@@ -11,6 +11,7 @@ on:
     paths:
       - "site/**"
       - "slop_salon.toml"
+      - "mise.toml"
       - ".github/workflows/deploy-site.yml"
   schedule:
     - cron: "17 */2 * * *"
@@ -28,29 +29,66 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: site
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v6
-        with:
-          version: 10
+      # node and pnpm come from the repo-root mise.toml (pnpm = "latest"), so the
+      # runner resolves the same versions as the local machine. This replaces an
+      # actions/setup-node + pnpm/action-setup pair that pinned pnpm 10 here
+      # while mise resolved 11 locally --- two sources of truth, one major apart.
+      - name: Set up mise (node + pnpm)
+        uses: jdx/mise-action@v4
 
-      - uses: actions/setup-node@v6
+      - name: Locate pnpm store
+        run: echo "STORE_PATH=$(pnpm store path --silent)" >> "$GITHUB_ENV"
+
+      - name: Cache pnpm store
+        uses: actions/cache@v6
         with:
-          node-version: 24
-          cache: pnpm
-          cache-dependency-path: site/pnpm-lock.yaml
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('site/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      # Astro's image service keeps its transform cache here. Without it CI
+      # re-encodes every optimised image from scratch on each of the 12 daily
+      # scheduled builds.
+      - name: Cache Astro build cache
+        uses: actions/cache@v6
+        with:
+          path: site/node_modules/.astro
+          key: ${{ runner.os }}-astro-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-astro-
 
       - run: pnpm install --frozen-lockfile
+        working-directory: site
 
-      - run: pnpm format:check
+      # lint, lint:css and test were defined in package.json but never run by
+      # CI --- only format:check and typecheck were. All five run now.
+      - name: Lint
+        run: pnpm run lint
+        working-directory: site
 
-      - run: pnpm typecheck
+      - name: Lint CSS
+        run: pnpm run lint:css
+        working-directory: site
 
-      - run: pnpm build
+      - name: Check formatting
+        run: pnpm run format:check
+        working-directory: site
+
+      - name: Typecheck
+        run: pnpm run typecheck
+        working-directory: site
+
+      - name: Test
+        run: pnpm run test
+        working-directory: site
+
+      - name: Build
+        run: pnpm run build
+        working-directory: site
         env:
           # Authenticated GH API calls (5000/hr vs. 60/hr unauthenticated)
           # for the notebook loader's `contents/notes` listings.
