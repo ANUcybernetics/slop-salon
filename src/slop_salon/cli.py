@@ -74,7 +74,7 @@ def status(
         if agent.sprite_id:
             try:
                 sprite_state = sprites.get_status(agent.sprite_id)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 --- one dead sprite must not abort the sweep
                 sprite_state = f"error: {e}"
         else:
             sprite_state = "not provisioned"
@@ -181,11 +181,11 @@ def _render_entry(obj: dict) -> list[str]:
         if isinstance(content, str):
             text = _oneline(content)
             return [f"{ts}  user       {_truncate(text, 500)}"] if text else []
-        rows = []
-        for block in content if isinstance(content, list) else []:
-            if isinstance(block, dict) and block.get("type") == "tool_result":
-                rows.append(f"{ts}    <- {_truncate(_oneline(_block_text(block)), 300)}")
-        return rows
+        return [
+            f"{ts}    <- {_truncate(_oneline(_block_text(block)), 300)}"
+            for block in (content if isinstance(content, list) else [])
+            if isinstance(block, dict) and block.get("type") == "tool_result"
+        ]
     if typ == "assistant":
         rows = []
         for block in content if isinstance(content, list) else []:
@@ -388,8 +388,7 @@ def _failure_tail(result: ExecResult, limit: int = 5) -> list[str]:
         if not stream:
             continue
         hits = [line for line in stream if _ERROR_LINE.search(line)]
-        for line in (hits or stream)[-limit:]:
-            lines.append(f"[{label}] {line}")
+        lines.extend(f"[{label}] {line}" for line in (hits or stream)[-limit:])
     return lines
 
 
@@ -793,7 +792,9 @@ def usage(
                 # `total_cost_usd` across agents needs to know the rows cover
                 # different spans. See this command's docstring.
                 "covers_from": (
-                    dt.datetime.fromtimestamp(min(mtimes)).isoformat() if mtimes else None
+                    dt.datetime.fromtimestamp(min(mtimes), tz=dt.UTC).astimezone().isoformat()
+                    if mtimes
+                    else None
                 ),
             }
             if err:
@@ -852,7 +853,11 @@ def usage(
         oldest = min(mtimes) if mtimes else None
         if oldest is not None:
             coverage[agent.name] = oldest
-        since_str = dt.datetime.fromtimestamp(oldest).strftime("%Y-%m-%d") if oldest else "?"
+        since_str = (
+            dt.datetime.fromtimestamp(oldest, tz=dt.UTC).astimezone().strftime("%Y-%m-%d")
+            if oldest
+            else "?"
+        )
         typer.echo(
             f"{agent.name:<8}{len(non_empty):>6}{empty:>6}  {med_turns:>5}  "
             f"{med_out:>8}  {_money(med, 12)}  {_money(p95, 12)}  {_money(total, 10)}  "
@@ -868,7 +873,11 @@ def usage(
         and len(coverage) > 1
         and max(coverage.values()) - min(coverage.values()) > 86400
     ):
-        newest = dt.datetime.fromtimestamp(max(coverage.values())).strftime("%Y-%m-%d")
+        newest = (
+            dt.datetime.fromtimestamp(max(coverage.values()), tz=dt.UTC)
+            .astimezone()
+            .strftime("%Y-%m-%d")
+        )
         typer.echo(
             f"\nuneven coverage: transcripts survive from {newest} for the newest agent "
             f"and earlier for others, so this total is a floor and the rows are not\n"
@@ -1125,6 +1134,7 @@ def provider_set(
 
 
 DRIFT_DEFAULT_FILES = ("SOUL.md", "CLAUDE.md", "slop-tick")
+DRIFT_DEFAULT_HELP = ", ".join(DRIFT_DEFAULT_FILES)
 
 
 def _fetch_live_files(repo: str, files: list[str]) -> dict[str, str | None]:
@@ -1143,7 +1153,7 @@ def _fetch_live_files(repo: str, files: list[str]) -> dict[str, str | None]:
 def drift(
     name: str = typer.Argument(None, help="Agent name (omit to scan all)"),
     file: list[str] = typer.Option(
-        None, "--file", "-f", help=f"Files to check (default: {', '.join(DRIFT_DEFAULT_FILES)})"
+        None, "--file", "-f", help=f"Files to check (default: {DRIFT_DEFAULT_HELP})"
     ),
     templates_dir: str = typer.Option("templates", "--templates"),
     soul_path: str = typer.Option("SOUL.md", "--soul"),

@@ -16,6 +16,7 @@ every hour forever --- the kind of mismatch that gets a real alert silenced.
 from __future__ import annotations
 
 import datetime as dt
+import itertools
 import re
 import subprocess
 
@@ -84,7 +85,7 @@ def longest_gap(elapses: list[dt.datetime]) -> float | None:
     """
     if len(elapses) < 2:
         return None
-    return max((b - a).total_seconds() for a, b in zip(elapses, elapses[1:], strict=False))
+    return max((b - a).total_seconds() for a, b in itertools.pairwise(elapses))
 
 
 def max_age_for(gap_seconds: float | None) -> float:

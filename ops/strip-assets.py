@@ -28,7 +28,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from slop_salon.strip_assets import strip_assets  # noqa: E402
+from slop_salon.strip_assets import strip_assets
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)

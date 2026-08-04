@@ -233,7 +233,10 @@ def _reject_reason(response: httpx.Response) -> str | None:
 @app.command()
 def run(
     model: str = typer.Argument(..., help="owner/name or owner/name:version"),
-    input: list[str] = typer.Option([], "--input", help="Model input as key=value (repeatable)"),
+    # `input` shadows the builtin, but it mirrors Replicate's own `input=` kwarg
+    # and the agents' cookbook documents `--input`; renaming it would only add a
+    # translation step between the CLI flag and the API call.
+    input: list[str] = typer.Option([], "--input", help="Model input as key=value (repeatable)"),  # noqa: A002
     output: Path = typer.Option(Path("assets"), "--output", help="Directory for downloaded media"),
 ):
     """Run a Replicate model with --input k=v ... and download any media."""

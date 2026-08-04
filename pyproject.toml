@@ -30,10 +30,35 @@ line-length = 100
 target-version = "py314"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "N", "UP", "B", "SIM"]
-ignore = [
-  "B008",
-] # typer requires function calls (typer.Option) in argument defaults
+select = [
+  "E",
+  "F",
+  "I",
+  "N",
+  "UP",
+  "B",
+  "SIM",
+  # BLE earns its place: six `# noqa: BLE001` comments predate it and had been
+  # inert since they were written. The rule is the codified form of "let
+  # exceptions bubble, catch at boundaries" --- the places we genuinely want a
+  # blind catch (a dead sprite must not abort a sweep) are the ones carrying
+  # the noqa.
+  "BLE",
+  "RUF", # RUF100 in particular: it is what caught the dead noqa above
+  "PTH", # pathlib over os.path
+  "C4",
+  "RET",
+  "A",
+  "PERF",
+  "FURB",
+  "DTZ", # this codebase converts between UTC and Canberra constantly
+]
+
+[tool.ruff.lint.flake8-bugbear]
+# typer's API *requires* function calls in argument defaults, so exempt them by
+# name rather than switching B008 off wholesale --- a genuine mutable default
+# elsewhere is still a bug we want reported.
+extend-immutable-calls = ["typer.Argument", "typer.Option"]
 
 [tool.ruff.lint.per-file-ignores]
 # Long shell-recipe lines in the cookbook strings must stay unwrapped so

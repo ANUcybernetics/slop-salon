@@ -484,14 +484,14 @@ def _recent_duplicate(session: Session, record: dict) -> tuple[str, str] | None:
         for item in resp.json().get("records", []):
             value = item.get("value") or {}
             try:
-                when = dt.datetime.fromisoformat(value.get("createdAt", "").replace("Z", "+00:00"))
+                when = dt.datetime.fromisoformat(value.get("createdAt", ""))
                 if when < cutoff:
                     continue
             except ValueError, TypeError:
                 continue
             if _same_post(incoming, _post_identity(value)):
                 return item.get("uri", ""), item.get("cid", "")
-    except Exception:
+    except Exception:  # noqa: BLE001 --- dedup is an optimisation; never block a post on it
         return None
     return None
 

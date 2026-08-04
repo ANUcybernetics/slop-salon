@@ -525,7 +525,7 @@ def test_drift_scans_all_agents_when_no_name(fake_config, tmp_path):
 
     def fake_fetch(repo, files):
         captured_repos.append(repo)
-        return {f: None for f in files}
+        return dict.fromkeys(files)
 
     with patch("slop_salon.cli._fetch_live_files", side_effect=fake_fetch):
         result = runner.invoke(app, ["drift"])

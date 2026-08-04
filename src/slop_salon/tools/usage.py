@@ -28,7 +28,6 @@ figure, since it still reads as authoritative.
 
 from __future__ import annotations
 
-import glob
 import json
 from pathlib import Path
 
@@ -195,7 +194,7 @@ def tally_dir(agent: str, root: Path | None = None, codex_root: Path | None = No
     provider swap stay visible in one table.
     """
     base = (root or SPRITE_PROJECTS_ROOT) / f"-home-sprite-slop-salon-{agent}"
-    rows = [(p, tally_session) for p in map(Path, glob.glob(str(base / "*.jsonl")))]
+    rows = [(p, tally_session) for p in base.glob("*.jsonl")]
     codex_base = codex_root or SPRITE_CODEX_SESSIONS_ROOT
     if codex_base.exists():
         rows += [(p, tally_codex_session) for p in codex_base.rglob("rollout-*.jsonl")]

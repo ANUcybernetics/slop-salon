@@ -27,9 +27,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from slop_salon.config import load_config  # noqa: E402
-from slop_salon.github_push import put_file  # noqa: E402
-from slop_salon.provision import resolve_secrets  # noqa: E402
+from slop_salon.config import load_config
+from slop_salon.github_push import put_file
+from slop_salon.provision import resolve_secrets
 
 
 def push_rite(name: str, rite_path: str, config_path: str = "slop_salon.toml") -> None:

@@ -208,7 +208,7 @@ def fetch_agent_feed(client: httpx.Client, handle: str) -> list[dict]:
 
 
 def parse_dt(s: str) -> datetime:
-    return datetime.fromisoformat(s.replace("Z", "+00:00"))
+    return datetime.fromisoformat(s)
 
 
 def iso_week_monday(d: date) -> str:

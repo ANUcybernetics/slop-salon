@@ -19,7 +19,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from slop_salon.recreate import recreate  # noqa: E402
+from slop_salon.recreate import recreate
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:

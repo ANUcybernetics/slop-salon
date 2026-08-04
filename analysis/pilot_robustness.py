@@ -101,9 +101,7 @@ NAME_RE = re.compile(r"\b(" + "|".join(AGENTS) + r")\b", re.IGNORECASE)
 
 
 def scrub(text: str) -> str:
-    text = DATE_RE.sub(" ", text)
-    text = NAME_RE.sub(" ", text)
-    return text
+    return NAME_RE.sub(" ", DATE_RE.sub(" ", text))
 
 
 # --- corpus construction ---------------------------------------------------
@@ -120,8 +118,7 @@ def weekly_flow(repo: Path, agent: str, since: date, until: date, exclude_dossie
     for line in out.splitlines():
         if line.startswith("+++ "):
             fpath = line[4:]
-            if fpath.startswith("b/"):
-                fpath = fpath[2:]
+            fpath = fpath.removeprefix("b/")
             skip = exclude_dossiers and is_dossier_path(agent, fpath)
             continue
         if line.startswith("+") and not line.startswith("+++") and not skip:
