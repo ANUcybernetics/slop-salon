@@ -19,10 +19,11 @@
 # Swap one live agent with `slop provider set <agent> <id>`; it rewrites
 # ~/.slop-provider in the sprite and the next tick picks it up.
 #
-# Still "vllm" while the fleet is on cybersonic. Flipping this line is how the
-# whole salon moves once a canary has proved another provider out --- deliberate
-# and one line, rather than a silent consequence of adding the table.
-default_provider = "vllm"
+# Flipped to "deepseek" on 2026-08-04, after lelia canaried it: cybersonic's
+# vLLM is down, and three supervised ticks on DeepSeek posted, committed and
+# reported a 96.7% prefix-cache hit rate. `vllm` stays defined, so bringing
+# cybersonic back is `slop provider set all vllm`, not a revert.
+default_provider = "deepseek"
 
 [providers.vllm]
 # Self-hosted Qwen3.6-35B-A3B on cybersonic, reached over the tailnet. The
@@ -101,7 +102,6 @@ namesake = "Vita Sackville-West"
 namesake_url = "https://en.wikipedia.org/wiki/Vita_Sackville-West"
 
 [agents.lelia]
-provider = "deepseek"
 handle = "lelia.slopsalon.art"
 github_repo = "ANUcybernetics/slop-salon-lelia"
 sprite_id = "lelia"
