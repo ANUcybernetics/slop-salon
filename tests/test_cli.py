@@ -20,6 +20,16 @@ def fake_config(tmp_path, monkeypatch):
     cfg = tmp_path / "slop_salon.toml"
     cfg.write_text(
         """
+default_provider = "deepseek"
+
+[providers.deepseek]
+runner = "claude"
+env = { ANTHROPIC_MODEL = "deepseek-v4-flash" }
+pricing = { input = 0.14, cache_read = 0.0028, cache_write = 0.14, output = 0.28 }
+
+[providers.selfhosted]
+runner = "claude"
+
 [agents.lou]
 handle = "lou.slopsalon.art"
 github_repo = "ANUcybernetics/slop-salon-lou"
@@ -243,6 +253,16 @@ def live_config(tmp_path, monkeypatch):
     cfg = tmp_path / "slop_salon.toml"
     cfg.write_text(
         """
+default_provider = "deepseek"
+
+[providers.deepseek]
+runner = "claude"
+env = { ANTHROPIC_MODEL = "deepseek-v4-flash" }
+pricing = { input = 0.14, cache_read = 0.0028, cache_write = 0.14, output = 0.28 }
+
+[providers.selfhosted]
+runner = "claude"
+
 [agents.lou]
 handle = "lou.slopsalon.art"
 github_repo = "ANUcybernetics/slop-salon-lou"
@@ -548,6 +568,16 @@ def fake_config_live(tmp_path, monkeypatch):
     cfg = tmp_path / "slop_salon.toml"
     cfg.write_text(
         """
+default_provider = "deepseek"
+
+[providers.deepseek]
+runner = "claude"
+env = { ANTHROPIC_MODEL = "deepseek-v4-flash" }
+pricing = { input = 0.14, cache_read = 0.0028, cache_write = 0.14, output = 0.28 }
+
+[providers.selfhosted]
+runner = "claude"
+
 [agents.lou]
 handle = "lou.slopsalon.art"
 github_repo = "ANUcybernetics/slop-salon-lou"
@@ -578,6 +608,8 @@ def _usage_line(agent: str, session: str, mtime: int, **kwargs) -> str:
         "cache_read": 900_000,
         "output": 9_000,
         "turns": 30,
+        # A stale notional figure from a sprite running the pre-pricing package.
+        # `slop usage` must recompute rather than believe this.
         "cost_usd": 0.78,
     }
     base.update(kwargs)
@@ -592,15 +624,15 @@ def test_usage_aggregates_across_live_agents(fake_config_live):
     sprite_outputs = {
         "spr_lou": "\n".join(
             [
-                _usage_line("lou", "aaaa0001", now - 7200, cost_usd=0.80),
-                _usage_line("lou", "aaaa0002", now - 3600, cost_usd=0.85),
-                _usage_line("lou", "aaaa0003", now - 600, cost_usd=0.90),
+                _usage_line("lou", "aaaa0001", now - 7200, output=9_000),
+                _usage_line("lou", "aaaa0002", now - 3600, output=18_000),
+                _usage_line("lou", "aaaa0003", now - 600, output=27_000),
             ]
         ),
         "spr_mina": "\n".join(
             [
-                _usage_line("mina", "bbbb0001", now - 7200, cost_usd=0.70),
-                _usage_line("mina", "bbbb0002", now - 600, cost_usd=0.75),
+                _usage_line("mina", "bbbb0001", now - 7200, output=9_000),
+                _usage_line("mina", "bbbb0002", now - 600, output=9_000),
             ]
         ),
     }
@@ -622,11 +654,14 @@ def test_usage_aggregates_across_live_agents(fake_config_live):
         assert "agent" in result.output
         assert "lou" in result.output
         assert "mina" in result.output
-        # Per-agent totals: lou 0.80+0.85+0.90 = 2.55, mina 0.70+0.75 = 1.45, grand 4.00
-        assert "$    2.55" in result.output
-        assert "$    1.45" in result.output
+        # Costs come from token counts at the provider's own rates, NOT from the
+        # sprite's stale notional cost_usd (0.78 a tick, which would have totalled
+        # $3.90 across these five).
+        assert "$3.90" not in result.output
+        # mina: two identical ticks at ~$0.0176 each.
+        assert "$0.035" in result.output
         assert "total" in result.output
-        assert "$    4.00" in result.output
+        assert "$0.096" in result.output
         _ = _json  # silence unused
 
 
@@ -634,7 +669,7 @@ def test_usage_single_agent(fake_config_live):
     with patch("slop_salon.cli.SpritesClient") as mock_class:
         instance = MagicMock()
         instance.exec.return_value = MagicMock(
-            stdout=_usage_line("lou", "abcd0001", 1_700_000_000, cost_usd=0.50),
+            stdout=_usage_line("lou", "abcd0001", 1_700_000_000),
             stderr="",
             exit_code=0,
         )
@@ -704,8 +739,8 @@ def test_usage_per_tick_shows_each_session(fake_config_live):
 def test_usage_json_output(fake_config_live):
     stdout = "\n".join(
         [
-            _usage_line("lou", "sess0001", 1_700_000_000, cost_usd=0.5),
-            _usage_line("lou", "sess0002", 1_700_000_100, cost_usd=1.0),
+            _usage_line("lou", "sess0001", 1_700_000_000, output=9_000),
+            _usage_line("lou", "sess0002", 1_700_000_100, output=27_000),
         ]
     )
 
@@ -723,10 +758,12 @@ def test_usage_json_output(fake_config_live):
         entry = data[0]
         assert entry["agent"] == "lou"
         assert entry["ticks"] == 2
-        assert entry["total_cost_usd"] == 1.5
-        assert entry["max_cost_usd"] == 1.0
+        assert entry["provider"] == "deepseek"
+        # 2 ticks x (50 new + 90k cache-write + 900k cache-read) + 9k/27k output,
+        # at DeepSeek rates. Worked by hand: $0.017647 + $0.022687.
+        assert entry["total_cost_usd"] == pytest.approx(0.0403, abs=0.0002)
+        assert entry["max_cost_usd"] > entry["median_cost_usd"]
         # statistics.median of 2 values averages them
-        assert entry["median_cost_usd"] == 0.75
 
 
 def test_usage_reports_sprite_errors(fake_config_live):
@@ -833,3 +870,51 @@ def test_failure_tail_falls_back_to_the_tail_when_nothing_looks_like_an_error():
     result = ExecResult(stdout="a\nb\nc", stderr="", exit_code=1)
 
     assert _failure_tail(result, limit=2) == ["[out] b", "[out] c"]
+
+
+def test_usage_shows_dashes_for_an_unmetered_provider(fake_config_live, monkeypatch):
+    """A self-hosted endpoint or a subscription is not billed per token.
+
+    `--` rather than `$0.000`: printing zero would understate as badly as the
+    old notional-Sonnet figure overstated. Both are lies about a real bill.
+    """
+    from unittest.mock import MagicMock, patch
+
+    cfg = fake_config_live
+    cfg.write_text(
+        cfg.read_text().replace('default_provider = "deepseek"', 'default_provider = "selfhosted"')
+    )
+
+    with patch("slop_salon.cli.SpritesClient") as mock_class:
+        instance = MagicMock()
+        instance.exec.return_value = MagicMock(
+            stdout=_usage_line("lou", "abcd0001", 1_700_000_000), stderr="", exit_code=0
+        )
+        mock_class.return_value = instance
+
+        from slop_salon.cli import app as _app
+
+        result = runner.invoke(_app, ["usage", "lou"])
+
+    assert result.exit_code == 0, result.output
+    assert "--" in result.output
+    assert "not billed per token" in result.output
+    # The sprite's stale notional figure must not leak through as a real cost.
+    assert "0.78" not in result.output
+
+
+@pytest.mark.parametrize(
+    ("n", "expected_index"),
+    [(1, 0), (2, 1), (3, 2), (5, 4), (20, 18)],
+)
+def test_p95_never_falls_below_the_median(n, expected_index):
+    """Nearest-rank, not `int(0.95 * (n - 1))`.
+
+    The old formula floored to index 0 for n <= 2, so a short window printed the
+    *cheapest* tick as p95 and the column came out below the median.
+    """
+    costs = sorted(float(i) for i in range(n))
+    p95 = costs[-(-95 * len(costs) // 100) - 1]
+    med = costs[len(costs) // 2]
+    assert p95 == costs[expected_index]
+    assert p95 >= med

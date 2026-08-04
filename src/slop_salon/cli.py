@@ -49,6 +49,7 @@ from slop_salon.provision import (
 )
 from slop_salon.recreate import recreate
 from slop_salon.sprites import ExecResult, SpritesClient
+from slop_salon.tools.usage import session_cost
 
 app = typer.Typer(add_completion=False, help="Slop Salon admin CLI.")
 
@@ -508,6 +509,17 @@ def _probe_inference(endpoint: str, token: str | None, timeout: float) -> watchd
     return watchdog.Probe(ok=False, detail=f"{url} returned {response.status_code}")
 
 
+def _money(value: float | None, width: int = 0) -> str:
+    """Render a cost, or `--` when the provider is not billed per token.
+
+    Deliberately not `$0.000`: a self-hosted endpoint or a subscription has a
+    real cost, it just is not per-token. Printing zero would understate as badly
+    as the old notional-Sonnet figure overstated.
+    """
+    text = "--" if value is None else f"${value:.3f}"
+    return f"{text:>{width}}" if width else text
+
+
 def _format_duration(seconds: float) -> str:
     return f"{seconds / 60:.0f}min" if seconds < 3600 else f"{seconds / 3600:.1f}h"
 
@@ -719,6 +731,20 @@ def usage(
                 continue
         if cutoff is not None:
             rows = [r for r in rows if r.get("mtime", 0) >= cutoff]
+        # Price here, not in the sprite: the registry is the only place that
+        # knows what a provider charges, and an agent's provider can differ from
+        # its neighbour's. `cost_usd` stays absent for an unmetered provider
+        # (self-hosted or subscription) so the table can say `--` rather than
+        # imply a number nobody is billed.
+        pricing = config.provider_for(agent.name).pricing
+        for r in rows:
+            # Drop anything the sprite sent. Sprites installed before this change
+            # still emit a notional Sonnet `cost_usd`, and silently trusting it
+            # would keep reporting a real DeepSeek wake at ~40x until every
+            # sprite happened to be upgraded.
+            r.pop("cost_usd", None)
+            if pricing is not None:
+                r["cost_usd"] = round(session_cost(r, pricing), 6)
         return agent, rows, None
 
     with ThreadPoolExecutor(max_workers=len(targets)) as pool:
@@ -741,7 +767,7 @@ def usage(
                         f"blocks={r.get('blocks', '?'):<4} "
                         f"in_new={r['in_new']:>6} cache_cr={r['cache_create']:>7} "
                         f"cache_rd={r['cache_read']:>8} out={r['output']:>6} "
-                        f"${r['cost_usd']:.3f}"
+                        f"{_money(r.get('cost_usd'))}"
                     )
         return
 
@@ -757,24 +783,30 @@ def usage(
             if err:
                 entry["error"] = err
             elif non_empty:
-                costs = sorted(r["cost_usd"] for r in non_empty)
+                costs = sorted(r["cost_usd"] for r in non_empty if "cost_usd" in r)
                 entry.update(
                     {
-                        "median_cost_usd": round(median(costs), 4),
-                        "mean_cost_usd": round(mean(costs), 4),
-                        "max_cost_usd": round(max(costs), 4),
-                        "total_cost_usd": round(sum(costs), 2),
+                        "provider": config.provider_for(agent.name).name,
                         "median_turns": int(median(r["turns"] for r in non_empty)),
                         "median_output_tokens": int(median(r["output"] for r in non_empty)),
                     }
                 )
+                if costs:
+                    entry.update(
+                        {
+                            "median_cost_usd": round(median(costs), 4),
+                            "mean_cost_usd": round(mean(costs), 4),
+                            "max_cost_usd": round(max(costs), 4),
+                            "total_cost_usd": round(sum(costs), 4),
+                        }
+                    )
             out.append(entry)
         typer.echo(json.dumps(out, indent=2))
         return
 
     typer.echo(
         f"{'agent':<8}{'ticks':>6}{'empty':>6}  {'turns':>5}  {'output':>8}  "
-        f"{'med $eq/tick':>12}  {'p95 $eq/tick':>12}  {'total $eq':>10}"
+        f"{'med $/tick':>12}  {'p95 $/tick':>12}  {'total $':>10}"
     )
     typer.echo("-" * 76)
     grand_total = 0.0
@@ -787,20 +819,31 @@ def usage(
         if not non_empty:
             typer.echo(f"{agent.name:<8}{0:>6}{empty:>6}  (no ticks in window)")
             continue
-        costs = sorted(r["cost_usd"] for r in non_empty)
-        med = costs[len(costs) // 2]
-        p95 = costs[int(0.95 * (len(costs) - 1))]
-        total = sum(costs)
-        grand_total += total
+        costs = sorted(r["cost_usd"] for r in non_empty if "cost_usd" in r)
+        med = costs[len(costs) // 2] if costs else None
+        # Nearest-rank: ceil(0.95 * n) - 1. The old `int(0.95 * (n - 1))` floored
+        # to index 0 for n <= 2, so the "p95" column printed the *cheapest* tick
+        # and came out below the median --- visibly nonsense on any short window.
+        p95 = costs[-(-95 * len(costs) // 100) - 1] if costs else None
+        total = sum(costs) if costs else None
+        grand_total += total or 0.0
         med_turns = sorted(r["turns"] for r in non_empty)[len(non_empty) // 2]
         med_out = sorted(r["output"] for r in non_empty)[len(non_empty) // 2]
         typer.echo(
             f"{agent.name:<8}{len(non_empty):>6}{empty:>6}  {med_turns:>5}  "
-            f"{med_out:>8}  ${med:>10.3f}  ${p95:>10.3f}  ${total:>8.2f}"
+            f"{med_out:>8}  {_money(med, 12)}  {_money(p95, 12)}  {_money(total, 10)}"
         )
-    typer.echo(
-        f"{'total':<8}{'':>6}{'':>6}  {'':>5}  {'':>8}  {'':>12}  {'':>12}  ${grand_total:>8.2f}"
+    blanks = f"{'':>6}{'':>6}  {'':>5}  {'':>8}  {'':>12}  {'':>12}"
+    typer.echo(f"{'total':<8}{blanks}  {_money(grand_total, 10)}")
+    unpriced = sorted(
+        {
+            config.provider_for(a.name).name
+            for a, rows, err in results
+            if not err and any("cost_usd" not in r for r in rows if r["turns"] > 0)
+        }
     )
+    if unpriced:
+        typer.echo(f"\n`--` = not billed per token (providers: {', '.join(unpriced)})")
 
 
 @app.command()

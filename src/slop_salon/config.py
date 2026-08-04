@@ -11,6 +11,23 @@ from pathlib import Path
 RUNNERS = ("claude", "codex")
 
 
+@dataclass(frozen=True)
+class Pricing:
+    """Per-million-token rates for a metered provider.
+
+    Only providers that actually bill per token carry one. A self-hosted
+    endpoint or a subscription has no per-token price, and `slop usage` prints
+    `--` for those rather than a number --- the previous behaviour, a notional
+    Sonnet-equivalent applied to every provider alike, overstated a real
+    DeepSeek wake by ~40x while looking exactly like a real figure.
+    """
+
+    input: float
+    output: float
+    cache_read: float = 0.0
+    cache_write: float = 0.0
+
+
 @dataclass
 class Provider:
     """One intelligence provider --- where an agent's thinking comes from.
@@ -42,6 +59,9 @@ class Provider:
     # from. Both or neither.
     credentials_dest: str = ""
     credentials_source_env: str = ""
+    # Per-token rates, when the provider is metered. None means "not billed per
+    # token" (self-hosted, or a subscription), not "free".
+    pricing: Pricing | None = None
 
     @property
     def is_subscription(self) -> bool:
@@ -106,6 +126,18 @@ def _parse_provider(name: str, fields: dict) -> Provider:
     runner = fields.get("runner", "claude")
     if runner not in RUNNERS:
         raise ValueError(f"provider {name!r}: unknown runner {runner!r} (want one of {RUNNERS})")
+    raw_pricing = fields.get("pricing")
+    pricing = None
+    if raw_pricing is not None:
+        missing = {"input", "output"} - set(raw_pricing)
+        if missing:
+            raise ValueError(f"provider {name!r}: pricing needs {sorted(missing)}")
+        pricing = Pricing(
+            input=float(raw_pricing["input"]),
+            output=float(raw_pricing["output"]),
+            cache_read=float(raw_pricing.get("cache_read", 0.0)),
+            cache_write=float(raw_pricing.get("cache_write", 0.0)),
+        )
     provider = Provider(
         name=name,
         runner=runner,
@@ -115,6 +147,7 @@ def _parse_provider(name: str, fields: dict) -> Provider:
         health_url=fields.get("health_url", ""),
         credentials_dest=fields.get("credentials_dest", ""),
         credentials_source_env=fields.get("credentials_source_env", ""),
+        pricing=pricing,
     )
     if bool(provider.credentials_dest) != bool(provider.credentials_source_env):
         raise ValueError(

@@ -20,9 +20,10 @@ price. That is a gap in what vLLM *reports*, not evidence that nothing is cached
 upper bound. A hosted provider does report hits, so a non-zero `cache_read` after
 a provider swap is the first sign the swap actually took.
 
-Dollar figures stay notional Sonnet-equivalents on every runner, deliberately:
-they are an effort proxy that makes ticks comparable across agents, models and
-time, not a bill. Real spend lives with the provider.
+This tool emits **raw token counts only**. Pricing lives in the provider
+registry and is applied admin-side by `slop usage`, because a sprite has no way
+to know what its provider charges --- and a hardcoded guess is worse than no
+figure, since it still reads as authoritative.
 """
 
 from __future__ import annotations
@@ -33,16 +34,7 @@ from pathlib import Path
 
 import typer
 
-# Notional Sonnet API pricing as of 2026-05 ($ per million tokens).
-# Source: https://www.anthropic.com/pricing
-#
-# Inference is self-hosted vLLM, so no real dollars are spent; the "cost"
-# is an API-equivalent effort proxy that makes ticks comparable across
-# agents and over time. Real spend caps live elsewhere (Replicate).
-PRICE_INPUT = 3.00
-PRICE_OUTPUT = 15.00
-PRICE_CACHE_CREATE = 3.75
-PRICE_CACHE_READ = 0.30
+from slop_salon.config import Pricing
 
 SPRITE_PROJECTS_ROOT = Path("/home/sprite/.claude/projects")
 SPRITE_CODEX_SESSIONS_ROOT = Path("/home/sprite/.codex/sessions")
@@ -211,13 +203,13 @@ def tally_dir(agent: str, root: Path | None = None, codex_root: Path | None = No
     return [fn(p) for p, fn in rows]
 
 
-def session_cost(stats: dict) -> float:
-    """Notional API-equivalent $ for one session (see pricing note above)."""
+def session_cost(stats: dict, pricing: Pricing) -> float:
+    """What one session actually cost, at `pricing`'s per-million-token rates."""
     return (
-        stats["in_new"] * PRICE_INPUT
-        + stats["cache_create"] * PRICE_CACHE_CREATE
-        + stats["cache_read"] * PRICE_CACHE_READ
-        + stats["output"] * PRICE_OUTPUT
+        stats["in_new"] * pricing.input
+        + stats["cache_create"] * pricing.cache_write
+        + stats["cache_read"] * pricing.cache_read
+        + stats["output"] * pricing.output
     ) / 1_000_000
 
 
@@ -225,8 +217,14 @@ def session_cost(stats: dict) -> float:
 def tally(
     agent: str = typer.Argument(..., help="Agent name (matches the slop-salon-<name> dir)"),
 ):
-    """Emit one JSON line per session for the given agent."""
+    """Emit one JSON line per session for the given agent --- raw token counts only.
+
+    Deliberately no dollar figure: the sprite has no idea what its provider
+    charges, and the previous version guessed with hardcoded Sonnet rates. That
+    guess reported a real DeepSeek wake as $12.36 against an actual $0.20. The
+    admin-side `slop usage` prices these counts from the provider registry,
+    which is the only place that knows the rates.
+    """
     for stats in tally_dir(agent):
         stats["agent"] = agent
-        stats["cost_usd"] = round(session_cost(stats), 6)
         typer.echo(json.dumps(stats))

@@ -43,6 +43,11 @@ secret_env = { ANTHROPIC_AUTH_TOKEN = "SLOP_ANTHROPIC_AUTH_TOKEN" }
 runner = "claude"
 env = { ANTHROPIC_BASE_URL = "https://api.deepseek.com/anthropic", ANTHROPIC_MODEL = "deepseek-v4-flash", ANTHROPIC_SMALL_FAST_MODEL = "deepseek-v4-flash", API_TIMEOUT_MS = "600000" }
 secret_env = { ANTHROPIC_API_KEY = "DEEPSEEK_API_TOKEN" }
+# USD per million tokens. `slop usage` prices every tick from here, so keep it
+# current --- a stale rate is worse than none, because it still looks authoritative.
+# A cache miss is what writes the cache, so cache_write is billed at the miss rate.
+# Providers with no `pricing` block are not billed per token and report `--`.
+pricing = { input = 0.14, cache_read = 0.0028, cache_write = 0.14, output = 0.28 }
 
 [providers.claude-sub]
 # Ben's Claude subscription. Sets no env at all, on purpose: Claude Code

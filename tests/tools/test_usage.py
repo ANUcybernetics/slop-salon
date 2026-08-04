@@ -5,18 +5,20 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
+from slop_salon.config import Pricing
 from slop_salon.tools.usage import (
-    PRICE_CACHE_CREATE,
-    PRICE_CACHE_READ,
-    PRICE_INPUT,
-    PRICE_OUTPUT,
     app,
     session_cost,
     tally_dir,
     tally_session,
 )
+
+# DeepSeek V4-Flash, per million tokens. A cache miss is what writes the cache,
+# so the write rate is the miss rate.
+DEEPSEEK = Pricing(input=0.14, output=0.28, cache_read=0.0028, cache_write=0.14)
 
 runner = CliRunner()
 
@@ -201,20 +203,30 @@ def test_tally_dir_returns_empty_when_no_project(tmp_path):
     assert rows == []
 
 
-def test_session_cost_pricing_math():
+def test_session_cost_uses_the_providers_own_rates():
     stats = {
         "in_new": 1_000_000,
         "cache_create": 1_000_000,
         "cache_read": 1_000_000,
         "output": 1_000_000,
     }
-    expected = PRICE_INPUT + PRICE_CACHE_CREATE + PRICE_CACHE_READ + PRICE_OUTPUT
-    assert session_cost(stats) == expected
+    expected = DEEPSEEK.input + DEEPSEEK.cache_write + DEEPSEEK.cache_read + DEEPSEEK.output
+    assert session_cost(stats, DEEPSEEK) == pytest.approx(expected)
 
 
 def test_session_cost_zero_when_no_usage():
     stats = {"in_new": 0, "cache_create": 0, "cache_read": 0, "output": 0}
-    assert session_cost(stats) == 0.0
+    assert session_cost(stats, DEEPSEEK) == 0.0
+
+
+def test_a_cache_heavy_session_is_cheap():
+    """The shape of a real tick: ~97% of input is a cache hit.
+
+    Pricing those hits at the miss rate is what made the old notional figure
+    overstate a real DeepSeek wake by ~40x.
+    """
+    stats = {"in_new": 62_473, "cache_create": 0, "cache_read": 1_846_144, "output": 18_839}
+    assert session_cost(stats, DEEPSEEK) == pytest.approx(0.0192, abs=0.0005)
 
 
 def test_cli_tally_emits_jsonl(tmp_path, monkeypatch):
@@ -232,8 +244,11 @@ def test_cli_tally_emits_jsonl(tmp_path, monkeypatch):
     assert {line["session"] for line in lines} == {"abcd1234", "efgh5678"}
     for line in lines:
         assert line["agent"] == "lou"
-        assert "cost_usd" in line
         assert line["turns"] == 1
+        # No dollar figure from the sprite: it has no idea what its provider
+        # charges, and the old hardcoded guess read as authoritative while being
+        # wrong by ~40x. `slop usage` prices these counts from the registry.
+        assert "cost_usd" not in line
 
 
 # --- codex runner ---------------------------------------------------------
