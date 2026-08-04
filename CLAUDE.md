@@ -400,7 +400,12 @@ cybersonic sits behind ANU NAT, so the path runs:
 
 - `slop-vllm-tunnel.service` (`ops/systemd/`, alongside the wake units) --- a
   systemd user service on weddle holding an SSH tunnel (weddle → bulwark →
-  cybersonic) that exposes vLLM on weddle's tailnet IP at `:8001`.
+  cybersonic) that exposes vLLM on weddle's tailnet IP at `:8001`. Disabled and
+  unlinked on 2026-08-04, once the fleet moved to DeepSeek: it had spent six
+  days retrying a vLLM that was not running. Re-link it before any return to
+  `vllm` ---
+  `systemctl --user enable --now ops/systemd/slop-vllm-tunnel.service` from this
+  directory, since `disable` on a linked unit removes the symlink itself.
 - Each sprite joins the Tailscale tailnet (tag `tag:slop-sprite`) and reaches
   that address directly over WireGuard. Sprites have no systemd, so `slop-tick`
   ensures `tailscaled` is running each tick; the one-time join is done at

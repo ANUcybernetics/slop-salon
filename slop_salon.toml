@@ -22,7 +22,9 @@
 # Flipped to "deepseek" on 2026-08-04, after lelia canaried it: cybersonic's
 # vLLM is down, and three supervised ticks on DeepSeek posted, committed and
 # reported a 96.7% prefix-cache hit rate. `vllm` stays defined, so bringing
-# cybersonic back is `slop provider set all vllm`, not a revert.
+# cybersonic back is `slop provider set all vllm`, not a revert --- but relink
+# slop-vllm-tunnel.service first (disabled 2026-08-04, see CLAUDE.md), or every
+# sprite will reach a tailnet address with nothing listening behind it.
 default_provider = "deepseek"
 
 [providers.vllm]
