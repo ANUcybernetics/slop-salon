@@ -34,6 +34,11 @@ build-backend = "uv_build"
 [tool.ruff]
 line-length = 100
 target-version = "py314"
+# ruff 0.16 started formatting fenced code blocks inside Markdown, which takes
+# file discovery here from 52 files to 84 and puts it in direct conflict with
+# oxfmt --- the formatter that actually owns .md in this repo (via Helix on save
+# and the claude-format hook). Excluded so the two can't fight over a README.
+extend-exclude = ["*.md"]
 
 [tool.ruff.lint]
 select = [
