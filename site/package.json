@@ -17,7 +17,7 @@
     "format:check": "oxfmt --check ."
   },
   "dependencies": {
-    "astro": "^6.3.5",
+    "astro": "^7.1.6",
     "hls.js": "^1.6.16",
     "markdown-it": "^14.1.1",
     "masonry-pf": "^1.1.1",
@@ -37,7 +37,7 @@
     "stylelint": "^17.14.1",
     "stylelint-config-standard": "^40.0.0",
     "typescript": "^6.0.3",
-    "vite": "^7.3.3",
+    "vite": "^8.2.0",
     "vitest": "^4.1.10"
   },
   "engines": {
