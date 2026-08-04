@@ -1,0 +1,45 @@
+name: CI
+
+# The admin side had no CI at all until now: `deploy-site.yml` covered the
+# Astro build and nothing covered the Python package, the `slop` CLI or the
+# slop-tick shell suite. Everything below was green only for as long as
+# somebody remembered to run it by hand.
+#
+# The checks themselves live in `mise.toml` as tasks, so `mise run check`
+# locally and this job are the same commands rather than two lists that drift.
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "site/**"
+      - "backlog/**"
+      - "docs/**"
+      - "**.md"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # python, uv, node, pnpm and bats all come from mise.toml, so the runner
+      # resolves exactly what a local `mise run check` does. bats especially:
+      # without it the shell suite silently doesn't run.
+      - name: Set up mise
+        uses: jdx/mise-action@v4
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Lint, format, types, tests
+        run: mise run check

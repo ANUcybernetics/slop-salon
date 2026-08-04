@@ -1,7 +1,38 @@
 [tools]
 python = "3.14"
+uv = "0.12.1"
 node = "24"
 pnpm = "latest"
 # `tests/test_slop_tick.bats` needs it; without a pin, `bats` is an unresolved
 # shim and the shell-script suite silently doesn't get run.
 bats = "1.13.0"
+
+# The checks CI runs, named once here so `mise run check` locally and the
+# workflow are the same commands rather than two lists that drift apart.
+[tasks.lint]
+description = "Lint with ruff"
+run = "uv run ruff check ."
+
+[tasks.fmt]
+description = "Format with ruff"
+run = "uv run ruff format ."
+
+[tasks.fmt-check]
+description = "Check formatting with ruff"
+run = "uv run ruff format --check ."
+
+[tasks.type]
+description = "Type-check with ty"
+run = "uv run ty check"
+
+[tasks.test]
+description = "Run the Python suite"
+run = "uv run pytest"
+
+[tasks.test-shell]
+description = "Run the slop-tick bats suite"
+run = "bats tests/test_slop_tick.bats"
+
+[tasks.check]
+description = "Everything CI runs: lint, format, types, both test suites"
+depends = ["lint", "fmt-check", "type", "test", "test-shell"]
