@@ -292,6 +292,7 @@ def test_shipped_memory_and_tools_stubs_start_under_their_cap():
 def test_provision_calls_steps_in_order(tmp_path, monkeypatch):
     """The provisioner orchestrates the workflow; verify the key external calls."""
     from slop_salon import provision
+    from slop_salon.config import LEGACY_PROVIDER
 
     templates_dir = tmp_path / "templates"
     templates_dir.mkdir()
@@ -315,6 +316,16 @@ sprite_id = ""
 siblings = ["other"]
 """
     )
+
+    # This config declares no provider, so provisioning falls through to
+    # LEGACY_PROVIDER --- and `provider_steps` refuses to run unless that
+    # provider's admin-side secrets are set. Supplying them here is what makes
+    # the test hermetic: it previously passed only on a box with the live token
+    # exported, and failed on CI and on any fresh clone. Derived from the
+    # provider rather than hardcoded, so renaming a secret can't leave a stale
+    # setenv silently doing nothing.
+    for admin_var in LEGACY_PROVIDER.secret_env.values():
+        monkeypatch.setenv(admin_var, "not-a-real-token")
 
     monkeypatch.chdir(tmp_path)
 
@@ -363,8 +374,6 @@ siblings = ["other"]
     # claude ships in the base image but its version drifts with the image, so
     # provisioning pins it to the version its provider asks for via the native
     # `claude install` subcommand (never the curl installer).
-    from slop_salon.config import LEGACY_PROVIDER
-
     version = LEGACY_PROVIDER.claude_version
     assert any(f"claude install {version}" in cmd for cmd in exec_commands)
     assert not any("claude.ai/install.sh" in cmd for cmd in exec_commands)
