@@ -7,6 +7,11 @@ import re
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+# An arbitrary explicit version for the fixture provider below. It only has to
+# be a version, not *the* version --- the real pin lives in slop_salon.toml and
+# is asserted against the registry in the claude-pin tests.
+PINNED_CLAUDE = "2.1.92"
+
 
 def test_resolve_secrets_merges_shared_env_and_per_agent_file(monkeypatch, tmp_path):
     from slop_salon.provision import resolve_secrets
@@ -121,10 +126,11 @@ def test_apt_install_cmd_uses_required_packages():
 
 
 def test_claude_pin_cmd_installs_explicit_known_good_version():
-    from slop_salon.config import LEGACY_PROVIDER
+    from slop_salon.config import load_config
     from slop_salon.provision import _build_claude_pin_cmd
 
-    version = LEGACY_PROVIDER.claude_version
+    # Sourced from the registry, which is the only place the pin lives now.
+    version = load_config("slop_salon.toml").providers["vllm"].claude_version
     assert _build_claude_pin_cmd(version) == f"claude install {version} --force"
     # Must be an explicit version, never a moving channel: a recreate off a newer
     # base image must not drift onto a build whose Skills injection vLLM rejects.
@@ -292,7 +298,6 @@ def test_shipped_memory_and_tools_stubs_start_under_their_cap():
 def test_provision_calls_steps_in_order(tmp_path, monkeypatch):
     """The provisioner orchestrates the workflow; verify the key external calls."""
     from slop_salon import provision
-    from slop_salon.config import LEGACY_PROVIDER
 
     templates_dir = tmp_path / "templates"
     templates_dir.mkdir()
@@ -306,9 +311,23 @@ def test_provision_calls_steps_in_order(tmp_path, monkeypatch):
     soul = tmp_path / "SOUL.md"
     soul.write_text("# Soul")
 
+    # Declare the provider inline rather than leaning on whatever the salon runs
+    # today. Two reasons: this test is about provisioning step order, so it
+    # should not change meaning when the fleet default is swapped; and
+    # `provider_steps` refuses to run unless the provider's admin-side secrets
+    # are set, which is why the test used to pass only on a box with the real
+    # SLOP_ANTHROPIC_AUTH_TOKEN exported and failed on any fresh clone.
     cfg = tmp_path / "slop_salon.toml"
     cfg.write_text(
-        """
+        f"""
+default_provider = "test-provider"
+
+[providers.test-provider]
+runner = "claude"
+claude_version = "{PINNED_CLAUDE}"
+env = {{ ANTHROPIC_BASE_URL = "https://example.invalid" }}
+secret_env = {{ ANTHROPIC_API_KEY = "TEST_PROVIDER_TOKEN" }}
+
 [agents.lou]
 handle = "lou.slopsalon.art"
 github_repo = "ANUcybernetics/slop-salon-lou"
@@ -316,16 +335,7 @@ sprite_id = ""
 siblings = ["other"]
 """
     )
-
-    # This config declares no provider, so provisioning falls through to
-    # LEGACY_PROVIDER --- and `provider_steps` refuses to run unless that
-    # provider's admin-side secrets are set. Supplying them here is what makes
-    # the test hermetic: it previously passed only on a box with the live token
-    # exported, and failed on CI and on any fresh clone. Derived from the
-    # provider rather than hardcoded, so renaming a secret can't leave a stale
-    # setenv silently doing nothing.
-    for admin_var in LEGACY_PROVIDER.secret_env.values():
-        monkeypatch.setenv(admin_var, "not-a-real-token")
+    monkeypatch.setenv("TEST_PROVIDER_TOKEN", "not-a-real-token")
 
     monkeypatch.chdir(tmp_path)
 
@@ -374,8 +384,7 @@ siblings = ["other"]
     # claude ships in the base image but its version drifts with the image, so
     # provisioning pins it to the version its provider asks for via the native
     # `claude install` subcommand (never the curl installer).
-    version = LEGACY_PROVIDER.claude_version
-    assert any(f"claude install {version}" in cmd for cmd in exec_commands)
+    assert any(f"claude install {PINNED_CLAUDE}" in cmd for cmd in exec_commands)
     assert not any("claude.ai/install.sh" in cmd for cmd in exec_commands)
 
     # The env file is written inside the sprite (the REST `env` field is ignored),

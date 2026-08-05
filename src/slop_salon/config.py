@@ -68,25 +68,6 @@ class Provider:
         return bool(self.credentials_dest)
 
 
-# Fallback when slop_salon.toml carries no [providers] table --- an unmigrated
-# config keeps working, and keeps working *the way it did*: self-hosted vLLM
-# over the tailnet, with the pinned claude. Only the bearer token is a secret;
-# everything else about that endpoint is already public in docs/runbook.md.
-LEGACY_PROVIDER = Provider(
-    name="vllm",
-    runner="claude",
-    env={
-        "ANTHROPIC_BASE_URL": "http://100.110.244.39:8001",
-        "ANTHROPIC_MODEL": "qwen3.6-27b",
-        "ANTHROPIC_SMALL_FAST_MODEL": "qwen3.6-27b",
-        "API_TIMEOUT_MS": "1800000",
-    },
-    secret_env={"ANTHROPIC_AUTH_TOKEN": "SLOP_ANTHROPIC_AUTH_TOKEN"},
-    claude_version="2.1.92",
-    health_url="http://100.110.244.39:8001/health",
-)
-
-
 @dataclass
 class Agent:
     name: str
@@ -112,13 +93,20 @@ class Config:
         """The provider agent `agent_name` runs on.
 
         Precedence: the agent's own `provider`, then the registry
-        `default_provider`, then `LEGACY_PROVIDER`.
+        `default_provider`. There is no third fallback: a config that resolves
+        to nothing is a config error, and saying so beats quietly inventing an
+        endpoint. The registry briefly carried a hardcoded vLLM provider for
+        exactly that case, which meant the one situation it existed to rescue
+        would have returned a tunnel that was switched off the same week.
         """
         if agent_name not in self.agents:
             raise KeyError(f"unknown agent {agent_name!r}")
         chosen = self.agents[agent_name].provider or self.default_provider
         if not chosen:
-            return LEGACY_PROVIDER
+            raise ValueError(
+                f"agent {agent_name!r} resolves to no provider: set `provider` on its "
+                f"block, or `default_provider` in {self.path}"
+            )
         return self.providers[chosen]
 
 

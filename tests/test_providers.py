@@ -12,7 +12,7 @@ import re
 
 import pytest
 
-from slop_salon.config import LEGACY_PROVIDER, Config, load_config, save_provider
+from slop_salon.config import Config, load_config, save_provider
 from slop_salon.provision import (
     PROVIDER_OWNED_ENV,
     _build_install_credentials_cmd,
@@ -69,26 +69,24 @@ def _decoded(cmd: str) -> str:
 # --- Resolving which provider an agent runs on ---
 
 
-def test_agent_provider_beats_default_which_beats_legacy(tmp_path):
+def test_agent_provider_beats_default(tmp_path):
     config = load_config(_write(tmp_path))
     assert config.provider_for("lou").name == "vllm"  # explicit on the agent
     assert config.provider_for("mina").name == "deepseek"  # falls to the default
 
-    bare = Config(path=tmp_path / "x.toml", agents=config.agents)
-    assert bare.provider_for("mina") is LEGACY_PROVIDER
 
+def test_a_config_resolving_to_no_provider_says_so(tmp_path):
+    """Resolving to nothing is a config error, not a cue to invent an endpoint.
 
-def test_unmigrated_config_still_loads_and_behaves_as_it_did(tmp_path):
-    """No [providers] table must keep meaning "the vLLM setup we already had"."""
-    path = _write(
-        tmp_path,
-        '[agents.lou]\nhandle = "lou.slopsalon.art"\ngithub_repo = "o/lou"\n',
-    )
-    config = load_config(path)
-    provider = config.provider_for("lou")
-    assert provider is LEGACY_PROVIDER
-    assert provider.runner == "claude"
-    assert provider.claude_version  # the pin vLLM needs is still applied
+    This used to fall back to a hardcoded vLLM provider so an unmigrated config
+    would "keep working the way it did". Nothing reaches that state --- there is
+    one slop_salon.toml, tracked beside the code that reads it --- and the
+    hardcoded copy went stale immediately, still naming the tailnet address and
+    claude pin of a tunnel disabled the same week. A loud failure is worth more.
+    """
+    bare = Config(path=tmp_path / "x.toml", agents=load_config(_write(tmp_path)).agents)
+    with pytest.raises(ValueError, match="resolves to no provider"):
+        bare.provider_for("mina")
 
 
 @pytest.mark.parametrize(
