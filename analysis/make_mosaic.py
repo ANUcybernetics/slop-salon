@@ -7,9 +7,9 @@ as square cells. Fetches from the Bluesky public API.
 
 Two layouts, both full-page against the style's 5.5x9in text block:
 
-  (default)  figures/mosaic.jpg --- 12x3 per agent, 216 works. Dense enough to
+  (default)  figures/mosaic.jpg --- 16x3 per agent, 288 works. Dense enough to
              read as texture: you see each agent's palette and the shared
-             late-season drift, but not individual works.
+             late drift, but not individual works.
   --detail   figures/mosaic-detail.jpg --- 4x1 per agent, 24 works at roughly
              3x the linear size, so individual pieces are legible. Columns are
              even samples through the season, so they read early to late and
@@ -40,23 +40,31 @@ LABEL_W = 200  # left strip carrying the agent name
 FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf"
 HERE = Path(__file__).parent
 
-# cols, rows-per-agent, cell px, transposed, output. The dense plate runs two
-# rows per agent so it sits as a top float rather than claiming a page of its
-# own; the paper has six content pages and the argument does not need the third
-# row. The detail plate is transposed --- agents across, time down one column
-# each --- which turns a tall 6x4 into a wide 4x6 and costs the page far less
-# height at the same tile size.
+# cols, rows-per-agent, cell px, transposed, output. The dense plate runs three
+# rows per agent, wide enough (16 cols) that the whole block still fits above
+# the text as a top float: at 5.5in wide it stands 430pt of the 650pt text
+# height, where a 12-col third row would stand 563pt and force a page of its
+# own, which the paper's six content pages cannot pay for. The detail plate is
+# transposed --- agents across, time down one column each --- which turns a
+# tall 6x4 into a wide 4x6 and costs the page far less height at the same tile
+# size.
 LAYOUTS = {
-    "dense": (12, 2, 220, False, HERE / "mosaic.jpg"),
+    "dense": (16, 3, 220, False, HERE / "mosaic.jpg"),
     "detail": (4, 1, 600, True, HERE / "mosaic-detail.jpg"),
 }
 LABEL_H = 90  # top strip carrying the agent name, transposed layout only
+SEASON_END = "2026-07-27"  # last day of season one; the feeds run on past it
 
 
-def all_images(client: httpx.Client, handle: str, cap: int | None = None) -> list[str]:
+def all_images(
+    client: httpx.Client, handle: str, cap: int | None = None, until: str | None = None
+) -> list[str]:
     """Return fullsize image URLs for one agent, newest first.
 
-    Stops early at `cap` when only the recent tail is wanted.
+    Stops early at `cap` when only the recent tail is wanted. `until` is an
+    ISO date (YYYY-MM-DD) past which posts are dropped: the agents kept
+    posting after season one closed on 2026-07-27, so a plate that samples
+    the live feed would reach outside the window the paper reports.
     """
     urls: list[str] = []
     cursor = None
@@ -72,6 +80,8 @@ def all_images(client: httpx.Client, handle: str, cap: int | None = None) -> lis
         r.raise_for_status()
         data = r.json()
         for item in data.get("feed", []):
+            if until and item["post"]["record"]["createdAt"][:10] > until:
+                continue
             embed = item["post"].get("embed", {}) or {}
             images = embed.get("images") or (embed.get("media", {}) or {}).get("images")
             if images:
@@ -116,6 +126,12 @@ def main() -> None:
     # (all six drifted toward technical plots late on), which undersells the
     # individuation the figure is there to show. Pass --recent for that variant.
     spread = "--recent" not in sys.argv
+    # Season one closed 2026-07-27 but the agents kept posting, so both plates
+    # cap at the window the paper reports. Pass --until= to widen or lift it.
+    until = SEASON_END
+    for arg in sys.argv[1:]:
+        if arg.startswith("--until="):
+            until = arg.split("=", 1)[1] or None
     cols, rows_per_agent, cell, transposed, default_out = LAYOUTS[
         "detail" if "--detail" in sys.argv else "dense"
     ]
@@ -137,7 +153,7 @@ def main() -> None:
 
     with httpx.Client(timeout=30, follow_redirects=True) as client:
         for i, handle in enumerate(AGENTS):
-            pool = all_images(client, handle, cap=None if spread else per_agent)
+            pool = all_images(client, handle, cap=None if spread else per_agent, until=until)
             urls = pick(pool, per_agent, spread)
             print(f"{handle}: {len(urls)} of {len(pool)} images", file=sys.stderr)
 
