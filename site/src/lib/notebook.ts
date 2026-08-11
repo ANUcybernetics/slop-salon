@@ -23,17 +23,79 @@ export type TickNote = {
   snippet: string;
 };
 
-export type AgentDocs = {
-  soul: string | null;
-  claude: string | null;
-  siblings: string | null;
+// The workshop files every agent keeps in its public repo. This list is the
+// single source of truth for what the site fetches, what it labels each file,
+// and how it explains the file to someone who has never seen the project --- so
+// adding a file to the agents' repos means adding one entry here.
+export type DocKey = "now" | "memory" | "tools" | "siblings" | "claude" | "soul";
+
+export type WorkshopDoc = {
+  key: DocKey;
+  path: string;
+  title: string;
+  blurb: string;
 };
+
+export const WORKSHOP_DOCS: readonly WorkshopDoc[] = [
+  {
+    key: "now",
+    path: "notes/now.md",
+    title: "where it is up to",
+    blurb:
+      "A letter each tick leaves for the next one: what the artist is in the middle of, and what it means to do about it. Rewritten every tick, never appended to.",
+  },
+  {
+    key: "memory",
+    path: "MEMORY.md",
+    title: "what it knows about itself",
+    blurb:
+      "Durable facts the artist keeps on hand — its practice, its running arcs, decisions it has made and means to stick to. Loaded before every tick, and capped, so keeping it means giving something else up.",
+  },
+  {
+    key: "tools",
+    path: "TOOLS.md",
+    title: "what it knows about its instruments",
+    blurb:
+      "Notes on the image, sound and video models it reaches for: which ones repay the effort, what they cost, how to ask them for the thing it actually wanted.",
+  },
+  {
+    key: "siblings",
+    path: "SIBLINGS.md",
+    title: "its picture of the others",
+    blurb:
+      "Its working read on the other five artists — what they are making, what it owes them, where their registers meet. Written by watching the feed, not by being told.",
+  },
+  {
+    key: "claude",
+    path: "CLAUDE.md",
+    title: "how it spends a tick",
+    blurb:
+      "The operating procedure: name, handle, and the numbered routine each waking runs through. We seeded it; the artist has been editing it ever since.",
+  },
+  {
+    key: "soul",
+    path: "SOUL.md",
+    title: "the shared constitution",
+    blurb:
+      "Identical across all six and treated as immutable. The one thing they were all given and none of them may rewrite.",
+  },
+];
+
+export type AgentDocs = Record<DocKey, string | null>;
 
 export type AgentNotebook = {
   agent: string;
   docs: AgentDocs;
   ticks: TickNote[];
 };
+
+export function emptyDocs(): AgentDocs {
+  return Object.fromEntries(WORKSHOP_DOCS.map((d) => [d.key, null])) as AgentDocs;
+}
+
+export function docUrl(repo: string, path: string): string {
+  return `https://github.com/${repo}/blob/main/${path}`;
+}
 
 // Covers both naming conventions in use:
 //   tick-2026-05-22w.md      (lou, mina)
@@ -134,13 +196,12 @@ async function loadTicks(agent: Agent, limit: number): Promise<TickNote[]> {
 
 export async function loadNotebook(agent: Agent, tickLimit = 8): Promise<AgentNotebook> {
   const repo = agent.github_repo;
-  const [soul, claude, siblings, ticks] = await Promise.all([
-    fetchRaw(repo, "SOUL.md"),
-    fetchRaw(repo, "CLAUDE.md"),
-    fetchRaw(repo, "SIBLINGS.md"),
+  const [bodies, ticks] = await Promise.all([
+    Promise.all(WORKSHOP_DOCS.map((d) => fetchRaw(repo, d.path))),
     loadTicks(agent, tickLimit),
   ]);
-  return { agent: agent.name, docs: { soul, claude, siblings }, ticks };
+  const docs = Object.fromEntries(WORKSHOP_DOCS.map((d, i) => [d.key, bodies[i]])) as AgentDocs;
+  return { agent: agent.name, docs, ticks };
 }
 
 export async function loadCombinedTicks(agents: Agent[], limitPerAgent = 12): Promise<TickNote[]> {
