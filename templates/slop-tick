@@ -110,49 +110,43 @@ fi
 # wake driver for hours. 30m is ~2x the slowest healthy tick seen so far.
 TICK_TIMEOUT="${SLOP_TICK_TIMEOUT:-30m}"
 
-# Which agent CLI drives this tick. Set by ~/.slop-provider; defaults to claude
-# so a sprite that predates the provider split keeps working untouched.
+# Which agent CLI drives this tick. It remains explicit alongside the shared
+# dispatcher profile because Codex needs AGENTS.md rendered before agent-run is
+# invoked. Defaults preserve sprites provisioned before either config split.
 RUNNER="${SLOP_RUNNER:-claude}"
+PROFILE="${AGENT_PROFILE:-}"
 
 case "$RUNNER" in
 claude)
-  # Model and API endpoint come from the ANTHROPIC_* vars in ~/.slop-provider.
-  #
-  # A tick has no human in it, so deny the tools that need one. AskUserQuestion
-  # is the live case: rahel's 2026-07-28 08:00 tick composed a real question
-  # ("Reply to Lelia, or let the register open on its own?"), spent a full API
-  # call on it, and got `is_error: true` back --- there is nobody to answer
-  # under `--print`. The agent can't discover that from the tool list, so take
-  # it away rather than ask it in prose not to use it. Passed as a flag, not
-  # written into ~/.claude/settings.json: the sprite image ships that file with
-  # defaults we must not clobber, and a tick-scoped restriction belongs on the
-  # tick's own command.
-  DENIED_TOOLS="${SLOP_DENIED_TOOLS:-AskUserQuestion}"
-  # `--disallowedTools=<value>`, not `--disallowedTools <value>`. The flag is
-  # variadic (`<tools...>`), so the separated form keeps eating arguments and
-  # swallows the prompt as a second tool name --- claude then exits 1 with
-  # "Input must be provided either through stdin or as a prompt argument".
-  # The `=` form binds exactly one value, and since the flag takes a comma- or
-  # space-separated list, a multi-tool SLOP_DENIED_TOOLS still works as one arg.
-  RUNNER_CMD=(claude --print "--disallowedTools=$DENIED_TOOLS" "$PROMPT")
+  PROFILE="${PROFILE:-claude-api}"
   ;;
 codex)
+  PROFILE="${PROFILE:-codex-sub}"
   # Codex has no `@` import syntax, so CLAUDE.md's SOUL/MEMORY/TOOLS imports
   # would silently drop out of the prompt. Render them into a flat AGENTS.md
   # (gitignored, rewritten every tick) before the run. Fail-open: a stale
   # AGENTS.md beats no tick.
   slop-prompt agents-md --root "$PWD" 2>/dev/null || true
-  # The sprite is itself the sandbox --- the agent has sudo and is expected to
-  # apt-install and render media --- so codex's own sandbox only gets in the
-  # way. No --ephemeral: it skips session persistence, and those session files
-  # are what `slop usage` reads to tally the tick.
-  RUNNER_CMD=(codex exec --sandbox danger-full-access -C "$PWD" "$PROMPT")
   ;;
 *)
   echo "slop-tick: unknown SLOP_RUNNER '$RUNNER' (want claude or codex)" >&2
   exit 1
   ;;
 esac
+
+# agent-run owns the provider/auth boundary. The tick retains its behavioural
+# settings: AskUserQuestion is unavailable in headless Claude runs, and Codex's
+# sandbox is disabled because the sprite itself is the sandbox. No --ephemeral:
+# its session files are what `slop usage` tallies.
+DENIED_TOOLS="${SLOP_DENIED_TOOLS:-AskUserQuestion}"
+RUNNER_CMD=(
+  agent-run
+  --profile "$PROFILE"
+  --cwd "$PWD"
+  --claude-disallowed-tools "$DENIED_TOOLS"
+  --codex-sandbox danger-full-access
+  "$PROMPT"
+)
 
 rc=0
 timeout --kill-after=15 "$TICK_TIMEOUT" "${RUNNER_CMD[@]}" 9>&- || rc=$?

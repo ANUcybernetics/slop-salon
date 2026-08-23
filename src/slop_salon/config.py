@@ -47,6 +47,10 @@ class Provider:
 
     name: str
     runner: str = "claude"
+    # Shared dotfiles dispatcher profile. Runner remains explicit because
+    # sprite-side preparation (AGENTS.md rendering, hooks, usage parsing) needs
+    # to know which CLI the profile launches without loading another registry.
+    profile: str = ""
     # Literal, non-secret env for the sprite (base URL, model, timeouts).
     env: dict[str, str] = field(default_factory=dict)
     # sprite var name -> admin env var name holding its value.
@@ -126,14 +130,19 @@ def _parse_provider(name: str, fields: dict) -> Provider:
             cache_read=float(raw_pricing.get("cache_read", 0.0)),
             cache_write=float(raw_pricing.get("cache_write", 0.0)),
         )
+    credentials_dest = fields.get("credentials_dest", "")
+    default_profile = (
+        "codex-sub" if runner == "codex" else "claude-sub" if credentials_dest else "claude-api"
+    )
     provider = Provider(
         name=name,
         runner=runner,
+        profile=fields.get("profile", default_profile),
         env={k: str(v) for k, v in fields.get("env", {}).items()},
         secret_env=dict(fields.get("secret_env", {})),
         claude_version=fields.get("claude_version", ""),
         health_url=fields.get("health_url", ""),
-        credentials_dest=fields.get("credentials_dest", ""),
+        credentials_dest=credentials_dest,
         credentials_source_env=fields.get("credentials_source_env", ""),
         pricing=pricing,
     )

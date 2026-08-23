@@ -970,6 +970,8 @@ app.add_typer(provider_app, name="provider")
 # allowlist rather than a denylist: a new provider adding a differently-named
 # key must not leak it just because nobody remembered to add a pattern.
 PROVIDER_PUBLIC_VARS = (
+    "AGENT_MODEL",
+    "AGENT_PROFILE",
     "SLOP_RUNNER",
     "ANTHROPIC_BASE_URL",
     "ANTHROPIC_MODEL",
@@ -1013,7 +1015,9 @@ def provider_list(config_path: str = typer.Option(None, "--config")):
         auth = "subscription" if provider.is_subscription else "api key"
         model = provider.env.get("ANTHROPIC_MODEL", "-")
         typer.echo(f"{pid}{default}")
-        typer.echo(f"  runner={provider.runner}  auth={auth}  model={model}")
+        typer.echo(
+            f"  profile={provider.profile}  runner={provider.runner}  auth={auth}  model={model}"
+        )
         if provider.claude_version:
             typer.echo(f"  claude pinned to {provider.claude_version}")
         missing = missing_provider_secrets(provider)

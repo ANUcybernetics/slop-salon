@@ -36,13 +36,20 @@ SLOP_SALON_REPO = "git+https://github.com/ANUcybernetics/slop-salon"
 # *no* key var is set (claude resolves ANTHROPIC_API_KEY -> ANTHROPIC_AUTH_TOKEN
 # -> the OAuth profile, reaching the profile only if both are absent).
 PROVIDER_OWNED_ENV = (
+    "AGENT_MODEL",
+    "AGENT_PROFILE",
     "ANTHROPIC_BASE_URL",
     "ANTHROPIC_AUTH_TOKEN",
     "ANTHROPIC_API_KEY",
     "ANTHROPIC_MODEL",
     "ANTHROPIC_SMALL_FAST_MODEL",
     "API_TIMEOUT_MS",
+    "DEEPSEEK_API_TOKEN",
+    "OPENROUTER_API_KEY",
 )
+
+DEFAULT_AGENT_RUN_SOURCE = Path("~/.dotfiles/bin/agent-run").expanduser()
+DEFAULT_AGENT_RUN_PROFILES_SOURCE = Path("~/.config/agent-run/profiles.toml").expanduser()
 
 
 def resolve_secrets(
@@ -112,7 +119,11 @@ def resolve_provider_env(
     provider file without it would silently fall back to the claude runner.
     """
     src = os.environ if environ is None else environ
-    env: dict[str, str] = {"SLOP_RUNNER": provider.runner, **provider.env}
+    env: dict[str, str] = {
+        "SLOP_RUNNER": provider.runner,
+        "AGENT_PROFILE": provider.profile,
+        **provider.env,
+    }
     for sprite_var, admin_var in provider.secret_env.items():
         value = src.get(admin_var)
         if value:
@@ -253,6 +264,17 @@ def _build_install_credentials_cmd(dest: str, content: str) -> str:
     return (
         f'umask 077 && mkdir -p "$(dirname {quoted})" && '
         f"echo {encoded} | base64 -d > {quoted} && chmod 600 {quoted}"
+    )
+
+
+def _build_install_file_cmd(dest: str, content: str, mode: str) -> str:
+    """Install a non-secret support file into a sprite."""
+    path = dest.replace("~/", "$HOME/", 1) if dest.startswith("~/") else dest
+    quoted = f'"{path}"' if path.startswith("$HOME/") else shlex.quote(path)
+    encoded = base64.b64encode(content.encode()).decode()
+    return (
+        f'mkdir -p "$(dirname {quoted})" && '
+        f"echo {encoded} | base64 -d > {quoted} && chmod {mode} {quoted}"
     )
 
 
@@ -438,15 +460,42 @@ def provider_steps(
             f"check ~/.config/mise/config.local.toml"
         )
 
+    src = os.environ if environ is None else environ
+    dispatcher_path = Path(
+        src.get("SLOP_AGENT_RUN_SOURCE", str(DEFAULT_AGENT_RUN_SOURCE))
+    ).expanduser()
+    profiles_path = Path(
+        src.get(
+            "SLOP_AGENT_RUN_PROFILES_SOURCE",
+            str(DEFAULT_AGENT_RUN_PROFILES_SOURCE),
+        )
+    ).expanduser()
+    try:
+        dispatcher = dispatcher_path.read_text()
+        profiles = profiles_path.read_text()
+    except OSError as error:
+        raise RuntimeError(
+            "shared agent dispatcher is not installed; run dotfiles update or set "
+            "SLOP_AGENT_RUN_SOURCE and SLOP_AGENT_RUN_PROFILES_SOURCE"
+        ) from error
+
     steps = [
+        (
+            "install ~/.local/bin/agent-run",
+            _build_install_file_cmd("~/.local/bin/agent-run", dispatcher, "755"),
+        ),
+        (
+            "install ~/.config/agent-run/profiles.toml",
+            _build_install_file_cmd("~/.config/agent-run/profiles.toml", profiles, "644"),
+        ),
         (
             "write ~/.slop-provider",
             _build_write_provider_file_cmd(resolve_provider_env(provider, environ)),
-        )
+        ),
     ]
     if provider.credentials_dest:
-        src = (os.environ if environ is None else environ)[provider.credentials_source_env]
-        content = Path(src).expanduser().read_text()
+        credentials_source = src[provider.credentials_source_env]
+        content = Path(credentials_source).expanduser().read_text()
         steps.append(
             (
                 f"install {provider.credentials_dest}",

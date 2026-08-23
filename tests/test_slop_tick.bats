@@ -70,6 +70,33 @@ echo "tick-output" > "$PWD/tick-$$.txt"
 EOF
     chmod +x "$STUB_DIR/codex"
 
+    # The shared dispatcher is tested in dotfiles. This integration stub keeps
+    # the tick suite focused on profile selection and runner-specific setup,
+    # then delegates to the existing Claude/Codex stubs.
+    cat > "$STUB_DIR/agent-run" <<'EOF'
+#!/usr/bin/env bash
+printf '%s' "$*" > "$HOME/agent-run-argv.txt"
+profile=""
+denied=""
+sandbox=""
+cwd="$PWD"
+prompt="${!#}"
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --profile) profile="$2"; shift 2 ;;
+        --claude-disallowed-tools) denied="$2"; shift 2 ;;
+        --codex-sandbox) sandbox="$2"; shift 2 ;;
+        --cwd) cwd="$2"; shift 2 ;;
+        *) shift ;;
+    esac
+done
+if [[ "$profile" == "codex-sub" ]]; then
+    exec codex exec --sandbox "$sandbox" -C "$cwd" "$prompt"
+fi
+exec claude --print "--disallowedTools=$denied" "$prompt"
+EOF
+    chmod +x "$STUB_DIR/agent-run"
+
     cat > "$STUB_DIR/slop-prompt" <<'EOF'
 #!/usr/bin/env bash
 printf '%s' "$*" > "$HOME/slop-prompt-argv.txt"
@@ -282,6 +309,7 @@ EOF
     [ "$status" -eq 0 ]
     [ -f "$HOME/claude-prompt.txt" ]
     [ ! -f "$HOME/codex-argv.txt" ]
+    grep -q -- "--profile claude-api" "$HOME/agent-run-argv.txt"
 }
 
 @test "sources ~/.slop-provider, and it wins over a stale ~/.slop-env" {
@@ -295,6 +323,7 @@ EOF
     cat > "$HOME/.slop-provider" <<'EOF'
 unset ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_MODEL
 export SLOP_RUNNER=claude
+export AGENT_PROFILE=deepseek
 export ANTHROPIC_MODEL=deepseek-v4-flash
 EOF
     cat > "$STUB_DIR/claude" <<'EOF'
@@ -307,6 +336,7 @@ EOF
     run bash "$SCRIPT" "tick"
     [ "$status" -eq 0 ]
     [ "$(cat "$HOME/claude-model.txt")" = "deepseek-v4-flash" ]
+    grep -q -- "--profile deepseek" "$HOME/agent-run-argv.txt"
 }
 
 @test "a subscription provider leaves no inference key set" {
@@ -337,6 +367,7 @@ EOF
 @test "SLOP_RUNNER=codex runs codex exec, not claude" {
     cat > "$HOME/.slop-provider" <<'EOF'
 export SLOP_RUNNER=codex
+export AGENT_PROFILE=codex-sub
 EOF
     run bash "$SCRIPT" "tick"
     [ "$status" -eq 0 ]

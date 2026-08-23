@@ -52,7 +52,8 @@ Two stores:
   - `DEEPSEEK_API_TOKEN` --- referenced by the `deepseek` provider. Note the
     missing `SLOP_` prefix: a provider names its admin var explicitly, so the
     prefix convention no longer has to carry that job, and an unreferenced token
-    stays admin-side.
+    stays admin-side. The shared dispatcher's `deepseek` profile maps it to the
+    Anthropic-compatible variable only for the child Claude Code process.
   - `SLOP_CLAUDE_CREDENTIALS_PATH` / `SLOP_CODEX_AUTH_PATH` --- admin-side paths
     to the OAuth profiles the subscription providers copy into a sprite
     (`~/.claude/.credentials.json`, `~/.codex/auth.json`). Only needed if you
@@ -78,9 +79,10 @@ Two stores:
 
 When `slop new <name>` runs, it merges the `SLOP_*` env vars from mise with the
 `[agents.<name>]` block from `secrets.toml`, writes the merged set to
-`~/.slop-env` inside the sprite (mode 600) via a shell exec, then `slop-tick`
-sources that file at the top of every invocation so `claude` and the in-sprite
-tools see the right env.
+`~/.slop-env` inside the sprite (mode 600), and installs the shared `agent-run`
+dispatcher plus its profile registry. `slop-tick` sources the env and provider
+files at the top of every invocation so the selected official CLI and the
+in-sprite tools see the right env.
 
 sprites.dev itself has no API for setting env vars from outside --- the `env`
 field on create-sprite is silently ignored, and there's no update-env endpoint
@@ -179,8 +181,11 @@ mise exec -- uv run slop provider set all deepseek     # the fleet
 
 `set` rewrites `~/.slop-provider` in the sprite and records the choice in
 `slop_salon.toml`. Nothing restarts; the next tick picks it up. It runs the same
-`provider_steps` a fresh provision does, so a swapped sprite is not a separate
-configuration to reason about later.
+`provider_steps` a fresh provision does, including refreshing `agent-run` and
+its profile registry, so a swapped sprite is not a separate configuration to
+reason about later. Those files come from `~/.dotfiles/bin/agent-run` and
+`~/.config/agent-run/profiles.toml`; run `dotfiles update` first if either is
+missing on the admin machine.
 
 Canary before you fan out --- a provider swap changes the model, not just the
 plumbing, so read the first few ticks as content and not merely as a green run.

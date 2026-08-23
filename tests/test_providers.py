@@ -16,6 +16,7 @@ from slop_salon.config import Config, load_config, save_provider
 from slop_salon.provision import (
     PROVIDER_OWNED_ENV,
     _build_install_credentials_cmd,
+    _build_install_file_cmd,
     _build_write_provider_file_cmd,
     missing_provider_secrets,
     provider_steps,
@@ -27,6 +28,7 @@ default_provider = "deepseek"
 
 [providers.vllm]
 runner = "claude"
+profile = "claude-api"
 claude_version = "2.1.92"
 health_url = "http://tailnet:8001/health"
 env = { ANTHROPIC_BASE_URL = "http://tailnet:8001", ANTHROPIC_MODEL = "qwen" }
@@ -34,11 +36,13 @@ secret_env = { ANTHROPIC_AUTH_TOKEN = "SLOP_ANTHROPIC_AUTH_TOKEN" }
 
 [providers.deepseek]
 runner = "claude"
+profile = "deepseek"
 env = { ANTHROPIC_BASE_URL = "https://api.deepseek.com/anthropic" }
-secret_env = { ANTHROPIC_API_KEY = "DEEPSEEK_API_TOKEN" }
+secret_env = { DEEPSEEK_API_TOKEN = "DEEPSEEK_API_TOKEN" }
 
 [providers.codex-sub]
 runner = "codex"
+profile = "codex-sub"
 credentials_dest = "~/.codex/auth.json"
 credentials_source_env = "SLOP_CODEX_AUTH_PATH"
 
@@ -64,6 +68,18 @@ def _decoded(cmd: str) -> str:
     payload = re.search(r"echo ([A-Za-z0-9+/=]+) \| base64 -d", cmd)
     assert payload, cmd
     return base64.b64decode(payload.group(1)).decode()
+
+
+def _with_dispatcher_sources(tmp_path, environ):
+    dispatcher = tmp_path / "agent-run"
+    dispatcher.write_text("#!/usr/bin/env python3\n")
+    profiles = tmp_path / "profiles.toml"
+    profiles.write_text("version = 1\n")
+    return {
+        **environ,
+        "SLOP_AGENT_RUN_SOURCE": str(dispatcher),
+        "SLOP_AGENT_RUN_PROFILES_SOURCE": str(profiles),
+    }
 
 
 # --- Resolving which provider an agent runs on ---
@@ -140,7 +156,7 @@ def test_secrets_are_named_not_embedded(tmp_path):
     assert "DEEPSEEK_API_TOKEN" in text  # the name is fine
     config = load_config(tmp_path / "slop_salon.toml")
     env = resolve_provider_env(config.providers["deepseek"], {"DEEPSEEK_API_TOKEN": "sk-secret"})
-    assert env["ANTHROPIC_API_KEY"] == "sk-secret"
+    assert env["DEEPSEEK_API_TOKEN"] == "sk-secret"
     assert "sk-secret" not in text
 
 
@@ -149,6 +165,7 @@ def test_runner_is_always_exported(tmp_path):
     config = load_config(_write(tmp_path))
     env = resolve_provider_env(config.providers["codex-sub"], {})
     assert env["SLOP_RUNNER"] == "codex"
+    assert env["AGENT_PROFILE"] == "codex-sub"
 
 
 def test_missing_admin_secret_is_reported_by_its_admin_name(tmp_path):
@@ -208,6 +225,16 @@ def test_credentials_land_600_with_their_parent_created(tmp_path):
     assert _decoded(cmd) == '{"token": "x"}'
 
 
+def test_dispatcher_support_files_land_with_explicit_modes():
+    script = _build_install_file_cmd("~/.local/bin/agent-run", "#!/bin/sh\n", "755")
+    config = _build_install_file_cmd("~/.config/agent-run/profiles.toml", "version = 1\n", "644")
+
+    assert 'chmod 755 "$HOME/.local/bin/agent-run"' in script
+    assert _decoded(script) == "#!/bin/sh\n"
+    assert 'chmod 644 "$HOME/.config/agent-run/profiles.toml"' in config
+    assert _decoded(config) == "version = 1\n"
+
+
 def test_subscription_provider_sets_no_key_var(tmp_path):
     """Claude resolves API_KEY -> AUTH_TOKEN -> OAuth profile, in that order.
 
@@ -226,9 +253,14 @@ def test_swap_and_fresh_provision_install_identical_state(tmp_path):
     about every time something broke.
     """
     config = load_config(_write(tmp_path))
-    environ = {"SLOP_ANTHROPIC_AUTH_TOKEN": "tok"}
+    environ = _with_dispatcher_sources(tmp_path, {"SLOP_ANTHROPIC_AUTH_TOKEN": "tok"})
     first = provider_steps(config.providers["vllm"], environ)
     second = provider_steps(config.providers["vllm"], environ)
     assert first == second
     labels = [label for label, _ in first]
-    assert labels == ["write ~/.slop-provider", "pin claude 2.1.92"]
+    assert labels == [
+        "install ~/.local/bin/agent-run",
+        "install ~/.config/agent-run/profiles.toml",
+        "write ~/.slop-provider",
+        "pin claude 2.1.92",
+    ]

@@ -336,6 +336,12 @@ siblings = ["other"]
 """
     )
     monkeypatch.setenv("TEST_PROVIDER_TOKEN", "not-a-real-token")
+    dispatcher = tmp_path / "agent-run"
+    dispatcher.write_text("#!/usr/bin/env python3\n")
+    profiles = tmp_path / "profiles.toml"
+    profiles.write_text("version = 1\n")
+    monkeypatch.setenv("SLOP_AGENT_RUN_SOURCE", str(dispatcher))
+    monkeypatch.setenv("SLOP_AGENT_RUN_PROFILES_SOURCE", str(profiles))
 
     monkeypatch.chdir(tmp_path)
 

@@ -32,6 +32,7 @@ default_provider = "deepseek"
 # claude pin is load-bearing: 2.1.168 sends the Skills list as a system-role
 # message inside `messages`, which vLLM 400s (it cost lelia 3.5 days once).
 runner = "claude"
+profile = "claude-api"
 claude_version = "2.1.92"
 health_url = "http://100.110.244.39:8001/health"
 env = { ANTHROPIC_BASE_URL = "http://100.110.244.39:8001", ANTHROPIC_MODEL = "qwen3.6-27b", ANTHROPIC_SMALL_FAST_MODEL = "qwen3.6-27b", API_TIMEOUT_MS = "1800000" }
@@ -43,8 +44,9 @@ secret_env = { ANTHROPIC_AUTH_TOKEN = "SLOP_ANTHROPIC_AUTH_TOKEN" }
 # of task-13 should stop), and metered: ~$0.14/M input on a cache miss,
 # ~$0.0028/M on a hit. No health endpoint, so wake-check skips the probe.
 runner = "claude"
+profile = "deepseek"
 env = { ANTHROPIC_BASE_URL = "https://api.deepseek.com/anthropic", ANTHROPIC_MODEL = "deepseek-v4-flash", ANTHROPIC_SMALL_FAST_MODEL = "deepseek-v4-flash", API_TIMEOUT_MS = "600000" }
-secret_env = { ANTHROPIC_API_KEY = "DEEPSEEK_API_TOKEN" }
+secret_env = { DEEPSEEK_API_TOKEN = "DEEPSEEK_API_TOKEN" }
 # USD per million tokens. `slop usage` prices every tick from here, so keep it
 # current --- a stale rate is worse than none, because it still looks authoritative.
 # A cache miss is what writes the cache, so cache_write is billed at the miss rate.
@@ -58,6 +60,7 @@ pricing = { input = 0.14, cache_read = 0.0028, cache_write = 0.14, output = 0.28
 # refresh tokens rotate on use, so two sprites sharing one profile may
 # deauthenticate each other. Canary a single agent before any second one.
 runner = "claude"
+profile = "claude-sub"
 credentials_dest = "~/.claude/.credentials.json"
 credentials_source_env = "SLOP_CLAUDE_CREDENTIALS_PATH"
 
@@ -67,6 +70,7 @@ credentials_source_env = "SLOP_CLAUDE_CREDENTIALS_PATH"
 # has no PostToolUse hook so ambient-recall is lost, and writes its own
 # transcript format. Same untested refresh-token risk as claude-sub.
 runner = "codex"
+profile = "codex-sub"
 credentials_dest = "~/.codex/auth.json"
 credentials_source_env = "SLOP_CODEX_AUTH_PATH"
 
