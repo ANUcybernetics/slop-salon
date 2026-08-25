@@ -15,8 +15,11 @@ import os
 import shlex
 import subprocess
 import tomllib
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
+import httpx
 import typer
 
 from slop_salon.config import Provider, load_config, save_sprite_id
@@ -353,6 +356,116 @@ def _build_install_ambient_hook_cmd() -> str:
         "chmod +x ~/.claude/hooks/ambient-recall.sh && "
         f"echo {merge_b64} | base64 -d | python3"
     )
+
+
+TAILSCALE_KEY_URL = "https://api.tailscale.com/api/v2/tailnet/-/keys/{key_id}"
+
+
+@dataclass(frozen=True)
+class AuthkeyVerdict:
+    """Outcome of the pre-destroy Tailscale auth-key check.
+
+    `fatal` aborts the recreate before anything is destroyed; `warning` lets it
+    proceed but records why the key could not be proven good. Both unset means
+    Tailscale confirmed the key is live.
+    """
+
+    fatal: str | None = None
+    warning: str | None = None
+
+
+def _expired(timestamp: str) -> bool:
+    """True if an RFC3339 timestamp is in the past. Unparseable reads as live.
+
+    An unparseable `expires` is a Tailscale API change, not evidence the key is
+    dead --- and this function gates a destroy, so it must never invent one.
+    """
+    try:
+        return datetime.fromisoformat(timestamp) <= datetime.now(tz=UTC)
+    except ValueError:
+        return False
+
+
+def check_tailscale_authkey(
+    env: dict[str, str],
+    api_token: str | None = None,
+    *,
+    timeout: float = 10.0,
+) -> AuthkeyVerdict:
+    """Verify `TAILSCALE_AUTHKEY` before a recreate destroys the old sprite.
+
+    The tailscale join is step 4 of `recreate`, three steps *after* the destroy,
+    so an expired key does not merely skip the tailnet --- it strands a sprite
+    with no cloned repo and no `slop-tick`, which is strictly worse than the
+    wedge the self-heal was answering. That is not hypothetical: on 2026-08-20
+    an expired key turned mina's unattended heal into five days of `fail(127)`,
+    because nothing downstream of the join ever ran.
+
+    Verifying needs `TAILSCALE_API_TOKEN`, itself an expiring credential, so an
+    unusable token yields a warning rather than a fatal --- "cannot verify" is
+    not "known bad", and refusing to heal on a missing admin token would ground
+    the fleet for the opposite reason. The catch worth knowing: an API *access
+    token* (`tskey-api-*`) and the auth key run the same 90-day clock and are
+    usually minted together, so they tend to die together and the check goes
+    blind exactly when it is needed. An OAuth client (`tskey-client-*`, scope
+    `auth_keys`) does not expire and closes that gap.
+    """
+    key = env.get("TAILSCALE_AUTHKEY", "")
+    if not key:
+        return AuthkeyVerdict(
+            fatal="TAILSCALE_AUTHKEY is unset --- set SLOP_TAILSCALE_AUTHKEY in "
+            "~/.config/mise/config.local.toml before recreating"
+        )
+    if not key.startswith("tskey-auth-"):
+        return AuthkeyVerdict(
+            fatal="TAILSCALE_AUTHKEY is not an auth key --- expected a reusable "
+            "tskey-auth-* key tagged tag:slop-sprite"
+        )
+
+    token = os.environ.get("TAILSCALE_API_TOKEN") if api_token is None else api_token
+    if not token:
+        return AuthkeyVerdict(
+            warning="TAILSCALE_API_TOKEN is unset, so the auth key is unverified; "
+            "if it has expired the join will fail after the old sprite is gone"
+        )
+
+    key_id = key.removeprefix("tskey-auth-").split("-")[0]
+    try:
+        response = httpx.get(
+            TAILSCALE_KEY_URL.format(key_id=key_id),
+            auth=(token, ""),
+            timeout=timeout,
+        )
+    except httpx.HTTPError as exc:
+        return AuthkeyVerdict(warning=f"could not reach the Tailscale API ({exc})")
+
+    if response.status_code == 401:
+        return AuthkeyVerdict(
+            warning="TAILSCALE_API_TOKEN was rejected (401), so the auth key is "
+            "unverified. Both credentials share a 90-day clock and are usually "
+            "minted together --- assume the key is stale too and refresh both."
+        )
+    if response.status_code == 404:
+        return AuthkeyVerdict(
+            fatal=f"Tailscale does not know auth key {key_id} (404) --- it was "
+            "revoked or deleted; mint a replacement before recreating"
+        )
+    if response.status_code != 200:
+        return AuthkeyVerdict(
+            warning=f"unexpected {response.status_code} from the Tailscale API; "
+            "auth key left unverified"
+        )
+
+    data = response.json()
+    if data.get("invalid"):
+        return AuthkeyVerdict(fatal=f"Tailscale reports auth key {key_id} as invalid")
+    expires = data.get("expires")
+    if expires and _expired(expires):
+        return AuthkeyVerdict(
+            fatal=f"Tailscale auth key {key_id} expired at {expires}; mint a "
+            "replacement before recreating"
+        )
+    return AuthkeyVerdict()
 
 
 def _build_tailscale_join_cmd(name: str) -> str:

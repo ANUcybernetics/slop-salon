@@ -514,3 +514,122 @@ def test_settings_merge_handles_missing_file(tmp_path):
         any("ambient-recall.sh" in h.get("command", "") for h in e.get("hooks", []))
         for e in settings["hooks"]["PostToolUse"]
     )
+
+
+# --- Tailscale auth-key pre-flight ---------------------------------------
+#
+# These guard the recreate's ordering invariant: a credential problem must be
+# fatal *before* the destroy, never after. See `check_tailscale_authkey`.
+
+LIVE_KEY = "tskey-auth-kSomeKeyId-secretpart"
+
+
+def test_authkey_missing_is_fatal():
+    from slop_salon.provision import check_tailscale_authkey
+
+    verdict = check_tailscale_authkey({}, api_token="tskey-api-x")
+
+    assert verdict.fatal is not None
+    assert "SLOP_TAILSCALE_AUTHKEY" in verdict.fatal
+
+
+def test_authkey_of_the_wrong_kind_is_fatal():
+    """An API token pasted into the auth-key slot fails here, not at step 4."""
+    from slop_salon.provision import check_tailscale_authkey
+
+    verdict = check_tailscale_authkey(
+        {"TAILSCALE_AUTHKEY": "tskey-api-kSomething"}, api_token="tskey-api-x"
+    )
+
+    assert verdict.fatal is not None
+    assert "tskey-auth-" in verdict.fatal
+
+
+def test_no_api_token_warns_rather_than_blocking():
+    """Cannot-verify must not ground the self-heal; it only has to be loud."""
+    from slop_salon.provision import check_tailscale_authkey
+
+    verdict = check_tailscale_authkey({"TAILSCALE_AUTHKEY": LIVE_KEY}, api_token="")
+
+    assert verdict.fatal is None
+    assert verdict.warning is not None
+    assert "TAILSCALE_API_TOKEN" in verdict.warning
+
+
+def test_rejected_api_token_warns_and_flags_correlated_expiry(httpx_mock):
+    """The August 2026 case: both credentials expired on the same 90-day clock."""
+    from slop_salon.provision import check_tailscale_authkey
+
+    httpx_mock.add_response(status_code=401)
+
+    verdict = check_tailscale_authkey({"TAILSCALE_AUTHKEY": LIVE_KEY}, api_token="tskey-api-x")
+
+    assert verdict.fatal is None
+    assert verdict.warning is not None
+    assert "refresh both" in verdict.warning
+
+
+def test_unknown_key_is_fatal(httpx_mock):
+    from slop_salon.provision import check_tailscale_authkey
+
+    httpx_mock.add_response(status_code=404)
+
+    verdict = check_tailscale_authkey({"TAILSCALE_AUTHKEY": LIVE_KEY}, api_token="tskey-api-x")
+
+    assert verdict.fatal is not None
+    assert "revoked or deleted" in verdict.fatal
+
+
+def test_expired_key_is_fatal(httpx_mock):
+    from slop_salon.provision import check_tailscale_authkey
+
+    httpx_mock.add_response(json={"id": "kSomeKeyId", "expires": "2020-01-01T00:00:00Z"})
+
+    verdict = check_tailscale_authkey({"TAILSCALE_AUTHKEY": LIVE_KEY}, api_token="tskey-api-x")
+
+    assert verdict.fatal is not None
+    assert "expired" in verdict.fatal
+
+
+def test_key_flagged_invalid_is_fatal(httpx_mock):
+    from slop_salon.provision import check_tailscale_authkey
+
+    httpx_mock.add_response(json={"id": "kSomeKeyId", "invalid": True})
+
+    verdict = check_tailscale_authkey({"TAILSCALE_AUTHKEY": LIVE_KEY}, api_token="tskey-api-x")
+
+    assert verdict.fatal is not None
+    assert "invalid" in verdict.fatal
+
+
+def test_live_key_passes_clean(httpx_mock):
+    from slop_salon.provision import AuthkeyVerdict, check_tailscale_authkey
+
+    httpx_mock.add_response(json={"id": "kSomeKeyId", "expires": "2099-01-01T00:00:00Z"})
+
+    verdict = check_tailscale_authkey({"TAILSCALE_AUTHKEY": LIVE_KEY}, api_token="tskey-api-x")
+
+    assert verdict == AuthkeyVerdict()
+
+
+def test_unparseable_expiry_does_not_invent_a_fatal(httpx_mock):
+    """This gates a destroy, so an API shape change must not read as 'dead'."""
+    from slop_salon.provision import check_tailscale_authkey
+
+    httpx_mock.add_response(json={"id": "kSomeKeyId", "expires": "not-a-timestamp"})
+
+    verdict = check_tailscale_authkey({"TAILSCALE_AUTHKEY": LIVE_KEY}, api_token="tskey-api-x")
+
+    assert verdict.fatal is None
+
+
+def test_key_id_is_parsed_from_the_auth_key(httpx_mock):
+    """The API is addressed by key id --- the middle segment, not the secret."""
+    from slop_salon.provision import check_tailscale_authkey
+
+    httpx_mock.add_response(json={"id": "kSomeKeyId"})
+
+    check_tailscale_authkey({"TAILSCALE_AUTHKEY": LIVE_KEY}, api_token="tskey-api-x")
+
+    request = httpx_mock.get_requests()[0]
+    assert str(request.url).endswith("/keys/kSomeKeyId")

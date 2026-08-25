@@ -22,6 +22,7 @@ from .provision import (
     _build_tailscale_join_cmd,
     _build_uv_and_slop_install_cmd,
     _build_write_env_file_cmd,
+    check_tailscale_authkey,
     provider_steps,
     resolve_secrets,
 )
@@ -57,6 +58,17 @@ def recreate(
         )
     env["BSKY_HANDLE"] = agent.handle
     gh_token = env["GH_TOKEN"]
+
+    # Same reasoning as the provider resolution above, for the one other step
+    # that can fail on a credential: the tailscale join is step 4, and by then
+    # the old sprite is gone. Checking here keeps a bad key a no-op instead of
+    # an outage --- a wedged sprite that still exists can be healed on the next
+    # wake, whereas a destroyed one with no clone and no `slop-tick` cannot.
+    verdict = check_tailscale_authkey(env)
+    if verdict.fatal:
+        raise SystemExit(f"tailscale pre-flight failed: {verdict.fatal}")
+    if verdict.warning:
+        print(f"  !! tailscale pre-flight: {verdict.warning}")
 
     sprites = sprites or SpritesClient()
 
