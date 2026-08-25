@@ -170,6 +170,20 @@ loop, and serialises healing across overlapping wakes with a file lock (state in
 detects + logs); set `SLOP_ALERT_WEBHOOK` to curl-POST each alert line. Watch it
 with `journalctl --user -t slop-wake-run | grep heal`.
 
+A recreate is only ever the answer to a **wedge**. Three other states are
+alert-only, because each needs a different fix and a blind recreate can make
+things worse: a stuck flock (`busy` for 4 straight wakes), a claude error hiding
+behind a zero exit (`claude-err`), and --- the catch-all --- **any failure with
+no signature at all**, alerted after 2 consecutive wakes and then re-alerted
+every 4. That last one is classification by exclusion, and it is deliberate: it
+makes an unrecognised failure loud by default instead of silent until someone
+writes a marker for it. Without it the healer was blind to everything outside
+its three signatures, which is how mina fast-failed `127` on every wake for five
+days while reading as healthy to every downstream check --- the per-agent wake
+line was red the whole time, but nothing counted it, so nothing said so twice.
+Replayed against that outage, the catch-all alerts six hours after the failed
+heal instead of five days later.
+
 ## Dead-man check
 
 Everything the healer knows, it learns _during_ a wake --- so it is structurally
@@ -391,10 +405,13 @@ classifies. Two durable lessons, neither specific to Tailscale:
   one does not. `recreate` resolves the provider up front for exactly this
   reason --- the comment there says so --- and the Tailscale step was the one
   place that ignored it.
-- **a heal that half-completes is invisible.** The healer classifies wedges, so
-  a sprite that comes back broken in any other shape is not retried and not
-  alerted. The pre-flight fix that briefly existed here guarded only the
-  Tailscale case; the general gap is still open.
+- **a heal that half-completes was invisible.** The healer classified only
+  wedges, so a sprite that came back broken in any other shape was neither
+  retried nor alerted. Fixed generally rather than for this one bug --- see the
+  catch-all in Wake driver above. Two narrower holes remain open by design and
+  are worth knowing: the wake's transient unit carries no `OnFailure=`, so a red
+  run files nothing through systemd, and `slop wake-check` only flags a wake in
+  which _every_ agent failed, so one dead agent out of six never trips it.
 
 Reviving `vllm` would mean restoring a network path to cybersonic, not just
 flipping the provider --- see that provider's section below.

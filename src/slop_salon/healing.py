@@ -15,6 +15,15 @@ doesn't trigger a recreate-storm:
 - a file lock so overlapping wakes never recreate the same agent twice;
 - a `SLOP_AUTOHEAL=0` kill-switch (still detects + alerts, just won't recreate).
 
+Recreating is only ever the answer to a wedge. The other three states --- a
+stuck flock, a claude error behind a zero exit, and any failure with no
+signature at all --- are alert-only, because each needs a different fix and a
+blind recreate can make things worse. The last of those is a deliberate
+catch-all: classification by exclusion means an unrecognised failure is loud by
+default. Without it the healer was blind to everything it had no marker for,
+which is how mina fast-failed 127 on every wake for five days while reading as
+healthy to every downstream check.
+
 State lives in `~/.local/state/slop/heal.json`.
 """
 
@@ -54,6 +63,24 @@ BUSY_CONSECUTIVE_THRESHOLD = 4
 _CLAUDE_ERROR_MARKERS = ("slop-tick: claude exited", "slop-tick: claude exceeded")
 CLAUDE_ERROR_CONSECUTIVE_THRESHOLD = 2
 
+# The residual bucket: a tick that failed for a reason none of the signatures
+# above explain. It is defined by exclusion on purpose --- the healer used to
+# classify only wedge/busy/claude-error, so anything else incremented no counter
+# and fired no alert, reading downstream exactly like a healthy agent. mina
+# fast-failed 127 ("slop-tick: command not found") on every wake for five days
+# that way, after a half-completed self-heal left its sprite with no repo. The
+# lesson generalises past that one bug: an unrecognised failure must be loud by
+# default, not silent until someone adds a marker for it.
+#
+# Never a recreate. By definition we do not know what broke --- and mina is the
+# proof that a recreate can *be* the cause, so retrying one blindly is how a
+# recoverable fault becomes a destroyed sprite.
+FAILURE_CONSECUTIVE_THRESHOLD = 2
+# ...and keep saying so. Alerting once and falling silent is precisely how five
+# days of failure came to look identical to a fixed agent, so re-alert on a slow
+# cadence rather than once.
+FAILURE_REALERT_EVERY = 4
+
 
 def _state_path() -> Path:
     base = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
@@ -87,6 +114,31 @@ def claude_failed(result: ExecResult) -> bool:
     return any(marker in blob for marker in _CLAUDE_ERROR_MARKERS)
 
 
+def is_unclassified_failure(result: ExecResult) -> bool:
+    """True if the tick failed and no other signature accounts for it.
+
+    Partitions cleanly against the others: `is_busy` is exit 75, `is_wedge` is a
+    non-zero exit carrying the proxy markers, and `claude_failed` only ever
+    matches a zero exit. So this is every remaining non-zero exit.
+    """
+    if result.exit_code == 0 or is_busy(result):
+        return False
+    return not is_wedge(result)
+
+
+def _first_error_line(result: ExecResult, limit: int = 200) -> str:
+    """The most useful single line under an unrecognised failure.
+
+    stderr first: the shell's own diagnostic ("slop-tick: command not found")
+    is what names the fault, while stdout tends to carry git's progress.
+    """
+    for blob in (result.stderr, result.stdout):
+        for line in (blob or "").strip().splitlines():
+            if line.strip():
+                return line.strip()[:limit]
+    return "(no output)"
+
+
 @dataclass
 class HealReport:
     wedged: list[str] = field(default_factory=list)
@@ -94,6 +146,7 @@ class HealReport:
     skipped_cooldown: list[str] = field(default_factory=list)
     busy_stuck: list[str] = field(default_factory=list)
     claude_failing: list[str] = field(default_factory=list)
+    failing: list[str] = field(default_factory=list)
     platform_incident: bool = False
     locked_out: bool = False
 
@@ -163,6 +216,10 @@ def heal_wedged(
                 entry["consecutive_claude_errors"] = entry.get("consecutive_claude_errors", 0) + 1
             else:
                 entry["consecutive_claude_errors"] = 0
+            if is_unclassified_failure(result):
+                entry["consecutive_failures"] = entry.get("consecutive_failures", 0) + 1
+            else:
+                entry["consecutive_failures"] = 0
 
         if len(wedged_now) >= PLATFORM_INCIDENT_THRESHOLD:
             report.platform_incident = True
@@ -229,6 +286,21 @@ def heal_wedged(
                     f"ticks (the tick still exits 0, so the wake looks healthy). Check "
                     f"`slop logs {name}`; do NOT blindly recreate --- it can land a newer, "
                     f"vLLM-incompatible claude."
+                )
+            # Re-alert on a cadence rather than only on first crossing: a single
+            # alert into a journal nobody reads is how mina's five dark days
+            # happened.
+            streak = entry.get("consecutive_failures", 0)
+            if (
+                is_unclassified_failure(result)
+                and streak >= FAILURE_CONSECUTIVE_THRESHOLD
+                and (streak - FAILURE_CONSECUTIVE_THRESHOLD) % FAILURE_REALERT_EVERY == 0
+            ):
+                report.failing.append(name)
+                alert_fn(
+                    f"{name} has failed {streak} consecutive wakes with an unrecognised "
+                    f"error (exit {result.exit_code}) --- not a wedge, so NOT auto-recreated. "
+                    f"First line: {_first_error_line(result)}"
                 )
 
         _save_state(path, state)

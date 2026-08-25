@@ -635,6 +635,11 @@ def _heal_wedged_agents(results: dict[str, ExecResult]) -> None:
         )
         if report.recreated:
             typer.echo(f"[heal] recreated: {', '.join(report.recreated)}")
+        if report.failing:
+            typer.echo(
+                f"[heal] failing with no known signature: {', '.join(report.failing)}",
+                err=True,
+            )
     except Exception as exc:  # noqa: BLE001 --- self-heal must never crash the wake
         typer.echo(f"[heal] error (ignored): {exc!r}", err=True)
 

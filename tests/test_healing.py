@@ -214,3 +214,101 @@ def test_claude_error_streak_alerts_without_recreating(tmp_path):
     assert any("claude errored" in m for m in msgs)
     # Recreating could land a newer, vLLM-incompatible claude --- must not.
     assert recreated == []
+
+
+# --- Unrecognised failures ------------------------------------------------
+#
+# The healer used to classify only wedge/busy/claude-error, so any other
+# failure incremented no counter and fired no alert --- indistinguishable from
+# a healthy agent downstream. These pin the catch-all that closes that.
+
+# mina's exact failure: a self-heal aborted after the destroy, leaving a sprite
+# with no cloned repo. It fast-failed this on every wake for five days.
+HALF_BUILT = ExecResult(
+    stdout="", stderr="/usr/bin/bash: line 1: slop-tick: command not found", exit_code=127
+)
+
+
+def test_classification_is_a_clean_partition():
+    from slop_salon.healing import claude_failed, is_busy, is_unclassified_failure
+
+    # Exactly one classifier owns each result.
+    for result in (WEDGE, BUSY, CLAUDE_ERR, HALF_BUILT, CONFLICT, OK):
+        owners = [
+            fn.__name__
+            for fn in (is_wedge, is_busy, claude_failed, is_unclassified_failure)
+            if fn(result)
+        ]
+        assert len(owners) <= 1, f"{result} claimed by {owners}"
+
+    assert is_unclassified_failure(HALF_BUILT)
+    assert is_unclassified_failure(CONFLICT)  # a merge conflict is a failure too
+    assert not is_unclassified_failure(OK)
+    assert not is_unclassified_failure(BUSY)
+    assert not is_unclassified_failure(WEDGE)
+    assert not is_unclassified_failure(CLAUDE_ERR)
+
+
+def test_single_unrecognised_failure_stays_quiet(tmp_path):
+    """One bad tick is a blip; the threshold exists so blips don't page."""
+    msgs, alert = _alerts()
+    report = _heal({"mina": HALF_BUILT}, state=tmp_path / "h.json", alert=alert)
+
+    assert report.failing == []
+    assert msgs == []
+
+
+def test_repeated_unrecognised_failure_alerts_with_the_reason(tmp_path):
+    state = tmp_path / "h.json"
+    _heal({"mina": HALF_BUILT}, state=state)
+    msgs, alert = _alerts()
+    report = _heal({"mina": HALF_BUILT}, state=state, alert=alert)
+
+    assert report.failing == ["mina"]
+    assert len(msgs) == 1
+    # The alert has to carry the reason: by definition nobody has a signature
+    # for it, so a bare "mina is failing" sends the reader back to the journal.
+    assert "slop-tick: command not found" in msgs[0]
+    assert "127" in msgs[0]
+
+
+def test_unrecognised_failure_is_never_auto_recreated(tmp_path):
+    """We do not know what broke --- and a recreate is what broke mina."""
+    state = tmp_path / "h.json"
+    recreated, rec = _recorder()
+    for _ in range(6):
+        _heal({"mina": HALF_BUILT}, state=state, rec=rec)
+
+    assert recreated == []
+
+
+def test_a_long_outage_keeps_alerting(tmp_path):
+    """Alerting once and falling silent is how five days looked like zero."""
+    state = tmp_path / "h.json"
+    msgs, alert = _alerts()
+    for _ in range(20):
+        _heal({"mina": HALF_BUILT}, state=state, alert=alert)
+
+    # Loud at the threshold, then on a slow cadence --- not once, not every wake.
+    assert 3 <= len(msgs) <= 8, f"{len(msgs)} alerts across 20 wakes"
+
+
+def test_recovery_resets_the_failure_streak(tmp_path):
+    state = tmp_path / "h.json"
+    _heal({"mina": HALF_BUILT}, state=state)
+    _heal({"mina": OK}, state=state)
+    msgs, alert = _alerts()
+    report = _heal({"mina": HALF_BUILT}, state=state, alert=alert)
+
+    assert report.failing == []
+    assert msgs == []
+
+
+def test_one_agent_failing_does_not_mask_the_healthy_rest(tmp_path):
+    """mina was 1 of 6, which is why the all-agents-failed check stayed green."""
+    state = tmp_path / "h.json"
+    fleet = dict.fromkeys(("lou", "gert", "vita", "lelia", "rahel"), OK)
+    _heal({**fleet, "mina": HALF_BUILT}, state=state)
+    report = _heal({**fleet, "mina": HALF_BUILT}, state=state)
+
+    assert report.failing == ["mina"]
