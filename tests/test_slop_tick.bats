@@ -45,13 +45,6 @@ exec "$REAL_GIT" "\$@"
 EOF
     chmod +x "$STUB_DIR/git"
 
-    # Stub pgrep so slop-tick's tailscaled-ensure check no-ops in the test.
-    cat > "$STUB_DIR/pgrep" <<'EOF'
-#!/usr/bin/env bash
-exit 0
-EOF
-    chmod +x "$STUB_DIR/pgrep"
-
     # Stub pkill so the orphan-shell reap is a hermetic no-op. The real
     # `pkill -f "shell-snapshots/snapshot-zsh"` would match (and kill) the
     # host's own shells when the suite runs inside an agent harness.

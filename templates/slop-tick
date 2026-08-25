@@ -36,23 +36,16 @@ if [[ $# -lt 1 ]]; then
   exit 1
 fi
 
-# No systemd in the sprite: make sure tailscaled is up before the tick (the
-# tailnet join is done once at provision; node state in /var/lib persists).
-if ! pgrep -x tailscaled >/dev/null 2>&1; then
-  sudo install -d -m 755 /var/run/tailscale /var/lib/tailscale
-  sudo bash -c 'setsid tailscaled --state=/var/lib/tailscale/tailscaled.state --socket=/var/run/tailscale/tailscaled.sock >/var/log/tailscaled.log 2>&1 </dev/null &'
-  sleep 5
-fi
-
 # One tick per sprite at a time. `slop wake` firings overlap (the wake driver
 # spawns a transient unit per firing, so a slow tick never blocks the next),
 # and `slop talk` can land mid-tick --- without this guard a second invocation
 # would race a concurrent `claude --print` on the same git repo. Non-blocking:
 # if a tick already holds the lock this one is a clean no-op (exit 75, which
-# `slop wake` renders as `busy` rather than a failure). Opened *after* the
-# tailscaled spawn above so that long-lived daemon never inherits the lock fd;
-# fd 9 is closed in the `claude` child (and the git commit/push) below so no
-# orphan shell or detached git gc can pin it.
+# `slop wake` renders as `busy` rather than a failure). Nothing long-lived may
+# be spawned before this point: a daemon started earlier would inherit fd 9 and
+# hold the lock for its whole life. fd 9 is likewise closed in the `claude`
+# child (and the git commit/push) below, so no orphan shell or detached git gc
+# can pin it --- one did, and stalled an agent at `busy` for ~16h.
 exec 9>"$HOME/.slop-tick.lock"
 if ! flock -n 9; then
   echo "slop-tick: a tick is already running in this sprite, skipping" >&2
