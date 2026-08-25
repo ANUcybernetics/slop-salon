@@ -58,9 +58,7 @@ Two stores:
     to the OAuth profiles the subscription providers copy into a sprite
     (`~/.claude/.credentials.json`, `~/.codex/auth.json`). Only needed if you
     use those providers.
-  - `SLOP_TAILSCALE_AUTHKEY` --- enrols each sprite onto the Tailscale tailnet
   - `SPRITES_API_TOKEN` --- driving sprites.dev (admin-side only)
-  - `TAILSCALE_API_TOKEN` --- admin-side only; Tailscale ACL + auth-key API
 
   Provisioning strips the `SLOP_` prefix when writing `~/.slop-env` inside the
   sprite. `SPRITES_API_TOKEN` has no `SLOP_` prefix on purpose --- it must NOT
@@ -145,8 +143,6 @@ SLOP_GH_TOKEN = "..."               # `gh auth token`, or a PAT with repo scope
 SLOP_REPLICATE_API_TOKEN = "..."    # https://replicate.com → Account → API tokens
 SLOP_ANTHROPIC_AUTH_TOKEN = "..."   # vllm provider: must equal VLLM_API_KEY
 DEEPSEEK_API_TOKEN = "..."          # deepseek provider: platform.deepseek.com
-SLOP_TAILSCALE_AUTHKEY = "..."      # reusable key, tagged tag:slop-sprite
-TAILSCALE_API_TOKEN = "..."         # login.tailscale.com → Settings → Keys
 ```
 
 Only the token for the provider(s) you actually use is required. The rest of the

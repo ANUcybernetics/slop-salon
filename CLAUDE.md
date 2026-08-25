@@ -367,35 +367,37 @@ each other. `slop provider set` refuses to put more than one agent on a
 subscription provider at once for that reason; canary a single agent and watch
 before adding a second.
 
-Deliberately not conditional on the provider: the Tailscale join still happens
-for every sprite at provision, so a later swap _to_ `vllm` works without a
-second visit. The claude version pin **is** conditional (`claude_version`),
-since it exists only because vLLM 400s on newer builds' system-role Skills
-message --- carrying it onto an endpoint that never needed it is how a
-workaround outlives its cause.
+The claude version pin **is** conditional (`claude_version`), since it exists
+only because vLLM 400s on newer builds' system-role Skills message --- carrying
+it onto an endpoint that never needed it is how a workaround outlives its cause.
 
-That unconditional join has a sharp edge, because it sits **after** the destroy
-in `recreate` (step 4 of 11) and runs unattended from the self-heal. On
-2026-08-20 the healer recreated mina, the join failed on an expired auth key,
-and steps 5--11 never ran --- so mina came back with no cloned repo and no
-`slop-tick`, fast-failing `127` on every wake for five days. The healer never
-retried, because `127` is not the wedge signature it classifies. A half-built
-sprite is strictly worse than the wedge the heal was answering, so
-`check_tailscale_authkey` now runs alongside the provider resolution, before
-anything is destroyed.
+**Tailscale was retired on 2026-08-25.** Sprites no longer join a tailnet: the
+join step is gone from provisioning and from `recreate`, `slop-tick` no longer
+ensures `tailscaled`, and `SLOP_TAILSCALE_AUTHKEY` / `TAILSCALE_API_TOKEN` are
+dead. It existed solely to reach the self-hosted vLLM, which the fleet left on
+2026-08-04; the join outlived its cause by three weeks and cost an agent five
+days in the meantime.
 
-The credential trap behind it is worth naming: `SLOP_TAILSCALE_AUTHKEY`
-(`tskey-auth-*`) and `TAILSCALE_API_TOKEN` (`tskey-api-*`) both run Tailscale's
-90-day maximum and are usually minted in the same sitting, so they expire
-together --- which means the token the pre-flight verifies *with* dies at the
-same moment as the key it verifies. Hence an unusable token warns rather than
-blocks: "cannot verify" is not "known bad", and failing closed would ground the
-fleet for the opposite reason. The durable fix is an **OAuth client**
-(`tskey-client-*`, scope `auth_keys`), which does not expire; prefer it over
-another API access token when refreshing. Neither credential is reachable from
-the `tailscale` CLI --- it has no key-creation subcommand, and on weddle it is
-authenticated as a node, not a tailnet admin --- so a refresh means the admin
-console or `POST /api/v2/tailnet/-/keys`.
+That outage is the reason the removal is worth recording rather than just doing.
+The join sat at step 4 of `recreate`, three steps **after** the destroy, and ran
+unattended from the self-heal. On 2026-08-20 the healer recreated mina, the join
+failed on an expired auth key, and steps 5--11 never ran --- so mina came back
+with no cloned repo and no `slop-tick`, fast-failing `127` on every wake for
+five days. The healer never retried, because `127` is not the wedge signature it
+classifies. Two durable lessons, neither specific to Tailscale:
+
+- **anything that can fail on a credential belongs before the destroy.** A
+  wedged sprite that still exists gets another go on the next wake; a destroyed
+  one does not. `recreate` resolves the provider up front for exactly this
+  reason --- the comment there says so --- and the Tailscale step was the one
+  place that ignored it.
+- **a heal that half-completes is invisible.** The healer classifies wedges, so
+  a sprite that comes back broken in any other shape is not retried and not
+  alerted. The pre-flight fix that briefly existed here guarded only the
+  Tailscale case; the general gap is still open.
+
+Reviving `vllm` would mean restoring a network path to cybersonic, not just
+flipping the provider --- see that provider's section below.
 
 Fresh provisioning and `slop provider set` both install `agent-run` and its
 profile registry from the admin machine before writing `~/.slop-provider`.
@@ -433,10 +435,11 @@ cybersonic sits behind ANU NAT, so the path runs:
   `vllm` ---
   `systemctl --user enable --now ops/systemd/slop-vllm-tunnel.service` from this
   directory, since `disable` on a linked unit removes the symlink itself.
-- Each sprite joins the Tailscale tailnet (tag `tag:slop-sprite`) and reaches
-  that address directly over WireGuard. Sprites have no systemd, so `slop-tick`
-  ensures `tailscaled` is running each tick; the one-time join is done at
-  provision (`_build_tailscale_join_cmd`).
+- sprites reached that address over a Tailscale tailnet they joined at
+  provision. **That path no longer exists** --- Tailscale was retired on
+  2026-08-25 (see Providers above), so a return to `vllm` has to re-establish
+  sprite→cybersonic reachability first. Nothing in provisioning does that any
+  more; treat it as the real cost of reviving this provider.
 
 vLLM enforces a bearer key: `VLLM_API_KEY` on cybersonic must match the sprites'
 `ANTHROPIC_AUTH_TOKEN`. The collective shares the single vLLM, so `slop wake`
@@ -456,8 +459,7 @@ without queue thrash.
   own deps per-run and so have no environment for it to check against.
 - secrets split by scope:
   - **shared admin tokens** (`SLOP_GH_TOKEN`, `SLOP_REPLICATE_API_TOKEN`, the
-    `SLOP_ANTHROPIC_*` inference vars, `SLOP_TAILSCALE_AUTHKEY`,
-    `SPRITES_API_TOKEN`, `TAILSCALE_API_TOKEN`) live in
+    `SLOP_ANTHROPIC_*` inference vars, `SPRITES_API_TOKEN`) live in
     `~/.config/mise/config.local.toml`. Provisioning strips the `SLOP_` prefix
     when writing `~/.slop-env`; the un-prefixed ones stay admin-side.
   - **per-agent secrets** (currently just the bsky app password) live in
