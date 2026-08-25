@@ -15,11 +15,8 @@ import os
 import shlex
 import subprocess
 import tomllib
-from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 
-import httpx
 import typer
 
 from slop_salon.config import Provider, load_config, save_sprite_id
@@ -358,146 +355,6 @@ def _build_install_ambient_hook_cmd() -> str:
     )
 
 
-TAILSCALE_KEY_URL = "https://api.tailscale.com/api/v2/tailnet/-/keys/{key_id}"
-
-
-@dataclass(frozen=True)
-class AuthkeyVerdict:
-    """Outcome of the pre-destroy Tailscale auth-key check.
-
-    `fatal` aborts the recreate before anything is destroyed; `warning` lets it
-    proceed but records why the key could not be proven good. Both unset means
-    Tailscale confirmed the key is live.
-    """
-
-    fatal: str | None = None
-    warning: str | None = None
-
-
-def _expired(timestamp: str) -> bool:
-    """True if an RFC3339 timestamp is in the past. Unparseable reads as live.
-
-    An unparseable `expires` is a Tailscale API change, not evidence the key is
-    dead --- and this function gates a destroy, so it must never invent one.
-    """
-    try:
-        return datetime.fromisoformat(timestamp) <= datetime.now(tz=UTC)
-    except ValueError:
-        return False
-
-
-def check_tailscale_authkey(
-    env: dict[str, str],
-    api_token: str | None = None,
-    *,
-    timeout: float = 10.0,
-) -> AuthkeyVerdict:
-    """Verify `TAILSCALE_AUTHKEY` before a recreate destroys the old sprite.
-
-    The tailscale join is step 4 of `recreate`, three steps *after* the destroy,
-    so an expired key does not merely skip the tailnet --- it strands a sprite
-    with no cloned repo and no `slop-tick`, which is strictly worse than the
-    wedge the self-heal was answering. That is not hypothetical: on 2026-08-20
-    an expired key turned mina's unattended heal into five days of `fail(127)`,
-    because nothing downstream of the join ever ran.
-
-    Verifying needs `TAILSCALE_API_TOKEN`, itself an expiring credential, so an
-    unusable token yields a warning rather than a fatal --- "cannot verify" is
-    not "known bad", and refusing to heal on a missing admin token would ground
-    the fleet for the opposite reason. The catch worth knowing: an API *access
-    token* (`tskey-api-*`) and the auth key run the same 90-day clock and are
-    usually minted together, so they tend to die together and the check goes
-    blind exactly when it is needed. An OAuth client (`tskey-client-*`, scope
-    `auth_keys`) does not expire and closes that gap.
-    """
-    key = env.get("TAILSCALE_AUTHKEY", "")
-    if not key:
-        return AuthkeyVerdict(
-            fatal="TAILSCALE_AUTHKEY is unset --- set SLOP_TAILSCALE_AUTHKEY in "
-            "~/.config/mise/config.local.toml before recreating"
-        )
-    if not key.startswith("tskey-auth-"):
-        return AuthkeyVerdict(
-            fatal="TAILSCALE_AUTHKEY is not an auth key --- expected a reusable "
-            "tskey-auth-* key tagged tag:slop-sprite"
-        )
-
-    token = os.environ.get("TAILSCALE_API_TOKEN") if api_token is None else api_token
-    if not token:
-        return AuthkeyVerdict(
-            warning="TAILSCALE_API_TOKEN is unset, so the auth key is unverified; "
-            "if it has expired the join will fail after the old sprite is gone"
-        )
-
-    key_id = key.removeprefix("tskey-auth-").split("-")[0]
-    try:
-        response = httpx.get(
-            TAILSCALE_KEY_URL.format(key_id=key_id),
-            auth=(token, ""),
-            timeout=timeout,
-        )
-    except httpx.HTTPError as exc:
-        return AuthkeyVerdict(warning=f"could not reach the Tailscale API ({exc})")
-
-    if response.status_code == 401:
-        return AuthkeyVerdict(
-            warning="TAILSCALE_API_TOKEN was rejected (401), so the auth key is "
-            "unverified. Both credentials share a 90-day clock and are usually "
-            "minted together --- assume the key is stale too and refresh both."
-        )
-    if response.status_code == 404:
-        return AuthkeyVerdict(
-            fatal=f"Tailscale does not know auth key {key_id} (404) --- it was "
-            "revoked or deleted; mint a replacement before recreating"
-        )
-    if response.status_code != 200:
-        return AuthkeyVerdict(
-            warning=f"unexpected {response.status_code} from the Tailscale API; "
-            "auth key left unverified"
-        )
-
-    data = response.json()
-    if data.get("invalid"):
-        return AuthkeyVerdict(fatal=f"Tailscale reports auth key {key_id} as invalid")
-    expires = data.get("expires")
-    if expires and _expired(expires):
-        return AuthkeyVerdict(
-            fatal=f"Tailscale auth key {key_id} expired at {expires}; mint a "
-            "replacement before recreating"
-        )
-    return AuthkeyVerdict()
-
-
-def _build_tailscale_join_cmd(name: str) -> str:
-    """Install Tailscale and join the tailnet.
-
-    The sprite reaches vLLM over the tailnet. Sprites have no systemd, so
-    tailscaled runs as a plain detached daemon; `slop-tick` re-ensures it
-    each tick. Reads TAILSCALE_AUTHKEY from ~/.slop-env --- so this must run
-    after the env-file write step.
-    """
-    return (
-        'V=$(curl -s "https://pkgs.tailscale.com/stable/?mode=json" '
-        "| jq -r .Tarballs.amd64) && "
-        'curl -fsSL "https://pkgs.tailscale.com/stable/$V" -o /tmp/ts.tgz && '
-        "tar xzf /tmp/ts.tgz -C /tmp && "
-        'D=$(find /tmp -maxdepth 1 -type d -name "tailscale_*_amd64") && '
-        'sudo cp "$D/tailscale" "$D/tailscaled" /usr/local/bin/ && '
-        "sudo install -d -m 755 /var/run/tailscale /var/lib/tailscale && "
-        'sudo bash -c "setsid /usr/local/bin/tailscaled '
-        "--state=/var/lib/tailscale/tailscaled.state "
-        "--socket=/var/run/tailscale/tailscaled.sock "
-        '>/var/log/tailscaled.log 2>&1 </dev/null &" && '
-        "sleep 5 && "
-        "source ~/.slop-env && "
-        'sudo /usr/local/bin/tailscale up --authkey="$TAILSCALE_AUTHKEY" '
-        f"--hostname=slop-{shlex.quote(name)} --accept-dns=false"
-    )
-
-
-# --- Step helpers (each does one logical step from the spec) ---
-
-
 def _push_initial_commit(repo: str, files: dict[str, str], token: str) -> None:
     """Create an initial commit on the GH repo via a temp clone + push.
 
@@ -669,16 +526,16 @@ def provision_agent(
         == 0
     )
     if repo_exists:
-        typer.echo(f"[1/14] GH repo {agent.github_repo} already exists, skipping create")
+        typer.echo(f"[1/13] GH repo {agent.github_repo} already exists, skipping create")
     else:
-        typer.echo(f"[1/14] Creating GH repo {agent.github_repo}")
+        typer.echo(f"[1/13] Creating GH repo {agent.github_repo}")
         subprocess.run(
             ["gh", "repo", "create", agent.github_repo, "--public"],
             check=True,
             env={**os.environ, "GH_TOKEN": gh_token},
         )
 
-    typer.echo("[2/14] Pushing templates as initial commit")
+    typer.echo("[2/13] Pushing templates as initial commit")
     files = _build_template_files(
         templates_dir,
         Path(soul_path),
@@ -689,12 +546,12 @@ def provision_agent(
     _push_initial_commit(agent.github_repo, files, gh_token)
 
     if not skip_dns_confirm:
-        typer.echo(f"[3/14] MANUAL: add Bluesky DNS TXT record at _atproto.{agent.handle}")
+        typer.echo(f"[3/13] MANUAL: add Bluesky DNS TXT record at _atproto.{agent.handle}")
         typer.confirm("Have you added the DNS record?", abort=True)
     else:
-        typer.echo("[3/14] Skipping DNS confirm (--yes-dns set)")
+        typer.echo("[3/13] Skipping DNS confirm (--yes-dns set)")
 
-    typer.echo("[4/14] Creating sprite")
+    typer.echo("[4/13] Creating sprite")
     sprites = SpritesClient()
     sprite_id = sprites.create_sprite(name=name)
 
@@ -706,47 +563,40 @@ def provision_agent(
                 f"stderr: {result.stderr}"
             )
 
-    typer.echo("[5/14] Writing ~/.slop-env in sprite (secrets + AGENT_NAME)")
+    typer.echo("[5/13] Writing ~/.slop-env in sprite (secrets + AGENT_NAME)")
     _exec(_build_write_env_file_cmd({"AGENT_NAME": name, **env}))
 
-    # Unconditional, whatever the provider: the tailnet is what a later swap
-    # *to* vllm needs, and joining it after the fact would mean a second visit.
-    typer.echo("[6/14] Installing Tailscale and joining the tailnet")
-    _exec(_build_tailscale_join_cmd(name))
-
-    typer.echo("[7/14] Apt install (imagemagick, ffmpeg, sox)")
+    typer.echo("[6/13] Apt install (imagemagick, ffmpeg, sox)")
     _exec(_build_apt_install_cmd())
 
-    typer.echo(f"[8/14] Installing provider {provider.name!r} (runner: {provider.runner})")
+    typer.echo(f"[7/13] Installing provider {provider.name!r} (runner: {provider.runner})")
     for label, command in provider_plan:
         typer.echo(f"  -> {label}")
         _exec(command)
 
-    typer.echo("[9/14] uv tool install slop-salon")
+    typer.echo("[8/13] uv tool install slop-salon")
     _exec(_build_uv_and_slop_install_cmd())
 
     # Claude Code only --- the hook is a PostToolUse entry in ~/.claude/settings.json
     # and codex has no equivalent, so on the codex runner the agent ticks without
     # ambient recall. Documented in docs/runbook.md rather than faked.
     if provider.runner == "claude":
-        typer.echo("[10/14] Installing ambient-recall hook + Claude Code settings")
+        typer.echo("[9/13] Installing ambient-recall hook + Claude Code settings")
         _exec(_build_install_ambient_hook_cmd())
     else:
-        typer.echo(
-            f"[10/14] Skipping ambient-recall hook (runner {provider.runner!r} has no hooks)"
-        )
+        typer.echo(f"[9/13] Skipping ambient-recall hook (runner {provider.runner!r} has no hooks)")
 
-    typer.echo("[11/14] Cloning agent repo + symlinking slop-tick into ~/.local/bin")
+    typer.echo("[10/13] Cloning agent repo + symlinking slop-tick into ~/.local/bin")
     repo_url = f"https://{gh_token}@github.com/{agent.github_repo}.git"
     _exec(_build_clone_and_symlink_cmd(name, repo_url))
 
-    typer.echo("[12/14] pre-commit install")
+    typer.echo("[11/13] pre-commit install")
     _exec(_build_pre_commit_install_cmd(name))
 
-    typer.echo("[13/14] Configuring git in sprite")
+    typer.echo("[12/13] Configuring git in sprite")
     _exec(_build_git_config_cmd(name, gh_token))
 
-    typer.echo(f"[14/14] Saving sprite_id to {config.path}")
+    typer.echo(f"[13/13] Saving sprite_id to {config.path}")
     save_sprite_id(config, name, sprite_id)
 
     typer.echo(f"\nProvisioned {name} → sprite {sprite_id}")

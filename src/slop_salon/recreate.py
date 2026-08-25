@@ -19,10 +19,8 @@ from .provision import (
     _build_git_config_cmd,
     _build_install_ambient_hook_cmd,
     _build_pre_commit_install_cmd,
-    _build_tailscale_join_cmd,
     _build_uv_and_slop_install_cmd,
     _build_write_env_file_cmd,
-    check_tailscale_authkey,
     provider_steps,
     resolve_secrets,
 )
@@ -59,23 +57,12 @@ def recreate(
     env["BSKY_HANDLE"] = agent.handle
     gh_token = env["GH_TOKEN"]
 
-    # Same reasoning as the provider resolution above, for the one other step
-    # that can fail on a credential: the tailscale join is step 4, and by then
-    # the old sprite is gone. Checking here keeps a bad key a no-op instead of
-    # an outage --- a wedged sprite that still exists can be healed on the next
-    # wake, whereas a destroyed one with no clone and no `slop-tick` cannot.
-    verdict = check_tailscale_authkey(env)
-    if verdict.fatal:
-        raise SystemExit(f"tailscale pre-flight failed: {verdict.fatal}")
-    if verdict.warning:
-        print(f"  !! tailscale pre-flight: {verdict.warning}")
-
     sprites = sprites or SpritesClient()
 
-    print(f"[1/11] Destroying old sprite {name!r}")
+    print(f"[1/10] Destroying old sprite {name!r}")
     subprocess.run(["sprite", "destroy", "-s", name, "--force"], check=True)
 
-    print(f"[2/11] Creating fresh sprite {name!r}")
+    print(f"[2/10] Creating fresh sprite {name!r}")
     sprites.create_sprite(name=name)
     # sprites.dev sometimes 404s the first exec immediately after create.
     time.sleep(3)
@@ -90,40 +77,37 @@ def recreate(
                 f"STDERR: {result.stderr[-2000:]}"
             )
 
-    print("[3/11] Writing ~/.slop-env (secrets + AGENT_NAME)")
+    print("[3/10] Writing ~/.slop-env (secrets + AGENT_NAME)")
     _exec("write env", _build_write_env_file_cmd({"AGENT_NAME": name, **env}))
 
-    print("[4/11] Installing Tailscale and joining the tailnet")
-    _exec("tailscale", _build_tailscale_join_cmd(name))
-
-    print("[5/11] Apt install (imagemagick, ffmpeg, sox)")
+    print("[4/10] Apt install (imagemagick, ffmpeg, sox)")
     _exec("apt", _build_apt_install_cmd())
 
     # Install the provider (env file, any OAuth profile, any claude pin). The pin
     # matters here specifically: a fresh sprite comes off whatever base image is
     # current, which may ship a newer claude that 400s against vLLM --- without
     # it a self-heal recreate turns a transient idle-wedge into a real outage.
-    print(f"[6/11] Installing provider {provider.name!r} (runner: {provider.runner})")
+    print(f"[5/10] Installing provider {provider.name!r} (runner: {provider.runner})")
     for label, command in provider_plan:
         _exec(label, command)
 
-    print("[7/11] uv tool install slop-salon")
+    print("[6/10] uv tool install slop-salon")
     _exec("uv install", _build_uv_and_slop_install_cmd())
 
     if provider.runner == "claude":
-        print("[8/11] Installing ambient-recall hook + Claude Code settings")
+        print("[7/10] Installing ambient-recall hook + Claude Code settings")
         _exec("ambient hook", _build_install_ambient_hook_cmd())
     else:
-        print(f"[8/11] Skipping ambient-recall hook (runner {provider.runner!r} has no hooks)")
+        print(f"[7/10] Skipping ambient-recall hook (runner {provider.runner!r} has no hooks)")
 
-    print("[9/11] Cloning agent repo from GH (preserves drift)")
+    print("[8/10] Cloning agent repo from GH (preserves drift)")
     repo_url = f"https://{gh_token}@github.com/{agent.github_repo}.git"
     _exec("clone", _build_clone_and_symlink_cmd(name, repo_url))
 
-    print("[10/11] pre-commit install")
+    print("[9/10] pre-commit install")
     _exec("pre-commit", _build_pre_commit_install_cmd(name))
 
-    print("[11/11] git config")
+    print("[10/10] git config")
     _exec("git config", _build_git_config_cmd(name, gh_token))
 
     print(f"Done --- {name} ready.")
