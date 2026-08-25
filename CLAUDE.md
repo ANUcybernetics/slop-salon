@@ -374,6 +374,29 @@ since it exists only because vLLM 400s on newer builds' system-role Skills
 message --- carrying it onto an endpoint that never needed it is how a
 workaround outlives its cause.
 
+That unconditional join has a sharp edge, because it sits **after** the destroy
+in `recreate` (step 4 of 11) and runs unattended from the self-heal. On
+2026-08-20 the healer recreated mina, the join failed on an expired auth key,
+and steps 5--11 never ran --- so mina came back with no cloned repo and no
+`slop-tick`, fast-failing `127` on every wake for five days. The healer never
+retried, because `127` is not the wedge signature it classifies. A half-built
+sprite is strictly worse than the wedge the heal was answering, so
+`check_tailscale_authkey` now runs alongside the provider resolution, before
+anything is destroyed.
+
+The credential trap behind it is worth naming: `SLOP_TAILSCALE_AUTHKEY`
+(`tskey-auth-*`) and `TAILSCALE_API_TOKEN` (`tskey-api-*`) both run Tailscale's
+90-day maximum and are usually minted in the same sitting, so they expire
+together --- which means the token the pre-flight verifies *with* dies at the
+same moment as the key it verifies. Hence an unusable token warns rather than
+blocks: "cannot verify" is not "known bad", and failing closed would ground the
+fleet for the opposite reason. The durable fix is an **OAuth client**
+(`tskey-client-*`, scope `auth_keys`), which does not expire; prefer it over
+another API access token when refreshing. Neither credential is reachable from
+the `tailscale` CLI --- it has no key-creation subcommand, and on weddle it is
+authenticated as a node, not a tailnet admin --- so a refresh means the admin
+console or `POST /api/v2/tailnet/-/keys`.
+
 Fresh provisioning and `slop provider set` both install `agent-run` and its
 profile registry from the admin machine before writing `~/.slop-provider`.
 `slop-tick` supplies no model override, so the active model remains exactly the
