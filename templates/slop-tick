@@ -109,9 +109,19 @@ TICK_TIMEOUT="${SLOP_TICK_TIMEOUT:-30m}"
 RUNNER="${SLOP_RUNNER:-claude}"
 PROFILE="${AGENT_PROFILE:-}"
 
+# agent-run owns the provider/auth boundary. The tick keeps its behavioural
+# settings, but they are per-runner and must be passed that way: agent-run
+# rejects an option belonging to a runner other than the profile's, so a
+# blanket list of both fails every tick before the model is reached. No
+# --ephemeral: its session files are what `slop usage` tallies.
+DENIED_TOOLS="${SLOP_DENIED_TOOLS:-AskUserQuestion}"
+RUNNER_OPTS=()
+
 case "$RUNNER" in
 claude)
   PROFILE="${PROFILE:-claude-api}"
+  # AskUserQuestion is unavailable in a headless run: nobody is there to answer.
+  RUNNER_OPTS=(--claude-disallowed-tools "$DENIED_TOOLS")
   ;;
 codex)
   PROFILE="${PROFILE:-codex-sub}"
@@ -120,6 +130,8 @@ codex)
   # (gitignored, rewritten every tick) before the run. Fail-open: a stale
   # AGENTS.md beats no tick.
   slop-prompt agents-md --root "$PWD" 2>/dev/null || true
+  # The sprite itself is the sandbox, so codex needs none of its own.
+  RUNNER_OPTS=(--codex-sandbox danger-full-access)
   ;;
 *)
   echo "slop-tick: unknown SLOP_RUNNER '$RUNNER' (want claude or codex)" >&2
@@ -127,17 +139,11 @@ codex)
   ;;
 esac
 
-# agent-run owns the provider/auth boundary. The tick retains its behavioural
-# settings: AskUserQuestion is unavailable in headless Claude runs, and Codex's
-# sandbox is disabled because the sprite itself is the sandbox. No --ephemeral:
-# its session files are what `slop usage` tallies.
-DENIED_TOOLS="${SLOP_DENIED_TOOLS:-AskUserQuestion}"
 RUNNER_CMD=(
   agent-run
   --profile "$PROFILE"
   --cwd "$PWD"
-  --claude-disallowed-tools "$DENIED_TOOLS"
-  --codex-sandbox danger-full-access
+  "${RUNNER_OPTS[@]}"
   "$PROMPT"
 )
 

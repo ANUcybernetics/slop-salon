@@ -376,6 +376,27 @@ EOF
     grep -q -- "tick" "$HOME/codex-argv.txt"
 }
 
+@test "a claude tick passes no codex-only options to agent-run" {
+    # agent-run rejects an option belonging to a runner other than the
+    # profile's, so passing both runners' options fails the tick before the
+    # model is reached. A canary caught exactly this on the fleet default.
+    run bash "$SCRIPT" "tick"
+    [ "$status" -eq 0 ]
+    grep -q -- "--claude-disallowed-tools" "$HOME/agent-run-argv.txt"
+    ! grep -q -- "--codex-sandbox" "$HOME/agent-run-argv.txt"
+}
+
+@test "a codex tick passes no claude-only options to agent-run" {
+    cat > "$HOME/.slop-provider" <<'EOF'
+export SLOP_RUNNER=codex
+export AGENT_PROFILE=codex-sub
+EOF
+    run bash "$SCRIPT" "tick"
+    [ "$status" -eq 0 ]
+    grep -q -- "--codex-sandbox" "$HOME/agent-run-argv.txt"
+    ! grep -q -- "--claude-disallowed-tools" "$HOME/agent-run-argv.txt"
+}
+
 @test "codex ticks render AGENTS.md first; claude ticks do not" {
     # Codex has no `@` import syntax, so CLAUDE.md's SOUL/MEMORY/TOOLS imports
     # would silently vanish from the prompt --- the same quiet failure as the
