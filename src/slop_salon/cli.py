@@ -1112,12 +1112,14 @@ def provider_set(
         typer.echo(f"error: {exc}", err=True)
         raise typer.Exit(code=1) from exc
 
-    if provider.is_subscription and len(targets) > 1:
+    if provider.is_subscription and not provider.credentials_shareable and len(targets) > 1:
         typer.echo(
             f"refusing to put {len(targets)} agents on {provider_id!r} at once: "
             "subscription OAuth profiles rotate refresh tokens on use, and whether "
-            "two sprites sharing one profile deauthenticate each other is untested. "
-            "Canary a single agent first.",
+            "two sprites sharing one profile deauthenticate each other is untested "
+            "for this provider. Canary a single agent, establish that a refresh by "
+            "one holder does not revoke another's token, then set "
+            "credentials_shareable on the provider.",
             err=True,
         )
         raise typer.Exit(code=1)

@@ -65,10 +65,10 @@ credentials_dest = "~/.claude/.credentials.json"
 credentials_source_env = "SLOP_CLAUDE_CREDENTIALS_PATH"
 
 [providers.codex-sub]
-# Ben's ChatGPT subscription, via `codex exec`. A different runner, not just a
+# The ANU ChatGPT Team seat, via `codex exec`. A different runner, not just a
 # different backend: codex reads AGENTS.md (generated per tick from CLAUDE.md),
 # has no PostToolUse hook so ambient-recall is lost, and writes its own
-# transcript format. Same untested refresh-token risk as claude-sub.
+# transcript format.
 runner = "codex"
 profile = "codex-sub"
 # GPT-5.6-Luna: codex's cheap/fast tier, 272k context. Named here rather than in
@@ -78,6 +78,14 @@ profile = "codex-sub"
 env = { AGENT_MODEL = "gpt-5.6-luna" }
 credentials_dest = "~/.codex/auth.json"
 credentials_source_env = "SLOP_CODEX_AUTH_PATH"
+# Tested on lelia, 2026-09-03. Codex does rotate the refresh token on use, but
+# does not revoke the old one: with the admin box and lelia both holding the
+# shipped token, lelia refreshed twice and the admin box refreshed off the
+# already-consumed original, each getting its own new token and neither
+# deauthenticating the other. The access token also lives ~10 days, so a
+# refresh is rare. claude-sub is a different provider and stays unshared until
+# someone runs the same test on it.
+credentials_shareable = true
 
 # --- Agents -----------------------------------------------------------------
 
@@ -118,6 +126,7 @@ namesake = "Vita Sackville-West"
 namesake_url = "https://en.wikipedia.org/wiki/Vita_Sackville-West"
 
 [agents.lelia]
+provider = "codex-sub"
 handle = "lelia.slopsalon.art"
 github_repo = "ANUcybernetics/slop-salon-lelia"
 sprite_id = "lelia"

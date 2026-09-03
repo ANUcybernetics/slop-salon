@@ -264,3 +264,38 @@ def test_swap_and_fresh_provision_install_identical_state(tmp_path):
         "write ~/.slop-provider",
         "pin claude 2.1.92",
     ]
+
+
+# --- Sharing one OAuth profile across sprites ---
+
+
+def test_subscription_is_unshareable_by_default(tmp_path):
+    """The default has to be "no".
+
+    Refresh tokens usually rotate on use, and a provider that revokes the old
+    one on rotation would have its sprites deauthenticate each other. That is a
+    per-provider fact, so it is opted into after testing rather than assumed.
+    """
+    config = load_config(_write(tmp_path))
+    provider = config.providers["codex-sub"]
+    assert provider.is_subscription
+    assert not provider.credentials_shareable
+
+
+def test_credentials_shareable_is_read_from_the_registry(tmp_path):
+    registry = REGISTRY.replace(
+        'credentials_source_env = "SLOP_CODEX_AUTH_PATH"',
+        'credentials_source_env = "SLOP_CODEX_AUTH_PATH"\ncredentials_shareable = true',
+    )
+    config = load_config(_write(tmp_path, registry))
+    assert config.providers["codex-sub"].credentials_shareable
+
+
+def test_credentials_shareable_without_a_profile_is_a_config_error(tmp_path):
+    """Nothing is being shared, so the flag can only be a mistake."""
+    registry = REGISTRY.replace(
+        'profile = "deepseek"',
+        'profile = "deepseek"\ncredentials_shareable = true',
+    )
+    with pytest.raises(ValueError, match="meaningless without credentials_dest"):
+        load_config(_write(tmp_path, registry))

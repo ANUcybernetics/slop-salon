@@ -63,6 +63,11 @@ class Provider:
     # from. Both or neither.
     credentials_dest: str = ""
     credentials_source_env: str = ""
+    # May more than one sprite hold this OAuth profile at once? False by
+    # default: refresh tokens usually rotate on use, and a provider that
+    # revokes the old one on rotation would have its sprites deauthenticate
+    # each other. Set only where that has actually been tested.
+    credentials_shareable: bool = False
     # Per-token rates, when the provider is metered. None means "not billed per
     # token" (self-hosted, or a subscription), not "free".
     pricing: Pricing | None = None
@@ -144,11 +149,16 @@ def _parse_provider(name: str, fields: dict) -> Provider:
         health_url=fields.get("health_url", ""),
         credentials_dest=credentials_dest,
         credentials_source_env=fields.get("credentials_source_env", ""),
+        credentials_shareable=bool(fields.get("credentials_shareable", False)),
         pricing=pricing,
     )
     if bool(provider.credentials_dest) != bool(provider.credentials_source_env):
         raise ValueError(
             f"provider {name!r}: credentials_dest and credentials_source_env must be set together"
+        )
+    if provider.credentials_shareable and not provider.credentials_dest:
+        raise ValueError(
+            f"provider {name!r}: credentials_shareable is meaningless without credentials_dest"
         )
     return provider
 
