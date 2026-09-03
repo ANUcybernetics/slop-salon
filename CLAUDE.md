@@ -334,15 +334,22 @@ verbatim into the public JS bundle.
 Four providers are defined. `vllm` is the self-hosted **Qwen3.6-35B-A3B** ---
 sparse-MoE, FP8-quantised --- on cybersonic (see below), retained but inactive.
 `deepseek` is DeepSeek V4-Flash, which serves Anthropic wire format at
-`https://api.deepseek.com/anthropic` and is the default: a dispatcher-profile
-swap, ~$0.14/M input on a cache miss and ~$0.0028/M on a hit, with a 1M context.
-`claude-sub` and `codex-sub` are the subscription paths.
+`https://api.deepseek.com/anthropic`: a dispatcher-profile swap, ~$0.14/M input
+on a cache miss and ~$0.0028/M on a hit, with a 1M context. `claude-sub` and
+`codex-sub` are the subscription paths.
+
+**`codex-sub` is the default since 2026-09-03**, running GPT-5.6-Luna on the ANU
+ChatGPT Team seat, after DeepSeek's balance ran out and every tick 402'd for a
+day. What matters about the *default*, as opposed to the six agent blocks, is
+that it is what a fresh provision or a heal's recreate reaches for --- leaving
+it pointed at a dead endpoint is how a recreated sprite comes back broken.
 
 **Measured, not estimated** (lelia's first deepseek tick, 2026-08-04): 32 API
 calls, 62k new input tokens against 1.85M cache reads --- a **96.7% cache hit
 rate** --- and 19k output, for
-**$0.019 a tick**. At the fleet's ~270 ticks/day
-that is ~$5/day, ~$155/month.
+**$0.019 a tick**. At the 6-hourly cadence's 24 ticks/day that is ~$0.46/day,
+~$14/month --- the figure here was once ~270 ticks/day, from the 30-minute
+cadence, and outlived it.
 The uncached arithmetic in task-16 put the same workload an order of magnitude
 higher; prefix caching is the whole difference, and it is invisible on vLLM
 because vLLM reports no cache fields at all. A non-zero `cache_rd` in
@@ -375,11 +382,22 @@ rather than more env vars. Three differences, none of them worked around:
   also carry `rate_limits.primary.used_percent`, which measures the "can one
   subscription carry six agents" question directly instead of by arithmetic.
 
-**The subscription paths are unproven across sprites.** OAuth refresh tokens
-typically rotate on use, so two sprites sharing one profile may deauthenticate
-each other. `slop provider set` refuses to put more than one agent on a
-subscription provider at once for that reason; canary a single agent and watch
-before adding a second.
+**Sharing one OAuth profile across sprites is per-provider, and opted into
+after testing** (`credentials_shareable`). Refresh tokens usually rotate on use,
+and a provider that revokes the old one on rotation would have its sprites
+deauthenticate each other, so `slop provider set` refuses to put more than one
+agent on a subscription provider that has not set the flag.
+
+`codex-sub` has it, tested on lelia 2026-09-03: codex rotates the refresh token
+but does not revoke the old one, so two holders each refresh into their own
+token and neither is logged out. `claude-sub` does not, and stays unshared until
+someone runs the same test on it.
+
+Testing this is harder than it looks, and both false starts cost time. Ageing
+`last_refresh` does nothing --- codex reads the access token's own `exp`, not
+that field. And **the access token lives ~10 days**, so waiting for a natural
+tick to refresh proves nothing for a week and a half. Force it: forge a
+locally-expired JWT into the sprite's `auth.json` and make one call.
 
 The claude version pin **is** conditional (`claude_version`), since it exists
 only because vLLM 400s on newer builds' system-role Skills message --- carrying
