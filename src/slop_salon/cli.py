@@ -1018,7 +1018,9 @@ def provider_list(config_path: str = typer.Option(None, "--config")):
     for pid, provider in config.providers.items():
         default = " (default)" if pid == config.default_provider else ""
         auth = "subscription" if provider.is_subscription else "api key"
-        model = provider.env.get("ANTHROPIC_MODEL", "-")
+        # AGENT_MODEL is agent-run's runner-agnostic knob (codex reads only that);
+        # ANTHROPIC_MODEL is what the claude runner reads directly.
+        model = provider.env.get("AGENT_MODEL") or provider.env.get("ANTHROPIC_MODEL") or "-"
         typer.echo(f"{pid}{default}")
         typer.echo(
             f"  profile={provider.profile}  runner={provider.runner}  auth={auth}  model={model}"

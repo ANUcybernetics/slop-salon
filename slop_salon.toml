@@ -71,6 +71,11 @@ credentials_source_env = "SLOP_CLAUDE_CREDENTIALS_PATH"
 # transcript format. Same untested refresh-token risk as claude-sub.
 runner = "codex"
 profile = "codex-sub"
+# GPT-5.6-Luna: codex's cheap/fast tier, 272k context. Named here rather than in
+# the shared dotfiles profile because the model is this consumer's choice, not
+# the auth route's. agent-run takes AGENT_MODEL as the default for --model, and
+# it is already provider-owned, so it rides along in ~/.slop-provider.
+env = { AGENT_MODEL = "gpt-5.6-luna" }
 credentials_dest = "~/.codex/auth.json"
 credentials_source_env = "SLOP_CODEX_AUTH_PATH"
 
