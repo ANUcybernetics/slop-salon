@@ -38,6 +38,11 @@ SLOP_SALON_REPO = "git+https://github.com/ANUcybernetics/slop-salon"
 PROVIDER_OWNED_ENV = (
     "AGENT_MODEL",
     "AGENT_PROFILE",
+    # Admin-box paths to the OAuth profiles a subscription provider ships. Read
+    # admin-side only (credentials_source_env); listing them here keeps a path
+    # that means nothing in a sprite out of its ~/.slop-env.
+    "CLAUDE_CREDENTIALS_PATH",
+    "CODEX_AUTH_PATH",
     "ANTHROPIC_BASE_URL",
     "ANTHROPIC_AUTH_TOKEN",
     "ANTHROPIC_API_KEY",
