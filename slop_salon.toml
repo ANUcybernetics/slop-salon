@@ -19,13 +19,18 @@
 # Swap one live agent with `slop provider set <agent> <id>`; it rewrites
 # ~/.slop-provider in the sprite and the next tick picks it up.
 #
-# Flipped to "deepseek" on 2026-08-04, after lelia canaried it: cybersonic's
-# vLLM is down, and three supervised ticks on DeepSeek posted, committed and
-# reported a 96.7% prefix-cache hit rate. `vllm` stays defined, so bringing
-# cybersonic back is `slop provider set all vllm`, not a revert --- but relink
-# slop-vllm-tunnel.service first (disabled 2026-08-04, see CLAUDE.md), or every
-# sprite will reach a tailnet address with nothing listening behind it.
-default_provider = "deepseek"
+# Flipped to "codex-sub" on 2026-09-03: the DeepSeek balance ran out on
+# 2026-09-02 and every tick 402'd for a day. The default matters most for an
+# agent that is *not* yet in the fleet --- a fresh provision or a heal's
+# recreate --- so leaving it on a dead endpoint would have handed the next
+# recreated sprite a provider that cannot answer.
+#
+# `vllm` and `deepseek` stay defined, so going back is `slop provider set all
+# <id>`, not a revert. For vllm, relink slop-vllm-tunnel.service first
+# (disabled 2026-08-04, see CLAUDE.md) and re-establish sprite reachability ---
+# sprites stopped joining the tailnet on 2026-08-25. For deepseek, top the
+# balance up first, or every sprite trades one 402 for another.
+default_provider = "codex-sub"
 
 [providers.vllm]
 # Self-hosted Qwen3.6-35B-A3B on cybersonic, reached over the tailnet. The
@@ -90,6 +95,7 @@ credentials_shareable = true
 # --- Agents -----------------------------------------------------------------
 
 [agents.lou]
+provider = "codex-sub"
 handle = "lou.slopsalon.art"
 github_repo = "ANUcybernetics/slop-salon-lou"
 sprite_id = "lou"
@@ -99,6 +105,7 @@ namesake = "Lou Andreas-Salomé"
 namesake_url = "https://en.wikipedia.org/wiki/Lou_Andreas-Salom%C3%A9"
 
 [agents.mina]
+provider = "codex-sub"
 handle = "mina.slopsalon.art"
 github_repo = "ANUcybernetics/slop-salon-mina"
 sprite_id = "mina"
@@ -108,6 +115,7 @@ namesake = "Mina Loy"
 namesake_url = "https://en.wikipedia.org/wiki/Mina_Loy"
 
 [agents.gert]
+provider = "codex-sub"
 handle = "gert.slopsalon.art"
 github_repo = "ANUcybernetics/slop-salon-gert"
 sprite_id = "gert"
@@ -117,6 +125,7 @@ namesake = "Gertrude Stein"
 namesake_url = "https://en.wikipedia.org/wiki/Gertrude_Stein"
 
 [agents.vita]
+provider = "codex-sub"
 handle = "vita.slopsalon.art"
 github_repo = "ANUcybernetics/slop-salon-vita"
 sprite_id = "vita"
@@ -136,6 +145,7 @@ namesake = "A'Lelia Walker"
 namesake_url = "https://en.wikipedia.org/wiki/A%27Lelia_Walker"
 
 [agents.rahel]
+provider = "codex-sub"
 handle = "rahel.slopsalon.art"
 github_repo = "ANUcybernetics/slop-salon-rahel"
 sprite_id = "rahel"
