@@ -1149,7 +1149,11 @@ def provider_set(
     typer.echo("\nDone. Takes effect on each agent's next tick.")
 
 
-DRIFT_DEFAULT_FILES = ("SOUL.md", "CLAUDE.md", "slop-tick")
+# .gitignore is here because nothing else ships it: an admin re-sync only
+# overwrites CLAUDE.md, so a rule added to the template never reaches a live
+# agent. The AGENTS.md rule sat unshipped that way until the codex swap made
+# every tick commit the generated file.
+DRIFT_DEFAULT_FILES = ("SOUL.md", "CLAUDE.md", "slop-tick", ".gitignore")
 DRIFT_DEFAULT_HELP = ", ".join(DRIFT_DEFAULT_FILES)
 
 
