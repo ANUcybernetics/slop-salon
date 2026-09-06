@@ -316,11 +316,13 @@ claude_version = "{PINNED_CLAUDE}"
 env = {{ ANTHROPIC_BASE_URL = "https://example.invalid" }}
 secret_env = {{ ANTHROPIC_API_KEY = "TEST_PROVIDER_TOKEN" }}
 
+[salons.one]
+
 [agents.lou]
 handle = "lou.slopsalon.art"
 github_repo = "ANUcybernetics/slop-salon-lou"
 sprite_id = ""
-siblings = ["other"]
+salon = "one"
 """
     )
     monkeypatch.setenv("TEST_PROVIDER_TOKEN", "not-a-real-token")

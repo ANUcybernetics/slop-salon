@@ -30,17 +30,19 @@ pricing = { input = 0.14, cache_read = 0.0028, cache_write = 0.14, output = 0.28
 [providers.selfhosted]
 runner = "claude"
 
+[salons.one]
+
 [agents.lou]
 handle = "lou.slopsalon.art"
 github_repo = "ANUcybernetics/slop-salon-lou"
 sprite_id = "spr_abc"
-siblings = ["other"]
+salon = "one"
 
 [agents.other]
 handle = "other.slopsalon.art"
 github_repo = "ANUcybernetics/slop-salon-other"
 sprite_id = "spr_xyz"
-siblings = ["lou"]
+salon = "one"
 """
     )
     monkeypatch.chdir(tmp_path)
@@ -263,18 +265,20 @@ pricing = { input = 0.14, cache_read = 0.0028, cache_write = 0.14, output = 0.28
 [providers.selfhosted]
 runner = "claude"
 
+[salons.one]
+
 [agents.lou]
 handle = "lou.slopsalon.art"
 github_repo = "ANUcybernetics/slop-salon-lou"
 sprite_id = "spr_lou"
-siblings = ["mina"]
+salon = "one"
 live = true
 
 [agents.mina]
 handle = "mina.slopsalon.art"
 github_repo = "ANUcybernetics/slop-salon-mina"
 sprite_id = "spr_mina"
-siblings = ["lou"]
+salon = "one"
 live = true
 """
     )
@@ -578,18 +582,20 @@ pricing = { input = 0.14, cache_read = 0.0028, cache_write = 0.14, output = 0.28
 [providers.selfhosted]
 runner = "claude"
 
+[salons.one]
+
 [agents.lou]
 handle = "lou.slopsalon.art"
 github_repo = "ANUcybernetics/slop-salon-lou"
 sprite_id = "spr_lou"
-siblings = ["mina"]
+salon = "one"
 live = true
 
 [agents.mina]
 handle = "mina.slopsalon.art"
 github_repo = "ANUcybernetics/slop-salon-mina"
 sprite_id = "spr_mina"
-siblings = ["lou"]
+salon = "one"
 live = true
 """
     )

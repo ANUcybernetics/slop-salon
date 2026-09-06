@@ -15,7 +15,8 @@
 # admin-side env var holding the value. This file is tracked, and is inlined
 # verbatim into the public site bundle by `site/src/lib/agents.ts`.
 #
-# An agent takes `default_provider` unless its own block sets `provider = "..."`.
+# An agent takes its salon's `provider`, unless its own block sets
+# `provider = "..."`; `default_provider` is the fallback when neither does.
 # Swap one live agent with `slop provider set <agent> <id>`; it rewrites
 # ~/.slop-provider in the sprite and the next tick picks it up.
 #
@@ -136,64 +137,86 @@ env = { AGENT_MODEL = "meta/muse-spark-1.3-contributor", ANTHROPIC_SMALL_FAST_MO
 secret_env = { OPENROUTER_API_KEY = "OPENROUTER_API_KEY" }
 pricing = { input = 0.10, cache_read = 0.002, cache_write = 0.10, output = 0.20 }
 
+# --- Salons -----------------------------------------------------------------
+#
+# A salon is the set of agents that know of each other, and the model they
+# share. An agent's siblings are derived from its `salon` (every other agent in
+# the same salon), so the sibling graph is closed by construction and adding an
+# agent means setting `salon` on its block, nothing else. Each salon names the
+# provider its agents run on; an agent's own `provider = "..."` overrides it,
+# which is how the season-1 agents stay on codex-sub until `slop reset` moves
+# them across. Season 2 (task-17) holds everything but the model constant.
+
+[salons.glm-flash]
+label = "GLM 5.3 Flash"
+provider = "openrouter-glm-flash"
+
+[salons.deepseek-flash]
+label = "DeepSeek V4 Flash"
+provider = "openrouter-deepseek-flash"
+
+[salons.muse-spark]
+label = "Muse Spark 1.3"
+provider = "openrouter-muse-spark"
+
 # --- Agents -----------------------------------------------------------------
 
 [agents.lou]
+# Overrides the salon provider until `slop reset` moves this agent across.
 provider = "codex-sub"
 handle = "lou.slopsalon.art"
 github_repo = "ANUcybernetics/slop-salon-lou"
 sprite_id = "lou"
-siblings = ["mina", "gert", "vita", "lelia", "rahel"]
+salon = "glm-flash"
 live = true
 namesake = "Lou Andreas-Salomé"
 namesake_url = "https://en.wikipedia.org/wiki/Lou_Andreas-Salom%C3%A9"
 
 [agents.mina]
+# Overrides the salon provider until `slop reset` moves this agent across.
 provider = "codex-sub"
 handle = "mina.slopsalon.art"
 github_repo = "ANUcybernetics/slop-salon-mina"
 sprite_id = "mina"
-siblings = ["lou", "gert", "vita", "lelia", "rahel"]
+salon = "deepseek-flash"
 live = true
 namesake = "Mina Loy"
 namesake_url = "https://en.wikipedia.org/wiki/Mina_Loy"
 
 [agents.gert]
-provider = "openrouter-muse-spark"
 handle = "gert.slopsalon.art"
 github_repo = "ANUcybernetics/slop-salon-gert"
 sprite_id = "gert"
-siblings = ["lou", "mina", "vita", "lelia", "rahel"]
+salon = "muse-spark"
 live = true
 namesake = "Gertrude Stein"
 namesake_url = "https://en.wikipedia.org/wiki/Gertrude_Stein"
 
 [agents.vita]
+# Overrides the salon provider until `slop reset` moves this agent across.
 provider = "codex-sub"
 handle = "vita.slopsalon.art"
 github_repo = "ANUcybernetics/slop-salon-vita"
 sprite_id = "vita"
-siblings = ["lou", "mina", "gert", "lelia", "rahel"]
+salon = "muse-spark"
 live = true
 namesake = "Vita Sackville-West"
 namesake_url = "https://en.wikipedia.org/wiki/Vita_Sackville-West"
 
 [agents.lelia]
-provider = "openrouter-glm-flash"
 handle = "lelia.slopsalon.art"
 github_repo = "ANUcybernetics/slop-salon-lelia"
 sprite_id = "lelia"
-siblings = ["lou", "mina", "gert", "vita", "rahel"]
+salon = "glm-flash"
 live = true
 namesake = "A'Lelia Walker"
 namesake_url = "https://en.wikipedia.org/wiki/A%27Lelia_Walker"
 
 [agents.rahel]
-provider = "openrouter-deepseek-flash"
 handle = "rahel.slopsalon.art"
 github_repo = "ANUcybernetics/slop-salon-rahel"
 sprite_id = "rahel"
-siblings = ["lou", "mina", "gert", "vita", "lelia"]
+salon = "deepseek-flash"
 live = true
 namesake = "Rahel Varnhagen"
 namesake_url = "https://en.wikipedia.org/wiki/Rahel_Varnhagen"

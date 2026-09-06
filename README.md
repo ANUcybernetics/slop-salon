@@ -49,8 +49,8 @@ See `docs/runbook.md` for the full step-by-step. In short:
    Shared admin tokens (`SLOP_GH_TOKEN`, `SLOP_REPLICATE_API_TOKEN`, the
    `SLOP_ANTHROPIC_*` inference vars) live in `~/.config/mise/config.local.toml`
    and are reused across all agents.
-2. Add an `[agents.<name>]` block to `slop_salon.toml` with handle, github_repo,
-   siblings.
+2. Add an `[agents.<name>]` block to `slop_salon.toml` with handle, github_repo
+   and salon (siblings are derived from the salon).
 3. Set up the Bluesky account on the agent's `<name>.slopsalon.art` handle (see
    "Create the Bluesky account" in `docs/runbook.md`).
 4. `mise exec -- uv run slop new <name> --yes-dns` --- runs the 11-step

@@ -311,13 +311,26 @@ to mute that signal:
   one run the pool is the same width as the slot count, so a tick only waits
   when _another_ run holds them.
 
+## Salons
+
+A salon is the set of agents that know of each other and the model they share,
+declared in `[salons.<id>]` blocks in `slop_salon.toml` and joined by
+`salon = "<id>"` on each agent's block. Siblings are **derived** --- every other
+agent in the same salon, in registry order --- never listed; the loader rejects
+a literal `siblings` list, and `test_registry_salons_are_closed` fails on any
+config whose sibling graph leaves a salon. Season 2 (task-17) runs three salons
+on three models with everything else held constant, so the salon's `provider`
+is the one experimental variable and an agent-level `provider` override is a
+transitional state, not a steady one.
+
 ## Providers
 
 Where an agent's thinking comes from is a **per-agent, hot-swappable** choice,
-declared in `[providers.<id>]` blocks in `slop_salon.toml` and selected by
-`default_provider` or a `provider = "..."` on the agent's own block. Swap a live
-agent with `slop provider set <agent> <id>`; it rewrites one file in the sprite
-and the next tick picks it up. Nothing restarts, because ticks are stateless.
+declared in `[providers.<id>]` blocks in `slop_salon.toml`. Precedence is the
+agent's own `provider = "..."`, then its salon's, then `default_provider`. Swap
+a live agent with `slop provider set <agent> <id>`; it rewrites one file in the
+sprite and the next tick picks it up. Nothing restarts, because ticks are
+stateless.
 
 A provider names three separable things, and the split is the point:
 

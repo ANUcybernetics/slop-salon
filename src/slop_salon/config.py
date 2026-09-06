@@ -78,16 +78,39 @@ class Provider:
 
 
 @dataclass
+class Salon:
+    """One salon: the agents that know of each other, and the model they share.
+
+    Season 2 runs several salons side by side on different models to see
+    whether they individuate, so a salon is where the experiment's one variable
+    lives: `provider` is the model, and everything else is held constant. An
+    agent's siblings are *derived* from its salon --- every other agent in the
+    same salon --- rather than listed by hand, so the sibling graph is closed
+    by construction and adding an agent is one line, not N.
+    """
+
+    name: str
+    # Human-readable name for the site ("GLM 5.3 Flash"). Defaults to the id.
+    label: str = ""
+    # Provider id every agent in the salon runs on, unless its own block
+    # overrides it. "" defers to `default_provider`.
+    provider: str = ""
+
+
+@dataclass
 class Agent:
     name: str
     handle: str
     github_repo: str
     sprite_id: str = ""
+    # Filled by the loader from `salon`; never read from the file.
     siblings: list[str] = field(default_factory=list)
     namesake: str = ""
     namesake_url: str = ""
     live: bool = False
-    # Provider id, or "" to take the registry default.
+    # Salon id, or "" for an agent that knows nobody.
+    salon: str = ""
+    # Provider id override, or "" to take the salon's, then the registry default.
     provider: str = ""
 
 
@@ -96,21 +119,31 @@ class Config:
     path: Path
     agents: dict[str, Agent]
     providers: dict[str, Provider] = field(default_factory=dict)
+    salons: dict[str, Salon] = field(default_factory=dict)
     default_provider: str = ""
+
+    def members(self, salon_name: str) -> list[str]:
+        """Agent names in salon `salon_name`, in registry order."""
+        if salon_name not in self.salons:
+            raise KeyError(f"unknown salon {salon_name!r}")
+        return [a.name for a in self.agents.values() if a.salon == salon_name]
 
     def provider_for(self, agent_name: str) -> Provider:
         """The provider agent `agent_name` runs on.
 
-        Precedence: the agent's own `provider`, then the registry
-        `default_provider`. There is no third fallback: a config that resolves
-        to nothing is a config error, and saying so beats quietly inventing an
-        endpoint. The registry briefly carried a hardcoded vLLM provider for
-        exactly that case, which meant the one situation it existed to rescue
-        would have returned a tunnel that was switched off the same week.
+        Precedence: the agent's own `provider`, then its salon's, then the
+        registry `default_provider`. There is no fourth fallback: a config
+        that resolves to nothing is a config error, and saying so beats
+        quietly inventing an endpoint. The registry briefly carried a
+        hardcoded vLLM provider for exactly that case, which meant the one
+        situation it existed to rescue would have returned a tunnel that was
+        switched off the same week.
         """
         if agent_name not in self.agents:
             raise KeyError(f"unknown agent {agent_name!r}")
-        chosen = self.agents[agent_name].provider or self.default_provider
+        agent = self.agents[agent_name]
+        salon_provider = self.salons[agent.salon].provider if agent.salon else ""
+        chosen = agent.provider or salon_provider or self.default_provider
         if not chosen:
             raise ValueError(
                 f"agent {agent_name!r} resolves to no provider: set `provider` on its "
@@ -178,26 +211,46 @@ def load_config(path: Path | str = "slop_salon.toml") -> Config:
     if default_provider and default_provider not in providers:
         raise ValueError(f"default_provider {default_provider!r} has no [providers.*] block in {p}")
 
+    salons = {}
+    for name, fields in data.get("salons", {}).items():
+        provider = fields.get("provider", "")
+        if provider and provider not in providers:
+            raise ValueError(f"salon {name!r}: provider {provider!r} has no [providers.*] block")
+        salons[name] = Salon(name=name, label=fields.get("label", name), provider=provider)
+
     agents = {}
     for name, fields in data.get("agents", {}).items():
+        if "siblings" in fields:
+            raise ValueError(f"agent {name!r}: `siblings` is derived from `salon`; delete the list")
         provider = fields.get("provider", "")
         if provider and provider not in providers:
             raise ValueError(f"agent {name!r}: provider {provider!r} has no [providers.*] block")
+        salon = fields.get("salon", "")
+        if salon and salon not in salons:
+            raise ValueError(f"agent {name!r}: salon {salon!r} has no [salons.*] block")
         agents[name] = Agent(
             name=name,
             handle=fields["handle"],
             github_repo=fields["github_repo"],
             sprite_id=fields.get("sprite_id", ""),
-            siblings=list(fields.get("siblings", [])),
             namesake=fields.get("namesake", ""),
             namesake_url=fields.get("namesake_url", ""),
             live=bool(fields.get("live", False)),
+            salon=salon,
             provider=provider,
         )
+    for agent in agents.values():
+        if agent.salon:
+            agent.siblings = [
+                other.name
+                for other in agents.values()
+                if other.salon == agent.salon and other.name != agent.name
+            ]
     return Config(
         path=p,
         agents=agents,
         providers=providers,
+        salons=salons,
         default_provider=default_provider,
     )
 
