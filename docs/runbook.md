@@ -54,6 +54,8 @@ Two stores:
     prefix convention no longer has to carry that job, and an unreferenced token
     stays admin-side. The shared dispatcher's `deepseek` profile maps it to the
     Anthropic-compatible variable only for the child Claude Code process.
+  - `OPENROUTER_API_KEY` --- referenced by the three `openrouter-*` providers
+    (season 2). Same no-prefix rule as `DEEPSEEK_API_TOKEN`.
   - `SLOP_CLAUDE_CREDENTIALS_PATH` / `SLOP_CODEX_AUTH_PATH` --- admin-side paths
     to the OAuth profiles the subscription providers copy into a sprite
     (`~/.claude/.credentials.json`, `~/.codex/auth.json`). Only needed if you
@@ -143,6 +145,7 @@ SLOP_GH_TOKEN = "..."               # `gh auth token`, or a PAT with repo scope
 SLOP_REPLICATE_API_TOKEN = "..."    # https://replicate.com → Account → API tokens
 SLOP_ANTHROPIC_AUTH_TOKEN = "..."   # vllm provider: must equal VLLM_API_KEY
 DEEPSEEK_API_TOKEN = "..."          # deepseek provider: platform.deepseek.com
+OPENROUTER_API_KEY = "..."          # openrouter-* providers: openrouter.ai/settings/keys
 ```
 
 Only the token for the provider(s) you actually use is required. The rest of the
