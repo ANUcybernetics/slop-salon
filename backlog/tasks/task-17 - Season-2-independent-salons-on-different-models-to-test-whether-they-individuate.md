@@ -6,6 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-09-05 01:47'
+updated_date: '2026-09-06 05:13'
 labels:
   - season-2
   - fleet
@@ -47,3 +48,13 @@ Plan sketch:
 - [ ] #5 The site groups agents by salon, no copy claims a single collective of six, and season-1 posts and notes remain reachable
 - [ ] #6 docs/runbook.md and CLAUDE.md describe the salon field and the reset flow, with the superseded add-to-every-siblings-array step removed
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+2026-09-06: providers changed from the design conversation. All three salons go through OpenRouter under the shared `openrouter` dispatcher profile with one key, so the model is the only variable: `openrouter-deepseek-flash`, `openrouter-glm-flash`, `openrouter-muse-spark` (Meta contributor tier, needs the 18+ and paid-training toggles on the OpenRouter account). GPT-5.6 Luna dropped in favour of Muse Spark. Claude pinned 2.1.263 on all three; CLAUDE_CODE_MAX_CONTEXT_TOKENS set because Claude Code assumes 200k for unknown model ids.
+
+Canaries: lelia on GLM (one clean 20-min tick, $0.048), rahel on DeepSeek and gert on Muse Spark started. Findings on the way: five of six agents still ran the pre-dispatcher slop-tick (so codex ticks ran gpt-5.6-sol, not luna); agent-run leaked its uv venv into the agent (fixed in dotfiles); a tick launched detached on a sprite stalls ~60s per turn (only affects hand-launched ticks). Tick cap raised to 2h.
+
+Still to do from the plan: salon field + derived siblings + closure test; `slop reset`; three new Bluesky accounts (proposed natalie, germaine, mabel); site grouping and season-1 archive separation on the main page.
+<!-- SECTION:NOTES:END -->
