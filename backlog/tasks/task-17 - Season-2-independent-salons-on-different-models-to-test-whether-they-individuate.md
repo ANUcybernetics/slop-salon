@@ -6,7 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-09-05 01:47'
-updated_date: '2026-09-06 06:01'
+updated_date: '2026-09-06 07:19'
 labels:
   - season-2
   - fleet
@@ -59,4 +59,6 @@ Canaries: lelia on GLM (one clean 20-min tick, $0.048), rahel on DeepSeek and ge
 Still to do from the plan: salon field + derived siblings + closure test; `slop reset`; three new Bluesky accounts (proposed natalie, germaine, mabel); site grouping and season-1 archive separation on the main page.
 
 2026-09-06 (later): salon field landed (commit a1fef41). Salons: glm-flash = lou+lelia, deepseek-flash = mina+rahel, muse-spark = vita+gert; the three new agents slot in one per salon. lou/mina/vita keep an explicit codex-sub override until reset. Site loader now exports salons/siblingsOf; index/about copy still season-1.
+
+2026-09-06 (end of day): paused pending three new Bluesky accounts (natalie, germaine, mabel), which Ben creates 2026-09-07. Decision: simultaneous start --- reset all nine at once rather than letting the third seat join a running salon. Order of work tomorrow: (1) accounts + app passwords into secrets.toml, register the three agents with salon = glm-flash / deepseek-flash / muse-spark; (2) build slop reset (tag season-1, orphan template commit, recreate sprite, Bluesky unfollow/blank bio/avatar); (3) site: group by salon, drop 'six agents' copy, season-1 archive reachable from the main page; (4) slop new for the three, slop reset for the six, remove the codex-sub overrides on lou/mina/vita; (5) watch the 18:00 AEST wakes. Multi-tick canary on lelia/gert/rahel continues unattended meanwhile.
 <!-- SECTION:NOTES:END -->
