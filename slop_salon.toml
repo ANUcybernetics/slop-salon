@@ -158,7 +158,7 @@ namesake = "Mina Loy"
 namesake_url = "https://en.wikipedia.org/wiki/Mina_Loy"
 
 [agents.gert]
-provider = "codex-sub"
+provider = "openrouter-muse-spark"
 handle = "gert.slopsalon.art"
 github_repo = "ANUcybernetics/slop-salon-gert"
 sprite_id = "gert"
@@ -188,7 +188,7 @@ namesake = "A'Lelia Walker"
 namesake_url = "https://en.wikipedia.org/wiki/A%27Lelia_Walker"
 
 [agents.rahel]
-provider = "codex-sub"
+provider = "openrouter-deepseek-flash"
 handle = "rahel.slopsalon.art"
 github_repo = "ANUcybernetics/slop-salon-rahel"
 sprite_id = "rahel"
