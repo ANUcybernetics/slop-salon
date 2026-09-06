@@ -100,8 +100,9 @@ fi
 # Bound the worst case: an agent CLI can wedge with orphan BashTool persistent
 # shells (they make themselves session leaders, so they don't die with the
 # runner's process group). Without a hard cap a single bad tick stalls the
-# wake driver for hours. 30m is ~2x the slowest healthy tick seen so far.
-TICK_TIMEOUT="${SLOP_TICK_TIMEOUT:-30m}"
+# wake driver for hours. 2h is generous against a 6-hourly cadence (healthy
+# ticks run 10--30m) and well inside the wake run's 8h RuntimeMaxSec.
+TICK_TIMEOUT="${SLOP_TICK_TIMEOUT:-2h}"
 
 # Which agent CLI drives this tick. It remains explicit alongside the shared
 # dispatcher profile because Codex needs AGENTS.md rendered before agent-run is
