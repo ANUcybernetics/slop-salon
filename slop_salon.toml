@@ -102,9 +102,10 @@ credentials_shareable = true
 # base URL and auth vars and leaves the rest to these blocks.
 # CLAUDE_CODE_MAX_CONTEXT_TOKENS is load-bearing: Claude Code does not know
 # these model ids, assumes a 200k window, and auto-compacts at that size.
-# OpenRouter fans most models out across hosts with differing quantisation.
-# Pin hosts with the account-level provider preferences on openrouter.ai, not
-# here; nothing in the request body can be set from Claude Code.
+# OpenRouter fans most models out across hosts, and some answer Claude Code's
+# request shape with an empty message. Nothing in the request body can be set
+# from Claude Code, so host routing lives in OpenRouter presets named in the
+# model string (`model@preset/slug`); `ops/openrouter-presets.py` creates them.
 # Pricing is OpenRouter's list price. It charges no cache-write premium, so
 # cache_write = input.
 
@@ -112,7 +113,7 @@ credentials_shareable = true
 runner = "claude"
 profile = "openrouter"
 claude_version = "2.1.263"
-env = { AGENT_MODEL = "deepseek/deepseek-v4-flash", ANTHROPIC_SMALL_FAST_MODEL = "deepseek/deepseek-v4-flash", API_TIMEOUT_MS = "600000", CLAUDE_CODE_MAX_CONTEXT_TOKENS = "1000000" }
+env = { AGENT_MODEL = "deepseek/deepseek-v4-flash@preset/slop-deepseek-flash", ANTHROPIC_SMALL_FAST_MODEL = "deepseek/deepseek-v4-flash@preset/slop-deepseek-flash", API_TIMEOUT_MS = "600000", CLAUDE_CODE_MAX_CONTEXT_TOKENS = "1000000" }
 secret_env = { OPENROUTER_API_KEY = "OPENROUTER_API_KEY" }
 pricing = { input = 0.082, cache_read = 0.0164, cache_write = 0.082, output = 0.164 }
 
@@ -120,7 +121,7 @@ pricing = { input = 0.082, cache_read = 0.0164, cache_write = 0.082, output = 0.
 runner = "claude"
 profile = "openrouter"
 claude_version = "2.1.263"
-env = { AGENT_MODEL = "z-ai/glm-5.3-flash", ANTHROPIC_SMALL_FAST_MODEL = "z-ai/glm-5.3-flash", API_TIMEOUT_MS = "600000", CLAUDE_CODE_MAX_CONTEXT_TOKENS = "1000000" }
+env = { AGENT_MODEL = "z-ai/glm-5.3-flash@preset/slop-glm-flash", ANTHROPIC_SMALL_FAST_MODEL = "z-ai/glm-5.3-flash@preset/slop-glm-flash", API_TIMEOUT_MS = "600000", CLAUDE_CODE_MAX_CONTEXT_TOKENS = "1000000" }
 secret_env = { OPENROUTER_API_KEY = "OPENROUTER_API_KEY" }
 pricing = { input = 0.075, cache_read = 0.015, cache_write = 0.075, output = 0.25 }
 

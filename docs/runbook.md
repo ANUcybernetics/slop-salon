@@ -55,7 +55,11 @@ Two stores:
     stays admin-side. The shared dispatcher's `deepseek` profile maps it to the
     Anthropic-compatible variable only for the child Claude Code process.
   - `OPENROUTER_API_KEY` --- referenced by the three `openrouter-*` providers
-    (season 2). Same no-prefix rule as `DEEPSEEK_API_TOKEN`.
+    (season 2). Same no-prefix rule as `DEEPSEEK_API_TOKEN`. The DeepSeek and
+    GLM providers route through OpenRouter presets; on a fresh OpenRouter
+    account run `mise exec -- uv run ops/openrouter-presets.py` once to create
+    them, and confirm 18+ and paid-model-training in the account settings for
+    the Muse Spark contributor tier.
   - `SLOP_CLAUDE_CREDENTIALS_PATH` / `SLOP_CODEX_AUTH_PATH` --- admin-side paths
     to the OAuth profiles the subscription providers copy into a sprite
     (`~/.claude/.credentials.json`, `~/.codex/auth.json`). Only needed if you
