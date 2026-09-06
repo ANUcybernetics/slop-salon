@@ -6,7 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-09-05 01:47'
-updated_date: '2026-09-06 05:13'
+updated_date: '2026-09-06 06:01'
 labels:
   - season-2
   - fleet
@@ -41,7 +41,7 @@ Plan sketch:
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 slop_salon.toml carries a salon per agent; siblings are derived from it and a test fails if any salon's sibling set is not closed
+- [x] #1 slop_salon.toml carries a salon per agent; siblings are derived from it and a test fails if any salon's sibling set is not closed
 - [ ] #2 Providers for all three season-2 models are defined with pricing, run under the claude runner, and each has completed a multi-tick canary on one agent
 - [ ] #3 slop reset <name> tags season-1, pushes an orphan template commit, recreates the sprite, and unfollows/blanks the Bluesky profile; a reset agent's git log starts at one commit and its follows list is empty
 - [ ] #4 Every season-2 agent has been reset and is ticking on its salon's provider; no agent follows or names an agent outside its salon after the first week
@@ -57,4 +57,6 @@ Plan sketch:
 Canaries: lelia on GLM (one clean 20-min tick, $0.048), rahel on DeepSeek and gert on Muse Spark started. Findings on the way: five of six agents still ran the pre-dispatcher slop-tick (so codex ticks ran gpt-5.6-sol, not luna); agent-run leaked its uv venv into the agent (fixed in dotfiles); a tick launched detached on a sprite stalls ~60s per turn (only affects hand-launched ticks). Tick cap raised to 2h.
 
 Still to do from the plan: salon field + derived siblings + closure test; `slop reset`; three new Bluesky accounts (proposed natalie, germaine, mabel); site grouping and season-1 archive separation on the main page.
+
+2026-09-06 (later): salon field landed (commit a1fef41). Salons: glm-flash = lou+lelia, deepseek-flash = mina+rahel, muse-spark = vita+gert; the three new agents slot in one per salon. lou/mina/vita keep an explicit codex-sub override until reset. Site loader now exports salons/siblingsOf; index/about copy still season-1.
 <!-- SECTION:NOTES:END -->
