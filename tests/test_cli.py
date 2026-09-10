@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -1075,3 +1076,69 @@ def test_provider_sync_touches_no_sprite_when_a_secret_is_missing(salon_config, 
 
     assert result.exit_code == 1
     instance.exec.assert_not_called()
+
+
+def _exec_commands(instance) -> list[str]:
+    return [call[0][1][-1] for call in instance.exec.call_args_list]
+
+
+def _decoded_env_file(instance) -> str:
+    """The body written to ~/.slop-env, decoded from the base64 the command carries."""
+    import base64
+    import re
+
+    for command in _exec_commands(instance):
+        if "~/.slop-env" not in command:
+            continue
+        blob = re.search(r"echo (\S+) \| base64 -d", command)
+        assert blob, command
+        return base64.b64decode(blob.group(1)).decode()
+    raise AssertionError("no ~/.slop-env write was issued")
+
+
+def test_rotate_env_rewrites_secrets_and_leaves_the_token_in_one_place(salon_config, monkeypatch):
+    """A rotated admin token has to reach the sprite, which keeps its own copy."""
+    for key in [k for k in os.environ if k.startswith("SLOP_")]:
+        monkeypatch.delenv(key)
+    monkeypatch.setenv("SLOP_GH_TOKEN", "ghp_rotated")
+    before = salon_config.read_text()
+
+    with patch("slop_salon.cli.SpritesClient") as mock_class:
+        instance = MagicMock()
+        instance.exec.return_value = ExecResult(stdout="", stderr="", exit_code=0)
+        mock_class.return_value = instance
+
+        result = runner.invoke(app, ["rotate-env", "lou"])
+
+    assert result.exit_code == 0, result.output
+    body = _decoded_env_file(instance)
+    assert "export GH_TOKEN=ghp_rotated" in body
+    assert "export BSKY_HANDLE=lou.slopsalon.art" in body
+    assert "export AGENT_NAME=lou" in body
+
+    commands = _exec_commands(instance)
+    assert any("~/.git-credentials" in c and "ghp_rotated" in c for c in commands)
+    # origin loses its inline token, so the next rotation is one file, not two.
+    (remote,) = [c for c in commands if "remote set-url" in c]
+    assert "https://github.com/ANUcybernetics/slop-salon-lou.git" in remote
+    assert "ghp_rotated" not in remote
+
+    # Rotating secrets is not a registry change.
+    assert salon_config.read_text() == before
+
+
+def test_rotate_env_leaves_the_provider_file_alone(salon_config, monkeypatch):
+    """`provider sync` owns ~/.slop-provider; rotating secrets must not fight it."""
+    for key in [k for k in os.environ if k.startswith("SLOP_")]:
+        monkeypatch.delenv(key)
+    monkeypatch.setenv("SLOP_GH_TOKEN", "ghp_rotated")
+
+    with patch("slop_salon.cli.SpritesClient") as mock_class:
+        instance = MagicMock()
+        instance.exec.return_value = ExecResult(stdout="", stderr="", exit_code=0)
+        mock_class.return_value = instance
+
+        result = runner.invoke(app, ["rotate-env"])
+
+    assert result.exit_code == 0, result.output
+    assert not any("~/.slop-provider" in c for c in _exec_commands(instance))

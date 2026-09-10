@@ -10,6 +10,7 @@ Subcommands:
     wake           fire a tick at every live agent in parallel
     usage          per-tick token and cost tally across live agents
     provider       show, swap, or sync agents' intelligence providers
+    rotate-env     rewrite sprites' secrets + git credentials from the admin box
     new            provision a new agent (see provision.py)
     reset          season reset: tag, orphan templates, recreate, bluesky hygiene
     sync-siblings  backfill missing sibling entries in live SIBLINGS.md
@@ -39,8 +40,11 @@ from slop_salon.config import load_config, save_provider
 from slop_salon.healing import SKIP_BUSY_CODE, claude_failed, heal_wedged, is_wedge
 from slop_salon.provision import (
     SLOP_SALON_REPO,
+    _build_detoken_remote_cmd,
+    _build_git_config_cmd,
     _build_install_ambient_hook_cmd,
     _build_template_files,
+    _build_write_env_file_cmd,
     _interpolate,
     _render_sibling_block,
     missing_provider_secrets,
@@ -1200,6 +1204,68 @@ def provider_sync(
         typer.echo(f"{agent.name} -> {provider.name}")
         try:
             for label, command in plans[provider.name]:
+                result = sprites.exec(agent.sprite_id, ["bash", "-lc", command])
+                if result.exit_code != 0:
+                    raise RuntimeError(f"{label} failed (exit={result.exit_code}): {result.stderr}")
+                typer.echo(f"  ok: {label}")
+        except Exception as exc:  # noqa: BLE001
+            typer.echo(f"  FAILED: {exc}", err=True)
+            failed.append(agent.name)
+
+    if failed:
+        typer.echo(f"\nfailed: {', '.join(failed)}", err=True)
+        raise typer.Exit(code=1)
+    typer.echo("\nDone. Takes effect on each agent's next tick.")
+
+
+@app.command(name="rotate-env")
+def rotate_env(
+    name: str = typer.Argument(None, help="Agent name; omit or 'all' for every live agent"),
+    config_path: str = typer.Option(None, "--config"),
+):
+    """Rewrite each sprite's `~/.slop-env` and git credentials from current secrets.
+
+    sprites.dev has no API for setting env from outside, so a sprite keeps its
+    own copy of every secret, written once at provision time. Rotate a token on
+    the admin box and that copy silently goes stale: the fleet kept pushing with
+    a token nobody was maintaining any more, and the drift was invisible because
+    nothing compares the two. This is the command the runbook has always pointed
+    at for that.
+
+    Leaves the provider file alone (`slop provider sync` owns it) and repoints
+    `origin` at a token-free URL, so the token afterwards lives in exactly one
+    file per sprite.
+    """
+    config = _config(config_path)
+    if name in (None, "all"):
+        targets = [a for a in config.agents.values() if a.live and a.sprite_id]
+    elif name in config.agents:
+        targets = [config.agents[name]]
+    else:
+        typer.echo(f"error: unknown agent {name!r}", err=True)
+        raise typer.Exit(code=1)
+    if not targets:
+        typer.echo("no matching agents with a sprite", err=True)
+        raise typer.Exit(code=1)
+
+    all_names = list(config.agents.keys())
+    sprites = SpritesClient()
+    failed = []
+    for agent in targets:
+        env = resolve_secrets(agent.name, all_names)
+        gh_token = env.get("GH_TOKEN")
+        if not gh_token:
+            typer.echo("error: SLOP_GH_TOKEN missing from the admin env", err=True)
+            raise typer.Exit(code=1)
+        env["BSKY_HANDLE"] = agent.handle
+        steps = [
+            ("write ~/.slop-env", _build_write_env_file_cmd({"AGENT_NAME": agent.name, **env})),
+            ("write ~/.git-credentials", _build_git_config_cmd(agent.name, gh_token)),
+            ("de-token origin", _build_detoken_remote_cmd(agent.name, agent.github_repo)),
+        ]
+        typer.echo(f"{agent.name}")
+        try:
+            for label, command in steps:
                 result = sprites.exec(agent.sprite_id, ["bash", "-lc", command])
                 if result.exit_code != 0:
                     raise RuntimeError(f"{label} failed (exit={result.exit_code}): {result.stderr}")

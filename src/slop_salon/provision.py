@@ -223,6 +223,18 @@ def _build_git_config_cmd(name: str, gh_token: str) -> str:
     )
 
 
+def _build_detoken_remote_cmd(name: str, repo: str) -> str:
+    """Point the sprite's `origin` at a token-free URL.
+
+    The clone embeds the token in the remote, so a rotated token has to be
+    written in two places or pushes keep using the stale one. Stripping it
+    leaves `~/.git-credentials` (installed by `_build_git_config_cmd`, and
+    already the configured helper) as the single copy, which is what makes
+    `slop rotate-env` a one-file change.
+    """
+    return f"cd ~/slop-salon-{name} && git remote set-url origin https://github.com/{repo}.git"
+
+
 def _build_write_env_file_cmd(env: dict[str, str]) -> str:
     """Write resolved secrets to `~/.slop-env` (mode 600) inside the sprite.
 
