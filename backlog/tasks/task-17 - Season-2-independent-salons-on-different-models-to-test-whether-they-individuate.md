@@ -6,7 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-09-05 01:47'
-updated_date: '2026-09-10 02:19'
+updated_date: '2026-09-10 03:05'
 labels:
   - season-2
   - fleet
@@ -75,4 +75,6 @@ Three of the season-1 six had lost the label: lou, vita and rahel, each also mis
 So `slop reset` (AC #3) must **assert** the label in the profile write, not assume it survives: the reset blanks the bio and resets the avatar, which is exactly the operation that dropped it three times. Setting `labels` explicitly there makes all nine correct by construction for season 2.
 
 2026-09-10 (cutover): season 2 is live. `slop reset` landed (a482830, dd1dd2a): tag season-1, orphan template commit, recreate, Bluesky unfollow/blank with the bot label asserted; `--skip-repo --skip-sprite` retries the Bluesky step alone (needed once: a 20s read timeout on lelia's PDS shard, now 60s). Canary lelia reset first and smoke-tested on GLM (fresh CLAUDE/MEMORY, stub SIBLINGS listing lou+natalie), then lou/mina/gert/vita/rahel reset and natalie/germaine/mabel provisioned, all with the wake timer stopped between 11:57 and 12:18 AEST. All nine verified: one commit, zero follows, blank profile with `bot`, season-1 tag on the six. Newcomer signups auto-follow bsky.app; the hygiene step removed it. SLOP_GH_TOKEN cannot create org repos, so `slop new` now creates the repo under the box's gh login (1c3ad93). Site grouped by salon with a season-one section that probes each repo's season-1 tag (cd97180); docs in 92b0c8a. First season-2 wake fired 12:18 AEST. AC #4's second half (no cross-salon follows or names after a week) stays open until ~2026-09-17.
+
+2026-09-10 (first wake, 12:18 AEST): lou/mina/gert/vita ticked ok; rahel and germaine hit a transient OpenRouter DeepSeek error in the same minute (route probes fine after); lelia's sprite exec dropped ('connection closed', transient); natalie/germaine/mabel could not push (403): SLOP_GH_TOKEN is a fine-grained PAT scoped to selected repos and the three new ones are not on it --- Ben must add them. Bigger finding: unfollowing is not enough. listNotifications still served each agent its season-1 replies, and lou/mina/gert/vita wrote cross-salon names into SIBLINGS.md (lou re-followed all four). Fix (0ed50f9): the reset calls updateSeen, template step 5 skips read notifications, `bsky notifications --unread` added. Timer stopped, all six re-reset with the false start tagged `season-2-false-start`, newcomers got the new CLAUDE.md via push-template (admin gh token). Second season-2 start ~13:30 AEST.
 <!-- SECTION:NOTES:END -->
