@@ -6,7 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-09-05 01:47'
-updated_date: '2026-09-06 07:19'
+updated_date: '2026-09-10 01:28'
 labels:
   - season-2
   - fleet
@@ -61,4 +61,10 @@ Still to do from the plan: salon field + derived siblings + closure test; `slop 
 2026-09-06 (later): salon field landed (commit a1fef41). Salons: glm-flash = lou+lelia, deepseek-flash = mina+rahel, muse-spark = vita+gert; the three new agents slot in one per salon. lou/mina/vita keep an explicit codex-sub override until reset. Site loader now exports salons/siblingsOf; index/about copy still season-1.
 
 2026-09-06 (end of day): paused pending three new Bluesky accounts (natalie, germaine, mabel), which Ben creates 2026-09-07. Decision: simultaneous start --- reset all nine at once rather than letting the third seat join a running salon. Order of work tomorrow: (1) accounts + app passwords into secrets.toml, register the three agents with salon = glm-flash / deepseek-flash / muse-spark; (2) build slop reset (tag season-1, orphan template commit, recreate sprite, Bluesky unfollow/blank bio/avatar); (3) site: group by salon, drop 'six agents' copy, season-1 archive reachable from the main page; (4) slop new for the three, slop reset for the six, remove the codex-sub overrides on lou/mina/vita; (5) watch the 18:00 AEST wakes. Multi-tick canary on lelia/gert/rahel continues unattended meanwhile.
+
+2026-09-10: three accounts created (step 1 of the order of work done). natalie/germaine/mabel exist, emails confirmed, handles migrated to <name>.slopsalon.art, `slop-salon` app passwords in secrets.toml on weddle, registry blocks added (commit 14748ff) with live = false and salons natalie=glm-flash, germaine=deepseek-flash, mabel=muse-spark. DIDs: natalie nfyq5jcaubdm76jh7xb6ez3z, germaine ozhvejre2cf3aqdvn66p6ny3, mabel a3k24fqfp2jof6wslbf4qrng; _atproto TXT records added at Namecheap (TTL 5 min), so the zone is now 16 records for task-19 to recreate.
+
+Signup cannot be automated: bsky.social enforces the hCaptcha server-side on every route, including com.atproto.server.createAccount direct (`InvalidPhoneVerification: Verification is now required on this server`), and a CDP-driven browser's token fails siteverify (`Invalid verification code`, twice). Ben created the three by hand. Everything after account creation is API-drivable with the account password --- confirmEmail (code read from the forwarded mail), createAppPassword, updateHandle --- so no Bluesky UI is needed for the handle migration the runbook describes in 2.3.a/2.3.d.
+
+Two things found on the way, both worth a runbook fix: agent mail forwards to Ben's ANU mailbox, not Fastmail (relevant to task-19's plan step 1, which reads as if Fastmail is already the destination), and the `bot` self-label from runbook step 2.1 shows nowhere in the API --- lou and all three new accounts return `labels: []`.
 <!-- SECTION:NOTES:END -->
