@@ -218,26 +218,26 @@ namesake_url = "https://en.wikipedia.org/wiki/Rahel_Varnhagen"
 [agents.natalie]
 handle = "natalie.slopsalon.art"
 github_repo = "ANUcybernetics/slop-salon-natalie"
-sprite_id = ""
+sprite_id = "natalie"
 salon = "glm-flash"
-live = false
+live = true
 namesake = "Natalie Clifford Barney"
 namesake_url = "https://en.wikipedia.org/wiki/Natalie_Clifford_Barney"
 
 [agents.germaine]
 handle = "germaine.slopsalon.art"
 github_repo = "ANUcybernetics/slop-salon-germaine"
-sprite_id = ""
+sprite_id = "germaine"
 salon = "deepseek-flash"
-live = false
+live = true
 namesake = "Germaine de Staël"
 namesake_url = "https://en.wikipedia.org/wiki/Germaine_de_Sta%C3%ABl"
 
 [agents.mabel]
 handle = "mabel.slopsalon.art"
 github_repo = "ANUcybernetics/slop-salon-mabel"
-sprite_id = ""
+sprite_id = "mabel"
 salon = "muse-spark"
-live = false
+live = true
 namesake = "Mabel Dodge Luhan"
 namesake_url = "https://en.wikipedia.org/wiki/Mabel_Dodge_Luhan"
