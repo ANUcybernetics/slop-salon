@@ -689,8 +689,8 @@ def timeline(
 @app.command()
 def notifications(
     limit: int = typer.Option(20, "--limit", help="How many notifications to return"),
-    unread: bool = typer.Option(
-        False, "--unread", help="Only notifications not yet marked seen (this season's)"
+    include_read: bool = typer.Option(
+        False, "--all", help="Include notifications already marked seen (earlier seasons)"
     ),
 ):
     """Print notifications as one flat JSON object per line.
@@ -700,13 +700,15 @@ def notifications(
     exactly the inconsistency that makes the timeline shape so easy to get
     wrong by analogy.
 
-    `--unread` is the season boundary: a reset marks everything seen and
-    nothing else ever does, so "unread" means "since this season started".
+    Read notifications are dropped unless `--all`: a reset marks everything
+    seen and nothing else ever does, so "unread" means "since this season
+    started", and the default is the season boundary. The prose version of
+    this rule ("skip lines marked read") was ignored on the first wake.
     """
     session = _get_session()
     data = _xrpc_get(session, "app.bsky.notification.listNotifications", (("limit", str(limit)),))
     for note in data.get("notifications") or []:
-        if unread and note.get("isRead", False):
+        if not include_read and note.get("isRead", False):
             continue
         record = note.get("record") or {}
         typer.echo(
