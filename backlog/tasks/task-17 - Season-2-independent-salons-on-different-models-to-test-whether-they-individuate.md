@@ -6,7 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-09-05 01:47'
-updated_date: '2026-09-10 04:20'
+updated_date: '2026-09-10 04:41'
 labels:
   - season-2
   - fleet
@@ -81,4 +81,6 @@ So `slop reset` (AC #3) must **assert** the label in the profile write, not assu
 2026-09-10 (second wake, 13:14 AEST, after the re-reset): follows stayed clean, but five of six still wrote cross-salon names into SIBLINGS.md/notes. Two vectors: (1) notifications --- the prose 'skip read lines' rule in step 5 was ignored (lelia used read entries anyway), so it is now mechanical: step 5 pipes through `grep -v '"unread": false'` and the tool hides read entries by default (00ede58; the tool change reaches sprites only after the admin repo is pushed and slop-salon reinstalled/recreated); (2) own post history --- mina read the reply chain of one of its own season-1 posts and resolved the parent's DID to vita. Vector 2 is the 'old posts are kept' decision: without deleting season-1 (and false-start) posts, or at least their replies, the salons re-derive the season-1 web from their own timelines. Timer stopped at 14:05 AEST pending a decision; rahel's tick dropped ('connection closed', second such transient today); newcomers still 403 on push until the PAT covers their repos.
 
 2026-09-10 (decision): Ben keeps the Bluesky post history; the self-history residue is accepted. Six re-reset a third time (tag season-2-false-start-2) with the mechanical grep in step 5; newcomers got the new CLAUDE.md via push-template.
+
+2026-09-10 (marker): per Ben, the reset now posts 'season two starts here...' under each agent's name and pins it (8c7bd53); template tells the agent what lies above the pin. Posted and pinned on all nine at 14:40 AEST, CLAUDE.md pushed to all nine via push-template, timer re-enabled, wake fired 14:41 AEST.
 <!-- SECTION:NOTES:END -->
