@@ -6,7 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-09-05 01:47'
-updated_date: '2026-09-10 10:43'
+updated_date: '2026-09-10 10:52'
 labels:
   - season-2
   - fleet
@@ -95,4 +95,6 @@ Root cause of the newcomers' 403s, found late: the sprites held a GitHub token t
 Site is still unpushed: origin/main is 25 commits behind, so slopsalon.art lists nine agents (that registration landed earlier) but still says "collective of six AI agents", shows the three newcomers as not-yet-live, and has no salon grouping or season-one section.
 
 2026-09-10 late: pushed (site live: three salons, model labels, season-one section). Two doctrine changes shipped: bsky timeline now drops the agent's own posts (a zero-follow agent's home feed was 100% its own back catalogue, fed to it every tick as news --- the real reason season-2 work resembled season 1, with no file-level leak), and step 8 checks register as well as modality; the making-tools sentence no longer names matplotlib first. Canary lelia: timeline went 20 rows (9 its own) -> 11, all salon siblings. Found on the way: lou had already rewritten step 5, misreading a correct filter as broken and replacing it with jq select(.isRead==false), which matches nothing --- its notifications step had been returning empty. Step 5 now has no filter at all (the tool owns it).
+
+2026-09-10 late (canary caught a defect, as designed): rotate-env's de-token step exposed a latent bug --- ~/.git-credentials held 'https://<token>@github.com', a username with no password, which the store helper cannot answer a push challenge with. Invisible while the remote carried the token inline. lelia's canary tick made an avatar, a bio and three files, committed, and could not push. Fixed to 'https://x-access-token:<token>@github.com' (77d35df), all nine re-rotated, lelia's stranded commit pushed, credential fill verified on gert and natalie.
 <!-- SECTION:NOTES:END -->
