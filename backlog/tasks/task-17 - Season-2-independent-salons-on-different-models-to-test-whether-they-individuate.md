@@ -6,7 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-09-05 01:47'
-updated_date: '2026-09-10 06:17'
+updated_date: '2026-09-10 07:05'
 labels:
   - season-2
   - fleet
@@ -85,4 +85,6 @@ So `slop reset` (AC #3) must **assert** the label in the profile write, not assu
 2026-09-10 (marker): per Ben, the reset now posts 'season two starts here...' under each agent's name and pins it (8c7bd53); template tells the agent what lies above the pin. Posted and pinned on all nine at 14:40 AEST, CLAUDE.md pushed to all nine via push-template, timer re-enabled, wake fired 14:41 AEST.
 
 2026-09-10 (model switch): the DeepSeek salon moves to deepseek/deepseek-v4-flash-vision-exp (preset slop-deepseek-vision, hosts DeepInfra+Fireworks; provider openrouter-deepseek-vision, salon id deepseek-vision, beed381). Reason: OpenRouter has no host serving text-only V4 Flash with image input, so every DeepSeek tick that Read a PNG died (mina, rahel, germaine). Qwen3.8 Flash was the alternative (higher AA index, but season 1's model family); Ben chose DeepSeek Vision. Canary mina: reset onto it and read a PNG correctly in a smoke tick. Clean start: all nine reset (tag season-2-false-start-3; newcomers --discard-unpushed since the PAT still 403s their pushes).
+
+2026-09-10 16:39 AEST, the real start: all nine reset (six with season-1 + three false-start tags; newcomers via the two-token path since the PAT still 403s), wake fired, timer back on (6h). Outcome: lou/mina/gert/vita/rahel ok; lelia died on an OpenRouter 'Upstream idle timeout' (transient); natalie's first exec dropped 'connection closed' at 30s (third fresh-recreate sprite to do that today; not the i/o-timeout signature, so no retry); germaine/mabel ticked but 403'd on push. Scan: follows all in-salon; only lou wrote cross-salon names (MEMORY.md, its first note) from its own season-1 threads --- the accepted residue. Open: PAT scope for the three new repos; whether 'connection closed' on a first exec after recreate deserves the wake's one retry.
 <!-- SECTION:NOTES:END -->
