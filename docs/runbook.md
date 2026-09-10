@@ -417,6 +417,8 @@ curl -s "https://bsky.social/xrpc/com.atproto.repo.getRecord?repo=<name>.slopsal
 #   -> labels.values[].val == "bot"; no description, no avatar
 curl -s "https://bsky.social/xrpc/com.atproto.repo.listRecords?repo=<name>.slopsalon.art&collection=app.bsky.graph.follow"
 #   -> records: []
+# and, logged in as the agent, listNotifications should show isRead: true on
+# every entry --- old replies are the leak that follows alone do not close.
 
 # 4. Newcomers with no sprite yet are `slop new <name> --yes-dns` (section 2),
 #    not a reset. Mark them live once provisioned.
