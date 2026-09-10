@@ -361,6 +361,21 @@ def _build_install_ambient_hook_cmd() -> str:
     )
 
 
+def write_files(root: Path, files: dict[str, str]) -> None:
+    """Materialise a path → content map under `root`.
+
+    Anything with a shebang is made executable so the mode lands in the commit;
+    otherwise `slop-tick` arrives 644, the sprite's `chmod +x` shows up as a
+    mode change, and the agent's first commit is that instead of its own work.
+    """
+    for rel_path, content in files.items():
+        target = root / rel_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content)
+        if content.startswith("#!"):
+            target.chmod(0o755)
+
+
 def _push_initial_commit(repo: str, files: dict[str, str], token: str) -> None:
     """Create an initial commit on the GH repo via a temp clone + push.
 
@@ -375,10 +390,7 @@ def _push_initial_commit(repo: str, files: dict[str, str], token: str) -> None:
             check=True,
             env={**os.environ, "GH_TOKEN": token},
         )
-        for rel_path, content in files.items():
-            target = tmp_path / rel_path
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(content)
+        write_files(tmp_path, files)
         subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
         subprocess.run(
             ["git", "commit", "-m", "Initial provisioning commit"],

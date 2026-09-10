@@ -34,6 +34,7 @@ from .provision import (
     _build_template_files,
     missing_provider_secrets,
     resolve_secrets,
+    write_files,
 )
 from .recreate import recreate
 from .sprites import SpritesClient
@@ -109,10 +110,7 @@ def push_season_reset(
         _git(["checkout", "--quiet", "--orphan", "season-reset"], cwd=clone)
         _git(["rm", "-rfq", "."], cwd=clone)
         _git(["clean", "-fdxq"], cwd=clone)
-        for rel_path, content in files.items():
-            target = clone / rel_path
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(content)
+        write_files(clone, files)
         _git(["add", "-A"], cwd=clone)
         _git(["commit", "--quiet", "-m", message], cwd=clone)
         _git(["push", "--quiet", "--force", "origin", f"HEAD:refs/heads/{branch}"], cwd=clone)
@@ -141,10 +139,16 @@ def list_follow_rkeys(client: httpx.Client, did: str) -> list[str]:
             return rkeys
 
 
+# The PDS shards answer in well under a second, but one reset saw a 20s read
+# timeout on a routine call; the step is the last one and cheap to retry, so
+# be patient rather than clever.
+BLUESKY_TIMEOUT = 3 * DEFAULT_TIMEOUT
+
+
 def reset_bluesky(session: Session) -> dict[str, int | dict]:
     """Unfollow everyone and rewrite the profile as `build_reset_profile`."""
     with httpx.Client(
-        base_url=session.pds, headers=session.auth_headers, timeout=DEFAULT_TIMEOUT
+        base_url=session.pds, headers=session.auth_headers, timeout=BLUESKY_TIMEOUT
     ) as client:
         rkeys = list_follow_rkeys(client, session.did)
         for rkey in rkeys:
@@ -182,6 +186,7 @@ def reset(
     soul_path: str | Path = "SOUL.md",
     sprites: SpritesClient | None = None,
     tag: str = SEASON_TAG,
+    skip_repo: bool = False,
     skip_sprite: bool = False,
     skip_bluesky: bool = False,
 ) -> None:
@@ -191,6 +196,12 @@ def reset(
     destructive step: the provider must resolve with its secrets present, the
     Bluesky password must open a session, and the sprite must be idle with
     nothing unpushed (otherwise the tag would miss work the reset destroys).
+
+    The `skip_*` flags make a part-way failure retryable. `skip_repo` is the
+    one that matters: the orphan push is the only step that is not safe to
+    repeat once the sprite has cloned it (a second orphan commit would leave
+    the sprite on an unrelated history), so a retry after a Bluesky timeout
+    is `--skip-repo --skip-sprite`.
     """
     config = load_config(config_path)
     if name not in config.agents:
@@ -233,14 +244,17 @@ def reset(
     else:
         print("[2/5] Skipping sprite pre-flight (--skip-sprite)")
 
-    print(f"[3/5] Tagging {agent.github_repo} head as {tag} and pushing an orphan reset commit")
-    siblings = [(s, config.agents[s].handle) for s in agent.siblings if s in config.agents]
-    files = _build_template_files(
-        Path(templates_dir), Path(soul_path), agent.name, agent.handle, siblings
-    )
-    remote = f"https://{gh_token}@github.com/{agent.github_repo}.git"
-    branch = push_season_reset(remote, files, tag=tag)
-    print(f"  -> {branch} is now one commit; {tag} holds the old head")
+    if not skip_repo:
+        print(f"[3/5] Tagging {agent.github_repo} head as {tag}, pushing an orphan reset commit")
+        siblings = [(s, config.agents[s].handle) for s in agent.siblings if s in config.agents]
+        files = _build_template_files(
+            Path(templates_dir), Path(soul_path), agent.name, agent.handle, siblings
+        )
+        remote = f"https://{gh_token}@github.com/{agent.github_repo}.git"
+        branch = push_season_reset(remote, files, tag=tag)
+        print(f"  -> {branch} is now one commit; {tag} holds the old head")
+    else:
+        print("[3/5] Skipping tag + orphan push (--skip-repo)")
 
     if not skip_sprite:
         print(f"[4/5] Recreating sprite on provider {provider.name!r}")

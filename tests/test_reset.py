@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -85,7 +85,13 @@ def test_push_season_reset_tags_old_head_and_leaves_one_orphan_commit(
     monkeypatch.setenv("GIT_COMMITTER_EMAIL", "t@example.test")
 
     branch = push_season_reset(
-        remote, {"CLAUDE.md": "# lou\n", "SIBLINGS.md": "# Siblings\n", "notes/.keep": ""}
+        remote,
+        {
+            "CLAUDE.md": "# lou\n",
+            "SIBLINGS.md": "# Siblings\n",
+            "notes/.keep": "",
+            "slop-tick": "#!/bin/bash\n",
+        },
     )
     assert branch == "main"
 
@@ -97,8 +103,11 @@ def test_push_season_reset_tags_old_head_and_leaves_one_orphan_commit(
         "CLAUDE.md",
         "SIBLINGS.md",
         "notes/.keep",
+        "slop-tick",
     ]
     assert (check / "CLAUDE.md").read_text() == "# lou\n"
+    # The shebang file is committed executable, so the sprite's chmod is a no-op.
+    assert _git(["ls-files", "-s", "slop-tick"], cwd=check).startswith("100755")
     # The tag preserves the old head, with its full history reachable.
     assert _git(["rev-parse", "season-1^{commit}"], cwd=check) == old_head
     assert _git(["rev-list", "--count", "season-1"], cwd=check) == "2"
@@ -318,4 +327,26 @@ def test_reset_skips_are_honoured(reset_config):
     recreate.assert_not_called()
     bluesky.assert_not_called()
     assert push.call_args.kwargs == {"tag": "season-3"}
-    assert push.call_args == call(push.call_args.args[0], push.call_args.args[1], tag="season-3")
+
+
+def test_reset_retry_after_bluesky_failure_touches_only_bluesky(reset_config):
+    """The retry the docstring promises: --skip-repo --skip-sprite redoes step 5 alone."""
+    session = _session()
+    with (
+        patch.object(
+            reset_mod, "resolve_secrets", return_value={"GH_TOKEN": "ghp_x", "BSKY_PASSWORD": "pw"}
+        ),
+        patch.object(reset_mod, "SpritesClient"),
+        patch.object(reset_mod, "create_session", return_value=session),
+        patch.object(reset_mod, "_preflight_sprite") as preflight,
+        patch.object(reset_mod, "push_season_reset") as push,
+        patch.object(reset_mod, "recreate") as recreate,
+        patch.object(
+            reset_mod, "reset_bluesky", return_value={"unfollowed": 6, "profile": {}}
+        ) as bluesky,
+    ):
+        reset("lou", skip_repo=True, skip_sprite=True)
+    preflight.assert_not_called()
+    push.assert_not_called()
+    recreate.assert_not_called()
+    bluesky.assert_called_once_with(session)

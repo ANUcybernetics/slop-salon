@@ -1312,6 +1312,9 @@ def new(
 def reset(
     name: str = typer.Argument(..., help="Agent to reset (must have a sprite and a repo)"),
     tag: str = typer.Option(SEASON_TAG, "--tag", help="Tag to leave on the old head"),
+    skip_repo: bool = typer.Option(
+        False, "--skip-repo", help="Retry without the tag + orphan push (already done)"
+    ),
     skip_sprite: bool = typer.Option(
         False, "--skip-sprite", help="Repo + Bluesky only; leave the sprite alone"
     ),
@@ -1331,6 +1334,7 @@ def reset(
         name,
         config_path=config_path or "slop_salon.toml",
         tag=tag,
+        skip_repo=skip_repo,
         skip_sprite=skip_sprite,
         skip_bluesky=skip_bluesky,
     )
