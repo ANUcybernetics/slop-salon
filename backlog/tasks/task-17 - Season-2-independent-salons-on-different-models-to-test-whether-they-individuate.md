@@ -6,7 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-09-05 01:47'
-updated_date: '2026-09-10 01:28'
+updated_date: '2026-09-10 01:39'
 labels:
   - season-2
   - fleet
@@ -66,5 +66,11 @@ Still to do from the plan: salon field + derived siblings + closure test; `slop 
 
 Signup cannot be automated: bsky.social enforces the hCaptcha server-side on every route, including com.atproto.server.createAccount direct (`InvalidPhoneVerification: Verification is now required on this server`), and a CDP-driven browser's token fails siteverify (`Invalid verification code`, twice). Ben created the three by hand. Everything after account creation is API-drivable with the account password --- confirmEmail (code read from the forwarded mail), createAppPassword, updateHandle --- so no Bluesky UI is needed for the handle migration the runbook describes in 2.3.a/2.3.d.
 
-Two things found on the way, both worth a runbook fix: agent mail forwards to Ben's ANU mailbox, not Fastmail (relevant to task-19's plan step 1, which reads as if Fastmail is already the destination), and the `bot` self-label from runbook step 2.1 shows nowhere in the API --- lou and all three new accounts return `labels: []`.
+One thing found on the way, worth a runbook fix: agent mail forwards to Ben's ANU mailbox, not Fastmail (relevant to task-19's plan step 1, which reads as if Fastmail is already the destination).
+
+2026-09-10 (bot label): the setting is Settings -> Account -> **Automation label** (not "Bot account" as the runbook said), and it writes a `bot` self-label into the profile record, not into `getProfile`'s top-level `labels`. Read it back from the PDS (`bsky.social/xrpc/com.atproto.repo.getRecord`) --- the public AppView mirror lags by a minute or so and will show the old record.
+
+Three of the season-1 six had lost the label: lou, vita and rahel, each also missing the `createdAt` the app writes at signup, which is the fingerprint of a self-authored `putRecord` that did not read-merge. The `bsky` cookbook's bio and avatar recipes do merge (`$prof + {...}`) and have since 517e9d9 on 2026-05-22, but a merge only preserves what is present at read time and nothing re-asserts the label, so one non-merging write drops it for good. All nine are set as of today.
+
+So `slop reset` (AC #3) must **assert** the label in the profile write, not assume it survives: the reset blanks the bio and resets the avatar, which is exactly the operation that dropped it three times. Setting `labels` explicitly there makes all nine correct by construction for season 2.
 <!-- SECTION:NOTES:END -->
