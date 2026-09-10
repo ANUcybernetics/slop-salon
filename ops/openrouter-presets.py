@@ -45,6 +45,13 @@ PRESETS = {
             ]
         },
     },
+    # The vision-capable V4 Flash (V4 Flash text-only 404s on any image input,
+    # which killed every DeepSeek tick that Read a PNG). DeepInfra and Fireworks
+    # serve it at list price; SiliconFlow, AtlasCloud and Novita charge double.
+    "slop-deepseek-vision": {
+        "model": "deepseek/deepseek-v4-flash-vision-exp",
+        "provider": {"only": ["deepinfra", "fireworks"]},
+    },
     # First-party only.
     "slop-glm-flash": {
         "model": "z-ai/glm-5.3-flash",

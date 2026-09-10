@@ -158,7 +158,7 @@ def test_reset_bluesky_unfollows_every_page_and_rewrites_profile(httpx_mock):
         url=f"{PDS}/xrpc/com.atproto.repo.deleteRecord", json={}, is_reusable=True
     )
     httpx_mock.add_response(
-        url=f"{PDS}/xrpc/app.bsky.feed.getAuthorFeed?actor=did%3Aplc%3Alou&limit=1&filter=posts_no_replies",
+        url=f"{PDS}/xrpc/app.bsky.feed.getAuthorFeed?actor=did%3Aplc%3Alou&limit=30&filter=posts_no_replies",
         json={"feed": [{"post": {"uri": "at://old", "cid": "x", "record": {"text": "old piece"}}}]},
     )
     httpx_mock.add_response(
@@ -221,9 +221,14 @@ def test_reset_bluesky_writes_profile_even_when_none_exists(httpx_mock):
     )
     # Retry case: the newest post already is the marker, so it is pinned, not reposted.
     httpx_mock.add_response(
-        url=f"{PDS}/xrpc/app.bsky.feed.getAuthorFeed?actor=did%3Aplc%3Alou&limit=1&filter=posts_no_replies",
+        url=f"{PDS}/xrpc/app.bsky.feed.getAuthorFeed?actor=did%3Aplc%3Alou&limit=30&filter=posts_no_replies",
+        # The marker is among recent posts but not the newest (the agent has
+        # posted since), so it is pinned, not reposted.
         json={
-            "feed": [{"post": {"uri": "at://marker", "cid": "mk", "record": {"text": MARKER_TEXT}}}]
+            "feed": [
+                {"post": {"uri": "at://newer", "cid": "n", "record": {"text": "a new piece"}}},
+                {"post": {"uri": "at://marker", "cid": "mk", "record": {"text": MARKER_TEXT}}},
+            ]
         },
     )
     httpx_mock.add_response(
@@ -337,6 +342,26 @@ def test_reset_runs_steps_in_order_with_fresh_siblings(reset_config):
     assert "## mina" in files["SIBLINGS.md"]
     assert "No observations yet" in files["SIBLINGS.md"]
     assert files["SOUL.md"] == "# Soul"
+
+
+def test_reset_discard_unpushed_still_refuses_a_running_tick(reset_config):
+    """The relaxed pre-flight drops the unpushed check, never the running-tick one."""
+    with (
+        patch.object(
+            reset_mod, "resolve_secrets", return_value={"GH_TOKEN": "ghp_x", "BSKY_PASSWORD": "pw"}
+        ),
+        patch.object(reset_mod, "SpritesClient") as sprites_class,
+        patch.object(reset_mod, "create_session", return_value=_session()),
+        patch.object(reset_mod, "_preflight_sprite") as strict,
+        patch.object(reset_mod, "push_season_reset") as push,
+        pytest.raises(SystemExit, match="tick is running"),
+    ):
+        sprites = MagicMock()
+        sprites.exec.return_value = MagicMock(stdout="4242\n", stderr="", exit_code=0)
+        sprites_class.return_value = sprites
+        reset("lou", discard_unpushed=True)
+    strict.assert_not_called()
+    push.assert_not_called()
 
 
 def test_reset_fails_before_any_write_when_bluesky_login_fails(reset_config):

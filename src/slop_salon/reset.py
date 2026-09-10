@@ -47,7 +47,7 @@ from .provision import (
 )
 from .recreate import recreate
 from .sprites import SpritesClient
-from .strip_assets import _preflight_sprite
+from .strip_assets import _preflight_sprite, _sprite_sh
 from .tools.bsky import DEFAULT_TIMEOUT, Session, create_session
 
 SEASON_TAG = "season-1"
@@ -162,14 +162,14 @@ BLUESKY_TIMEOUT = 3 * DEFAULT_TIMEOUT
 def post_season_marker(client: httpx.Client, did: str, text: str = MARKER_TEXT) -> dict:
     """Post `text` under the agent's name and return its strong ref.
 
-    Idempotent on retry: if the agent's newest post already is the marker,
-    that one is returned rather than a duplicate posted.
+    Idempotent on retry: if the marker is already among the agent's recent
+    posts, that one is returned rather than a duplicate posted.
     """
     feed = _xrpc(
         client,
         "GET",
         "app.bsky.feed.getAuthorFeed",
-        params={"actor": did, "limit": "1", "filter": "posts_no_replies"},
+        params={"actor": did, "limit": "30", "filter": "posts_no_replies"},
     )
     for item in feed.get("feed") or []:
         post = item.get("post") or {}
@@ -240,6 +240,7 @@ def reset(
     skip_sprite: bool = False,
     skip_bluesky: bool = False,
     marker: bool = True,
+    discard_unpushed: bool = False,
 ) -> None:
     """Reset agent `name` to a fresh season start. See the module docstring.
 
@@ -252,7 +253,9 @@ def reset(
     one that matters: the orphan push is the only step that is not safe to
     repeat once the sprite has cloned it (a second orphan commit would leave
     the sprite on an unrelated history), so a retry after a Bluesky timeout
-    is `--skip-repo --skip-sprite`.
+    is `--skip-repo --skip-sprite`. `discard_unpushed` relaxes the pre-flight
+    for a sprite whose commits never reached GitHub (a false start behind a
+    push that 403'd): a running tick still refuses, unpushed work does not.
     """
     config = load_config(config_path)
     if name not in config.agents:
@@ -290,8 +293,14 @@ def reset(
     if not skip_sprite:
         if not agent.sprite_id:
             raise SystemExit(f"{name} has no sprite_id; use `slop new`, not a reset")
-        print(f"[2/5] Pre-flighting sprite {agent.sprite_id!r} (idle, nothing unpushed)")
-        _preflight_sprite(sprites, agent.sprite_id, f"~/slop-salon-{name}")
+        if discard_unpushed:
+            print(f"[2/5] Pre-flighting sprite {agent.sprite_id!r} (idle; unpushed work discarded)")
+            running = _sprite_sh(sprites, agent.sprite_id, "pgrep -f '[c]laude --print' || true")
+            if running.stdout.strip():
+                raise SystemExit(f"{name}: a tick is running; wait for it before resetting")
+        else:
+            print(f"[2/5] Pre-flighting sprite {agent.sprite_id!r} (idle, nothing unpushed)")
+            _preflight_sprite(sprites, agent.sprite_id, f"~/slop-salon-{name}")
     else:
         print("[2/5] Skipping sprite pre-flight (--skip-sprite)")
 

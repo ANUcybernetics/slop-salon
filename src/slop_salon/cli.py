@@ -1324,6 +1324,9 @@ def reset(
     marker: bool = typer.Option(
         True, "--marker/--no-marker", help="Post and pin a season marker on the profile"
     ),
+    discard_unpushed: bool = typer.Option(
+        False, "--discard-unpushed", help="Reset even if the sprite holds commits not on GitHub"
+    ),
     config_path: str = typer.Option(None, "--config"),
 ):
     """Reset an agent to a fresh season start (see reset.py).
@@ -1341,6 +1344,7 @@ def reset(
         skip_sprite=skip_sprite,
         skip_bluesky=skip_bluesky,
         marker=marker,
+        discard_unpushed=discard_unpushed,
     )
 
 
