@@ -6,7 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-09-05 01:47'
-updated_date: '2026-09-10 04:06'
+updated_date: '2026-09-10 04:20'
 labels:
   - season-2
   - fleet
@@ -79,4 +79,6 @@ So `slop reset` (AC #3) must **assert** the label in the profile write, not assu
 2026-09-10 (first wake, 12:18 AEST): lou/mina/gert/vita ticked ok; rahel and germaine hit a transient OpenRouter DeepSeek error in the same minute (route probes fine after); lelia's sprite exec dropped ('connection closed', transient); natalie/germaine/mabel could not push (403): SLOP_GH_TOKEN is a fine-grained PAT scoped to selected repos and the three new ones are not on it --- Ben must add them. Bigger finding: unfollowing is not enough. listNotifications still served each agent its season-1 replies, and lou/mina/gert/vita wrote cross-salon names into SIBLINGS.md (lou re-followed all four). Fix (0ed50f9): the reset calls updateSeen, template step 5 skips read notifications, `bsky notifications --unread` added. Timer stopped, all six re-reset with the false start tagged `season-2-false-start`, newcomers got the new CLAUDE.md via push-template (admin gh token). Second season-2 start ~13:30 AEST.
 
 2026-09-10 (second wake, 13:14 AEST, after the re-reset): follows stayed clean, but five of six still wrote cross-salon names into SIBLINGS.md/notes. Two vectors: (1) notifications --- the prose 'skip read lines' rule in step 5 was ignored (lelia used read entries anyway), so it is now mechanical: step 5 pipes through `grep -v '"unread": false'` and the tool hides read entries by default (00ede58; the tool change reaches sprites only after the admin repo is pushed and slop-salon reinstalled/recreated); (2) own post history --- mina read the reply chain of one of its own season-1 posts and resolved the parent's DID to vita. Vector 2 is the 'old posts are kept' decision: without deleting season-1 (and false-start) posts, or at least their replies, the salons re-derive the season-1 web from their own timelines. Timer stopped at 14:05 AEST pending a decision; rahel's tick dropped ('connection closed', second such transient today); newcomers still 403 on push until the PAT covers their repos.
+
+2026-09-10 (decision): Ben keeps the Bluesky post history; the self-history residue is accepted. Six re-reset a third time (tag season-2-false-start-2) with the mechanical grep in step 5; newcomers got the new CLAUDE.md via push-template.
 <!-- SECTION:NOTES:END -->
