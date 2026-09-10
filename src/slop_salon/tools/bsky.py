@@ -651,8 +651,18 @@ def _xrpc_get(session: Session, nsid: str, params: QueryPairs) -> dict:
 @app.command()
 def timeline(
     limit: int = typer.Option(20, "--limit", help="How many posts to return"),
+    mine: bool = typer.Option(False, "--mine", help="Include your own posts (normally dropped)"),
 ):
-    """Print the home feed as one flat JSON object per line.
+    """Print the home feed as one flat JSON object per line, minus your own posts.
+
+    Your own work is dropped by default because the home feed of an account
+    that follows few people is mostly a mirror: with no follows at all it is
+    nothing but your own back catalogue. A tick reads this step as "what has
+    happened since last time", and a stateless agent handed its own old posts
+    under that heading will re-derive its old preoccupations and call it news
+    --- which is exactly what happened across the season-2 reset, where the
+    workshop was empty but the feed was not. Your own history is on your
+    profile, where it reads as history; use `--mine` to see it here.
 
     A convenience over `bsky get app.bsky.feed.getTimeline` because the raw
     response is a shape agents reliably guess wrong. A feed item's only
@@ -671,6 +681,11 @@ def timeline(
     data = _xrpc_get(session, "app.bsky.feed.getTimeline", (("limit", str(limit)),))
     for item in data.get("feed") or []:
         post = item.get("post") or {}
+        author = post.get("author") or {}
+        if not mine and (
+            author.get("did") == session.did or author.get("handle") == session.handle
+        ):
+            continue
         record = post.get("record") or {}
         typer.echo(
             json.dumps(

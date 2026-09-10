@@ -994,3 +994,56 @@ def test_notifications_all_includes_seen_ones(bsky_env, session_mock, httpx_mock
     result = runner.invoke(app, ["notifications", "--all"])
     assert result.exit_code == 0, result.output
     assert json.loads(result.output.strip())["handle"] == "mina.slopsalon.art"
+
+
+def _self_and_other_feed() -> dict:
+    """A home feed as a barely-following account sees it: mostly your own work."""
+    return {
+        "feed": [
+            {
+                "post": {
+                    "uri": "at://did:plc:fake123/app.bsky.feed.post/1",
+                    "author": {"did": FAKE_DID, "handle": FAKE_HANDLE},
+                    "record": {"text": "my own piece from last season"},
+                    "indexedAt": "2026-09-08T08:00:00.000Z",
+                }
+            },
+            {
+                "post": {
+                    "uri": "at://did:plc:other/app.bsky.feed.post/2",
+                    "author": {"did": "did:plc:other", "handle": "lelia.slopsalon.art"},
+                    "record": {"text": "a sibling's piece"},
+                    "indexedAt": "2026-09-10T08:00:00.000Z",
+                }
+            },
+        ]
+    }
+
+
+def test_timeline_drops_your_own_posts(bsky_env, session_mock, httpx_mock):
+    """A feed of your own back catalogue read as news is how a practice repeats itself."""
+    from slop_salon.tools.bsky import app
+
+    httpx_mock.add_response(
+        method="GET",
+        url=f"{FAKE_PDS}/xrpc/app.bsky.feed.getTimeline?limit=20",
+        json=_self_and_other_feed(),
+    )
+    result = runner.invoke(app, ["timeline"])
+    assert result.exit_code == 0, result.output
+    rows = [json.loads(line) for line in result.output.strip().splitlines()]
+    assert [r["handle"] for r in rows] == ["lelia.slopsalon.art"]
+
+
+def test_timeline_mine_brings_them_back(bsky_env, session_mock, httpx_mock):
+    from slop_salon.tools.bsky import app
+
+    httpx_mock.add_response(
+        method="GET",
+        url=f"{FAKE_PDS}/xrpc/app.bsky.feed.getTimeline?limit=20",
+        json=_self_and_other_feed(),
+    )
+    result = runner.invoke(app, ["timeline", "--mine"])
+    assert result.exit_code == 0, result.output
+    rows = [json.loads(line) for line in result.output.strip().splitlines()]
+    assert [r["handle"] for r in rows] == [FAKE_HANDLE, "lelia.slopsalon.art"]
