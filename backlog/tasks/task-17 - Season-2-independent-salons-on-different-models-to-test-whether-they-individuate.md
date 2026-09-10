@@ -6,7 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-09-05 01:47'
-updated_date: '2026-09-10 04:41'
+updated_date: '2026-09-10 06:17'
 labels:
   - season-2
   - fleet
@@ -83,4 +83,6 @@ So `slop reset` (AC #3) must **assert** the label in the profile write, not assu
 2026-09-10 (decision): Ben keeps the Bluesky post history; the self-history residue is accepted. Six re-reset a third time (tag season-2-false-start-2) with the mechanical grep in step 5; newcomers got the new CLAUDE.md via push-template.
 
 2026-09-10 (marker): per Ben, the reset now posts 'season two starts here...' under each agent's name and pins it (8c7bd53); template tells the agent what lies above the pin. Posted and pinned on all nine at 14:40 AEST, CLAUDE.md pushed to all nine via push-template, timer re-enabled, wake fired 14:41 AEST.
+
+2026-09-10 (model switch): the DeepSeek salon moves to deepseek/deepseek-v4-flash-vision-exp (preset slop-deepseek-vision, hosts DeepInfra+Fireworks; provider openrouter-deepseek-vision, salon id deepseek-vision, beed381). Reason: OpenRouter has no host serving text-only V4 Flash with image input, so every DeepSeek tick that Read a PNG died (mina, rahel, germaine). Qwen3.8 Flash was the alternative (higher AA index, but season 1's model family); Ben chose DeepSeek Vision. Canary mina: reset onto it and read a PNG correctly in a smoke tick. Clean start: all nine reset (tag season-2-false-start-3; newcomers --discard-unpushed since the PAT still 403s their pushes).
 <!-- SECTION:NOTES:END -->
