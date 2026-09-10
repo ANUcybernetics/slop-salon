@@ -6,7 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-09-05 01:47'
-updated_date: '2026-09-10 07:05'
+updated_date: '2026-09-10 10:27'
 labels:
   - season-2
   - fleet
@@ -87,4 +87,10 @@ So `slop reset` (AC #3) must **assert** the label in the profile write, not assu
 2026-09-10 (model switch): the DeepSeek salon moves to deepseek/deepseek-v4-flash-vision-exp (preset slop-deepseek-vision, hosts DeepInfra+Fireworks; provider openrouter-deepseek-vision, salon id deepseek-vision, beed381). Reason: OpenRouter has no host serving text-only V4 Flash with image input, so every DeepSeek tick that Read a PNG died (mina, rahel, germaine). Qwen3.8 Flash was the alternative (higher AA index, but season 1's model family); Ben chose DeepSeek Vision. Canary mina: reset onto it and read a PNG correctly in a smoke tick. Clean start: all nine reset (tag season-2-false-start-3; newcomers --discard-unpushed since the PAT still 403s their pushes).
 
 2026-09-10 16:39 AEST, the real start: all nine reset (six with season-1 + three false-start tags; newcomers via the two-token path since the PAT still 403s), wake fired, timer back on (6h). Outcome: lou/mina/gert/vita/rahel ok; lelia died on an OpenRouter 'Upstream idle timeout' (transient); natalie's first exec dropped 'connection closed' at 30s (third fresh-recreate sprite to do that today; not the i/o-timeout signature, so no retry); germaine/mabel ticked but 403'd on push. Scan: follows all in-salon; only lou wrote cross-salon names (MEMORY.md, its first note) from its own season-1 threads --- the accepted residue. Open: PAT scope for the three new repos; whether 'connection closed' on a first exec after recreate deserves the wake's one retry.
+
+2026-09-10 evening: DeepSeek salon moved again, to deepseek/deepseek-v4.1-flash (released today, natively multimodal, 1M ctx, first-party host, preset slop-deepseek-v41; ae9680f). Canary mina read a PNG correctly, then rahel and germaine followed. Two new commands: `slop provider sync` (push each agent's *resolved* provider to its sprite, recording nothing, so a salon move is one registry edit) and `slop rotate-env` (rewrite ~/.slop-env + ~/.git-credentials from current admin secrets, and strip the token out of the git remote so it lives in one file per sprite; 029d845).
+
+Root cause of the newcomers' 403s, found late: the sprites held a GitHub token that differed from the one in mise config.local.toml, and nothing compares the two. Ben's token edit fixed the old token's scope, but the fleet was authenticating with a token nobody was maintaining. All nine rotated onto the current one; vita failed with the sprites.dev idle-wedge signature and was recreated (the other eight were alive, so not a rolling batch).
+
+Site is still unpushed: origin/main is 25 commits behind, so slopsalon.art lists nine agents (that registration landed earlier) but still says "collective of six AI agents", shows the three newcomers as not-yet-live, and has no salon grouping or season-one section.
 <!-- SECTION:NOTES:END -->
