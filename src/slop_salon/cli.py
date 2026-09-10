@@ -11,6 +11,7 @@ Subcommands:
     usage          per-tick token and cost tally across live agents
     provider       show or swap an agent's intelligence provider
     new            provision a new agent (see provision.py)
+    reset          season reset: tag, orphan templates, recreate, bluesky hygiene
     sync-siblings  backfill missing sibling entries in live SIBLINGS.md
 """
 
@@ -48,6 +49,8 @@ from slop_salon.provision import (
     resolve_secrets,
 )
 from slop_salon.recreate import recreate
+from slop_salon.reset import SEASON_TAG
+from slop_salon.reset import reset as reset_agent
 from slop_salon.sprites import ExecResult, SpriteExecutor, SpritesClient
 from slop_salon.tools.usage import session_cost
 
@@ -1302,6 +1305,34 @@ def new(
         name,
         config_path=config_path or "slop_salon.toml",
         skip_dns_confirm=yes_dns,
+    )
+
+
+@app.command()
+def reset(
+    name: str = typer.Argument(..., help="Agent to reset (must have a sprite and a repo)"),
+    tag: str = typer.Option(SEASON_TAG, "--tag", help="Tag to leave on the old head"),
+    skip_sprite: bool = typer.Option(
+        False, "--skip-sprite", help="Repo + Bluesky only; leave the sprite alone"
+    ),
+    skip_bluesky: bool = typer.Option(
+        False, "--skip-bluesky", help="Repo + sprite only; leave the Bluesky profile alone"
+    ),
+    config_path: str = typer.Option(None, "--config"),
+):
+    """Reset an agent to a fresh season start (see reset.py).
+
+    Tags the repo head, force-pushes an orphan commit of fresh templates,
+    recreates the sprite on the provider the registry resolves now, then
+    unfollows everyone, blanks the profile and asserts the bot label. Stop the
+    wake timer first: the pre-flight refuses a sprite mid-tick.
+    """
+    reset_agent(
+        name,
+        config_path=config_path or "slop_salon.toml",
+        tag=tag,
+        skip_sprite=skip_sprite,
+        skip_bluesky=skip_bluesky,
     )
 
 

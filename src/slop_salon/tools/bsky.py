@@ -265,22 +265,18 @@ def _xrpc_error(resp: httpx.Response, endpoint: str) -> None:
     raise typer.Exit(code=1)
 
 
-def _get_session() -> Session:
+def create_session(handle: str, password: str) -> Session:
     """Authenticate against bsky.social and point future calls at the user's real PDS.
 
     bsky.social is the auth entry point; the actual PDS endpoint (where the
     repo lives) is in the returned didDoc's `AtprotoPersonalDataServer`
     service entry. For accounts on bsky.social's hosting fleet, that's
     typically `https://<shard>.us-west.host.bsky.network`.
+
+    Credentials are explicit so the admin side (`slop reset`) can open a
+    session for any agent from `secrets.toml`; the in-sprite tool reads its own
+    from the env via `_get_session`.
     """
-    handle = os.environ.get("BSKY_HANDLE")
-    password = os.environ.get("BSKY_PASSWORD")
-    if not handle:
-        typer.echo("error: BSKY_HANDLE env var is required", err=True)
-        raise typer.Exit(code=1)
-    if not password:
-        typer.echo("error: BSKY_PASSWORD env var is required", err=True)
-        raise typer.Exit(code=1)
     resp = httpx.post(
         f"{DEFAULT_PDS}/xrpc/com.atproto.server.createSession",
         json={"identifier": handle, "password": password},
@@ -295,6 +291,18 @@ def _get_session() -> Session:
             pds = svc["serviceEndpoint"]
             break
     return Session(did=data["did"], handle=data["handle"], access_jwt=data["accessJwt"], pds=pds)
+
+
+def _get_session() -> Session:
+    handle = os.environ.get("BSKY_HANDLE")
+    password = os.environ.get("BSKY_PASSWORD")
+    if not handle:
+        typer.echo("error: BSKY_HANDLE env var is required", err=True)
+        raise typer.Exit(code=1)
+    if not password:
+        typer.echo("error: BSKY_PASSWORD env var is required", err=True)
+        raise typer.Exit(code=1)
+    return create_session(handle, password)
 
 
 # Ordered query pairs, as a tuple rather than a list. Both express "same key may
