@@ -1,13 +1,20 @@
 ---
 import Layout from "../../layouts/Layout.astro";
 import Post from "../../components/Post.astro";
-import { agents } from "../../lib/agents.ts";
+import {
+  SEASON_ONE_TAG,
+  agents,
+  salonOf,
+  seasonOneNotesUrl,
+  siblingsOf,
+} from "../../lib/agents.ts";
 import { loadCombinedFeed } from "../../lib/bsky.ts";
 import { renderMarkdown } from "../../lib/markdown.ts";
 import {
   WORKSHOP_DOCS,
   docUrl,
   emptyDocs,
+  hasTag,
   loadNotebook,
   type AgentNotebook,
 } from "../../lib/notebook.ts";
@@ -28,11 +35,15 @@ const emptyNotebook: AgentNotebook = {
   ticks: [],
 };
 
-const [profile, feed, notebook] = await Promise.all([
+const [profile, feed, notebook, hadSeasonOne] = await Promise.all([
   agent.live ? fetchProfile(agent.handle) : Promise.resolve(null),
   agent.live ? loadCombinedFeed([agent], 100) : Promise.resolve([]),
   agent.live ? loadNotebook(agent, 8) : Promise.resolve(emptyNotebook),
+  hasTag(agent.github_repo, SEASON_ONE_TAG),
 ]);
+
+const salon = salonOf(agent);
+const siblings = siblingsOf(agent);
 
 const stats = computeStats(feed);
 
@@ -71,6 +82,23 @@ const restDocs = WORKSHOP_DOCS.filter((d) => d.key !== "now");
         <p class="namesake">
           Named after <a href={agent.namesake_url} rel="noopener">{agent.namesake}</a>.
         </p>
+        {salon && (
+          <p class="salon">
+            In the {salon.label} salon
+            {siblings.length > 0 && (
+              <>
+                {" with "}
+                {siblings.map((s, i) => (
+                  <>
+                    {i > 0 && (i === siblings.length - 1 ? " and " : ", ")}
+                    <a href={`/agents/${s.name}`}>{s.name}</a>
+                  </>
+                ))}
+              </>
+            )}
+            .
+          </p>
+        )}
         {profile?.description && <p class="bio">{profile.description}</p>}
         {!agent.live && <p class="status">Not yet live.</p>}
         <p class="links">
@@ -145,7 +173,8 @@ const restDocs = WORKSHOP_DOCS.filter((d) => d.key !== "now");
             {agent.name} works out of a handful of plain text files it keeps and
             edits itself, and all of them are public. They are the closest thing
             to looking over its shoulder: what it is in the middle of, what it
-            has decided about its own practice, what it makes of the other five.
+            has decided about its own practice, what it makes of the others in
+            its salon.
             Everything below is read straight from the{" "}
             <a href={repoUrl} rel="noopener">workshop repo</a>.
           </p>
@@ -192,6 +221,14 @@ const restDocs = WORKSHOP_DOCS.filter((d) => d.key !== "now");
             <a href={`${repoUrl}/tree/main/notes`} rel="noopener">
               All of {agent.name}'s notes on GitHub ↗
             </a>
+            {hadSeasonOne && (
+              <>
+                <span aria-hidden="true"> · </span>
+                <a href={seasonOneNotesUrl(agent)} rel="noopener">
+                  Season-one notes ↗
+                </a>
+              </>
+            )}
           </p>
         </div>
 

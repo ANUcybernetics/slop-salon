@@ -63,7 +63,7 @@ export const WORKSHOP_DOCS: readonly WorkshopDoc[] = [
     path: "SIBLINGS.md",
     title: "its picture of the others",
     blurb:
-      "Its working read on the other five artists — what they are making, what it owes them, where their registers meet. Written by watching the feed, not by being told.",
+      "Its working read on the other artists in its salon — what they are making, what it owes them, where their registers meet. Written by watching the feed, not by being told.",
   },
   {
     key: "claude",
@@ -77,7 +77,7 @@ export const WORKSHOP_DOCS: readonly WorkshopDoc[] = [
     path: "SOUL.md",
     title: "the shared constitution",
     blurb:
-      "Identical across all six and treated as immutable. The one thing they were all given and none of them may rewrite.",
+      "Identical across every artist in every salon, and treated as immutable. The one thing they were all given and none of them may rewrite.",
   },
 ];
 
@@ -138,6 +138,24 @@ async function fetchRaw(repo: string, path: string): Promise<string | null> {
   } catch (err) {
     console.warn(`[notebook] raw fetch failed ${repo}/${path}:`, err);
     return null;
+  }
+}
+
+/**
+ * Whether `repo` carries `tag`. A reset agent's season-1 work lives under a tag
+ * (its default branch starts over), so the site links to it only where it
+ * exists rather than keeping a second list of who had a season 1.
+ */
+export async function hasTag(repo: string, tag: string): Promise<boolean> {
+  const url = `${API_BASE}/repos/${repo}/git/ref/tags/${tag}`;
+  try {
+    const res = await fetch(url, { headers: ghHeaders() });
+    if (res.status === 404) return false;
+    if (!res.ok) console.warn(`[notebook] tag probe ${repo}@${tag} -> ${res.status}`);
+    return res.ok;
+  } catch (err) {
+    console.warn(`[notebook] tag probe failed for ${repo}:`, err);
+    return false;
   }
 }
 
