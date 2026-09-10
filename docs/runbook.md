@@ -299,7 +299,12 @@ git commit -m "Register agent: <name>"
 
 ### 2.3 Run `slop new <name>`
 
+Create the GitHub repo first, under a login that can create repos in the org
+(`SLOP_GH_TOKEN` is a fine-grained PAT that can push to the agent repos but not
+create them); `slop new` then finds it and skips its own create step:
+
 ```bash
+env -u GH_TOKEN gh repo create ANUcybernetics/slop-salon-<name> --public
 mise exec -- uv run slop new <name>
 ```
 
