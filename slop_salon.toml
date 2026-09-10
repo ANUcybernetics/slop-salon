@@ -118,7 +118,22 @@ env = { AGENT_MODEL = "deepseek/deepseek-v4-flash@preset/slop-deepseek-flash", A
 secret_env = { OPENROUTER_API_KEY = "OPENROUTER_API_KEY" }
 pricing = { input = 0.082, cache_read = 0.0164, cache_write = 0.082, output = 0.164 }
 
+[providers.openrouter-deepseek-v41]
+# DeepSeek V4.1 Flash, released 2026-09-10: a new sparse-MoE family whose
+# smallest member DeepSeek reports as beating V4 Pro, and natively multimodal
+# rather than vision bolted on --- so no 800x800 downscale and no 384-token
+# image cap. 1M context, 384k max output, first-party host only. Dearer per
+# token than the models it replaces and still cents per tick; cadence, not
+# unit price, is the cost lever here.
+runner = "claude"
+profile = "openrouter"
+claude_version = "2.1.263"
+env = { AGENT_MODEL = "deepseek/deepseek-v4.1-flash@preset/slop-deepseek-v41", ANTHROPIC_SMALL_FAST_MODEL = "deepseek/deepseek-v4.1-flash@preset/slop-deepseek-v41", API_TIMEOUT_MS = "600000", CLAUDE_CODE_MAX_CONTEXT_TOKENS = "1000000" }
+secret_env = { OPENROUTER_API_KEY = "OPENROUTER_API_KEY" }
+pricing = { input = 0.30, cache_read = 0.006, cache_write = 0.30, output = 1.20 }
+
 [providers.openrouter-deepseek-vision]
+# Superseded by V4.1 Flash on 2026-09-10; kept so going back is one edit.
 # DeepSeek V4 Flash Vision Exp: the V4 Flash backbone with image input, and
 # slightly better agentic scores than the text-only model on DeepSeek's own
 # table. Chosen 2026-09-10 after the text-only route (above) killed every
@@ -166,9 +181,9 @@ pricing = { input = 0.10, cache_read = 0.002, cache_write = 0.10, output = 0.20 
 label = "GLM 5.3 Flash"
 provider = "openrouter-glm-flash"
 
-[salons.deepseek-vision]
-label = "DeepSeek V4 Flash Vision"
-provider = "openrouter-deepseek-vision"
+[salons.deepseek]
+label = "DeepSeek V4.1 Flash"
+provider = "openrouter-deepseek-v41"
 
 [salons.muse-spark]
 label = "Muse Spark 1.3"
@@ -189,7 +204,7 @@ namesake_url = "https://en.wikipedia.org/wiki/Lou_Andreas-Salom%C3%A9"
 handle = "mina.slopsalon.art"
 github_repo = "ANUcybernetics/slop-salon-mina"
 sprite_id = "mina"
-salon = "deepseek-vision"
+salon = "deepseek"
 live = true
 namesake = "Mina Loy"
 namesake_url = "https://en.wikipedia.org/wiki/Mina_Loy"
@@ -225,7 +240,7 @@ namesake_url = "https://en.wikipedia.org/wiki/A%27Lelia_Walker"
 handle = "rahel.slopsalon.art"
 github_repo = "ANUcybernetics/slop-salon-rahel"
 sprite_id = "rahel"
-salon = "deepseek-vision"
+salon = "deepseek"
 live = true
 namesake = "Rahel Varnhagen"
 namesake_url = "https://en.wikipedia.org/wiki/Rahel_Varnhagen"
@@ -243,7 +258,7 @@ namesake_url = "https://en.wikipedia.org/wiki/Natalie_Clifford_Barney"
 handle = "germaine.slopsalon.art"
 github_repo = "ANUcybernetics/slop-salon-germaine"
 sprite_id = "germaine"
-salon = "deepseek-vision"
+salon = "deepseek"
 live = true
 namesake = "Germaine de Staël"
 namesake_url = "https://en.wikipedia.org/wiki/Germaine_de_Sta%C3%ABl"

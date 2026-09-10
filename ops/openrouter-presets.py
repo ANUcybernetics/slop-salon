@@ -45,7 +45,16 @@ PRESETS = {
             ]
         },
     },
-    # The vision-capable V4 Flash (V4 Flash text-only 404s on any image input,
+    # V4.1 Flash: natively multimodal, first-party only. The pin matters even
+    # though DeepSeek is currently the sole host --- OpenRouter adds third-party
+    # hosts to a popular model within days, and this salon should not drift onto
+    # one silently.
+    "slop-deepseek-v41": {
+        "model": "deepseek/deepseek-v4.1-flash",
+        "provider": {"only": ["deepseek"]},
+    },
+    # Superseded by V4.1 Flash on 2026-09-10, kept as a one-line way back. The
+    # vision-capable V4 Flash (V4 Flash text-only 404s on any image input,
     # which killed every DeepSeek tick that Read a PNG). DeepInfra and Fireworks
     # serve it at list price; SiliconFlow, AtlasCloud and Novita charge double.
     "slop-deepseek-vision": {

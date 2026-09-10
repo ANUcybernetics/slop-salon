@@ -9,7 +9,7 @@ Subcommands:
     talk           one-shot stateless prompt to an agent
     wake           fire a tick at every live agent in parallel
     usage          per-tick token and cost tally across live agents
-    provider       show or swap an agent's intelligence provider
+    provider       show, swap, or sync agents' intelligence providers
     new            provision a new agent (see provision.py)
     reset          season reset: tag, orphan templates, recreate, bluesky hygiene
     sync-siblings  backfill missing sibling entries in live SIBLINGS.md
@@ -1145,6 +1145,68 @@ def provider_set(
             failed.append(agent.name)
             continue
         save_provider(config, agent.name, provider_id)
+
+    if failed:
+        typer.echo(f"\nfailed: {', '.join(failed)}", err=True)
+        raise typer.Exit(code=1)
+    typer.echo("\nDone. Takes effect on each agent's next tick.")
+
+
+@provider_app.command("sync")
+def provider_sync(
+    name: str = typer.Argument(None, help="Agent name; omit or 'all' for every live agent"),
+    config_path: str = typer.Option(None, "--config"),
+):
+    """Push each agent's *resolved* provider to its sprite, recording nothing.
+
+    `provider set` moves one agent off what the registry says; this makes
+    sprites match what it already says --- after a salon's `provider` changes,
+    or after a provider block's env does. Because it writes nothing back,
+    moving a whole salon onto a new model stays one edit in the registry rather
+    than three per-agent overrides that then have to be unpicked.
+
+    Takes one agent so a model swap can be canaried before the rest of its
+    salon follows.
+    """
+    config = _config(config_path)
+    if name in (None, "all"):
+        targets = [a for a in config.agents.values() if a.live and a.sprite_id]
+    elif name in config.agents:
+        targets = [config.agents[name]]
+    else:
+        typer.echo(f"error: unknown agent {name!r}", err=True)
+        raise typer.Exit(code=1)
+    if not targets:
+        typer.echo("no matching agents with a sprite", err=True)
+        raise typer.Exit(code=1)
+
+    # Resolve every target before touching any sprite: either all of them can
+    # be synced or none should be, so a missing token cannot leave a salon
+    # split across two models mid-command.
+    plans: dict[str, list[tuple[str, str]]] = {}
+    try:
+        for agent in targets:
+            provider = config.provider_for(agent.name)
+            if provider.name not in plans:
+                plans[provider.name] = provider_steps(provider)
+    except (RuntimeError, ValueError) as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    sprites = SpritesClient()
+    failed = []
+    for agent in targets:
+        provider = config.provider_for(agent.name)
+        typer.echo(f"{agent.name} -> {provider.name}")
+        try:
+            for label, command in plans[provider.name]:
+                result = sprites.exec(agent.sprite_id, ["bash", "-lc", command])
+                if result.exit_code != 0:
+                    raise RuntimeError(f"{label} failed (exit={result.exit_code}): {result.stderr}")
+                typer.echo(f"  ok: {label}")
+        except Exception as exc:  # noqa: BLE001
+            typer.echo(f"  FAILED: {exc}", err=True)
+            failed.append(agent.name)
 
     if failed:
         typer.echo(f"\nfailed: {', '.join(failed)}", err=True)

@@ -966,3 +966,112 @@ def test_p95_never_falls_below_the_median(n, expected_index):
     med = costs[len(costs) // 2]
     assert p95 == costs[expected_index]
     assert p95 >= med
+
+
+@pytest.fixture
+def salon_config(tmp_path, monkeypatch):
+    """Two salons on two providers, plus one agent holding an override."""
+    cfg = tmp_path / "slop_salon.toml"
+    cfg.write_text(
+        """
+[providers.new-model]
+runner = "claude"
+profile = "openrouter"
+env = { AGENT_MODEL = "vendor/new" }
+secret_env = { OPENROUTER_API_KEY = "TEST_OR_KEY" }
+
+[providers.old-model]
+runner = "claude"
+profile = "openrouter"
+env = { AGENT_MODEL = "vendor/old" }
+secret_env = { OPENROUTER_API_KEY = "TEST_OR_KEY" }
+
+[salons.alpha]
+provider = "new-model"
+
+[agents.lou]
+handle = "lou.slopsalon.art"
+github_repo = "ANUcybernetics/slop-salon-lou"
+sprite_id = "spr_lou"
+salon = "alpha"
+live = true
+
+[agents.mina]
+# Held back on the old model; sync must respect this, not overwrite it.
+provider = "old-model"
+handle = "mina.slopsalon.art"
+github_repo = "ANUcybernetics/slop-salon-mina"
+sprite_id = "spr_mina"
+salon = "alpha"
+live = true
+"""
+    )
+    dispatcher = tmp_path / "agent-run"
+    dispatcher.write_text("#!/usr/bin/env python3\n")
+    profiles = tmp_path / "profiles.toml"
+    profiles.write_text("version = 1\n")
+    monkeypatch.setenv("SLOP_AGENT_RUN_SOURCE", str(dispatcher))
+    monkeypatch.setenv("SLOP_AGENT_RUN_PROFILES_SOURCE", str(profiles))
+    monkeypatch.setenv("TEST_OR_KEY", "not-a-real-key")
+    monkeypatch.chdir(tmp_path)
+    return cfg
+
+
+def _synced_models(instance) -> dict[str, str]:
+    """{sprite_id: AGENT_MODEL} from the base64 provider-file writes it was given."""
+    import base64
+    import re
+
+    out = {}
+    for call in instance.exec.call_args_list:
+        sprite_id, command = call[0][0], call[0][1][-1]
+        if "~/.slop-provider" not in command:
+            continue
+        blob = re.search(r"echo (\S+) \| base64 -d", command)
+        assert blob, command
+        body = base64.b64decode(blob.group(1)).decode()
+        model = re.search(r"AGENT_MODEL='?([^'\n]+)", body)
+        assert model, body
+        out[sprite_id] = model.group(1)
+    return out
+
+
+def test_provider_sync_pushes_the_resolved_provider_and_records_nothing(salon_config):
+    """A salon moved onto a new model needs one registry edit, not per-agent overrides."""
+    before = salon_config.read_text()
+    with patch("slop_salon.cli.SpritesClient") as mock_class:
+        instance = MagicMock()
+        instance.exec.return_value = ExecResult(stdout="", stderr="", exit_code=0)
+        mock_class.return_value = instance
+
+        result = runner.invoke(app, ["provider", "sync"])
+
+    assert result.exit_code == 0, result.output
+    # lou takes the salon's provider; mina's own override still wins.
+    assert _synced_models(instance) == {"spr_lou": "vendor/new", "spr_mina": "vendor/old"}
+    assert salon_config.read_text() == before
+
+
+def test_provider_sync_takes_one_agent_so_a_swap_can_be_canaried(salon_config):
+    with patch("slop_salon.cli.SpritesClient") as mock_class:
+        instance = MagicMock()
+        instance.exec.return_value = ExecResult(stdout="", stderr="", exit_code=0)
+        mock_class.return_value = instance
+
+        result = runner.invoke(app, ["provider", "sync", "lou"])
+
+    assert result.exit_code == 0, result.output
+    assert _synced_models(instance) == {"spr_lou": "vendor/new"}
+
+
+def test_provider_sync_touches_no_sprite_when_a_secret_is_missing(salon_config, monkeypatch):
+    """Resolve-then-apply: a half-synced salon would be two models, not one."""
+    monkeypatch.delenv("TEST_OR_KEY")
+    with patch("slop_salon.cli.SpritesClient") as mock_class:
+        instance = MagicMock()
+        mock_class.return_value = instance
+
+        result = runner.invoke(app, ["provider", "sync"])
+
+    assert result.exit_code == 1
+    instance.exec.assert_not_called()
