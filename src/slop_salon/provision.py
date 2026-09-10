@@ -535,11 +535,18 @@ def provision_agent(
     siblings = [(s, config.agents[s].handle) for s in agent.siblings if s in config.agents]
     templates_dir = Path(templates_dir)
 
+    # Repo creation runs as the admin box's own `gh` login, not the slop token:
+    # that token is scoped to push to the agent repos and cannot create one in
+    # the org (`Resource not accessible by personal access token`). Everything
+    # after this --- the template push, the sprite's clone and pushes --- uses
+    # the token, which is why creating the repo here and pushing to it are two
+    # different credentials on purpose.
+    gh_env = {k: v for k, v in os.environ.items() if k != "GH_TOKEN"}
     repo_exists = (
         subprocess.run(
             ["gh", "repo", "view", agent.github_repo, "--json", "name"],
             capture_output=True,
-            env={**os.environ, "GH_TOKEN": gh_token},
+            env=gh_env,
         ).returncode
         == 0
     )
@@ -550,7 +557,7 @@ def provision_agent(
         subprocess.run(
             ["gh", "repo", "create", agent.github_repo, "--public"],
             check=True,
-            env={**os.environ, "GH_TOKEN": gh_token},
+            env=gh_env,
         )
 
     typer.echo("[2/13] Pushing templates as initial commit")

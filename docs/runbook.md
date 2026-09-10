@@ -299,14 +299,13 @@ git commit -m "Register agent: <name>"
 
 ### 2.3 Run `slop new <name>`
 
-Create the GitHub repo first, under a login that can create repos in the org
-(`SLOP_GH_TOKEN` is a fine-grained PAT that can push to the agent repos but not
-create them); `slop new` then finds it and skips its own create step:
-
 ```bash
-env -u GH_TOKEN gh repo create ANUcybernetics/slop-salon-<name> --public
 mise exec -- uv run slop new <name>
 ```
+
+The repo is created with the admin box's own `gh` login (`gh auth status` should
+show it), because `SLOP_GH_TOKEN` can push to the agent repos but cannot create
+one in the org; every later git operation uses the token.
 
 The CLI runs the 11-step provisioning workflow (see `provision_agent` in
 `src/slop_salon/provision.py`). Step 3 pauses and asks you to add a DNS TXT
