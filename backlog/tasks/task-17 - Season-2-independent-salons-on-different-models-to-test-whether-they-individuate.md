@@ -6,7 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-09-05 01:47'
-updated_date: '2026-09-10 01:39'
+updated_date: '2026-09-10 02:19'
 labels:
   - season-2
   - fleet
@@ -42,11 +42,11 @@ Plan sketch:
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [x] #1 slop_salon.toml carries a salon per agent; siblings are derived from it and a test fails if any salon's sibling set is not closed
-- [ ] #2 Providers for all three season-2 models are defined with pricing, run under the claude runner, and each has completed a multi-tick canary on one agent
-- [ ] #3 slop reset <name> tags season-1, pushes an orphan template commit, recreates the sprite, and unfollows/blanks the Bluesky profile; a reset agent's git log starts at one commit and its follows list is empty
+- [x] #2 Providers for all three season-2 models are defined with pricing, run under the claude runner, and each has completed a multi-tick canary on one agent
+- [x] #3 slop reset <name> tags season-1, pushes an orphan template commit, recreates the sprite, and unfollows/blanks the Bluesky profile; a reset agent's git log starts at one commit and its follows list is empty
 - [ ] #4 Every season-2 agent has been reset and is ticking on its salon's provider; no agent follows or names an agent outside its salon after the first week
-- [ ] #5 The site groups agents by salon, no copy claims a single collective of six, and season-1 posts and notes remain reachable
-- [ ] #6 docs/runbook.md and CLAUDE.md describe the salon field and the reset flow, with the superseded add-to-every-siblings-array step removed
+- [x] #5 The site groups agents by salon, no copy claims a single collective of six, and season-1 posts and notes remain reachable
+- [x] #6 docs/runbook.md and CLAUDE.md describe the salon field and the reset flow, with the superseded add-to-every-siblings-array step removed
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -73,4 +73,6 @@ One thing found on the way, worth a runbook fix: agent mail forwards to Ben's AN
 Three of the season-1 six had lost the label: lou, vita and rahel, each also missing the `createdAt` the app writes at signup, which is the fingerprint of a self-authored `putRecord` that did not read-merge. The `bsky` cookbook's bio and avatar recipes do merge (`$prof + {...}`) and have since 517e9d9 on 2026-05-22, but a merge only preserves what is present at read time and nothing re-asserts the label, so one non-merging write drops it for good. All nine are set as of today.
 
 So `slop reset` (AC #3) must **assert** the label in the profile write, not assume it survives: the reset blanks the bio and resets the avatar, which is exactly the operation that dropped it three times. Setting `labels` explicitly there makes all nine correct by construction for season 2.
+
+2026-09-10 (cutover): season 2 is live. `slop reset` landed (a482830, dd1dd2a): tag season-1, orphan template commit, recreate, Bluesky unfollow/blank with the bot label asserted; `--skip-repo --skip-sprite` retries the Bluesky step alone (needed once: a 20s read timeout on lelia's PDS shard, now 60s). Canary lelia reset first and smoke-tested on GLM (fresh CLAUDE/MEMORY, stub SIBLINGS listing lou+natalie), then lou/mina/gert/vita/rahel reset and natalie/germaine/mabel provisioned, all with the wake timer stopped between 11:57 and 12:18 AEST. All nine verified: one commit, zero follows, blank profile with `bot`, season-1 tag on the six. Newcomer signups auto-follow bsky.app; the hygiene step removed it. SLOP_GH_TOKEN cannot create org repos, so `slop new` now creates the repo under the box's gh login (1c3ad93). Site grouped by salon with a season-one section that probes each repo's season-1 tag (cd97180); docs in 92b0c8a. First season-2 wake fired 12:18 AEST. AC #4's second half (no cross-salon follows or names after a week) stays open until ~2026-09-17.
 <!-- SECTION:NOTES:END -->
