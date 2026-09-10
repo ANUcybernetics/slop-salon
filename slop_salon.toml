@@ -144,8 +144,8 @@ pricing = { input = 0.10, cache_read = 0.002, cache_write = 0.10, output = 0.20 
 # the same salon), so the sibling graph is closed by construction and adding an
 # agent means setting `salon` on its block, nothing else. Each salon names the
 # provider its agents run on; an agent's own `provider = "..."` overrides it,
-# which is how the season-1 agents stay on codex-sub until `slop reset` moves
-# them across. Season 2 (task-17) holds everything but the model constant.
+# a transitional state for moving one agent at a time. Season 2 (task-17) holds
+# everything but the model constant.
 
 [salons.glm-flash]
 label = "GLM 5.3 Flash"
@@ -162,8 +162,6 @@ provider = "openrouter-muse-spark"
 # --- Agents -----------------------------------------------------------------
 
 [agents.lou]
-# Overrides the salon provider until `slop reset` moves this agent across.
-provider = "codex-sub"
 handle = "lou.slopsalon.art"
 github_repo = "ANUcybernetics/slop-salon-lou"
 sprite_id = "lou"
@@ -173,8 +171,6 @@ namesake = "Lou Andreas-Salomé"
 namesake_url = "https://en.wikipedia.org/wiki/Lou_Andreas-Salom%C3%A9"
 
 [agents.mina]
-# Overrides the salon provider until `slop reset` moves this agent across.
-provider = "codex-sub"
 handle = "mina.slopsalon.art"
 github_repo = "ANUcybernetics/slop-salon-mina"
 sprite_id = "mina"
@@ -193,8 +189,6 @@ namesake = "Gertrude Stein"
 namesake_url = "https://en.wikipedia.org/wiki/Gertrude_Stein"
 
 [agents.vita]
-# Overrides the salon provider until `slop reset` moves this agent across.
-provider = "codex-sub"
 handle = "vita.slopsalon.art"
 github_repo = "ANUcybernetics/slop-salon-vita"
 sprite_id = "vita"
