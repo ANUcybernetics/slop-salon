@@ -319,8 +319,8 @@ declared in `[salons.<id>]` blocks in `slop_salon.toml` and joined by
 agent in the same salon, in registry order --- never listed; the loader rejects
 a literal `siblings` list, and `test_registry_salons_are_closed` fails on any
 config whose sibling graph leaves a salon. Season 2 (task-17) runs three salons
-on three models with everything else held constant, so the salon's `provider`
-is the one experimental variable and an agent-level `provider` override is a
+on three models with everything else held constant, so the salon's `provider` is
+the one experimental variable and an agent-level `provider` override is a
 transitional state, not a steady one.
 
 ## Providers
@@ -347,19 +347,20 @@ verbatim into the public JS bundle.
 Seven providers are defined. `vllm` is the self-hosted **Qwen3.6-35B-A3B** ---
 sparse-MoE, FP8-quantised --- on cybersonic (see below), retained but inactive.
 `deepseek` is DeepSeek V4-Flash direct, which serves Anthropic wire format at
-`https://api.deepseek.com/anthropic`: a dispatcher-profile swap, ~$0.14/M input
-on a cache miss and ~$0.0028/M on a hit, with a 1M context. `claude-sub` and
-`codex-sub` are the subscription paths. The three `openrouter-*` providers are
-season 2's salons (task-17): DeepSeek V4 Flash, GLM 5.3 Flash and Muse Spark
-1.3, each a different model behind the same `claude` runner, the same
-`openrouter` dispatcher profile, one `OPENROUTER_API_KEY` and one claude pin,
-so the model is the only variable. The comment block above them in
-`slop_salon.toml` carries the non-obvious parts (the context-window override,
+`https://api.deepseek.com/anthropic`: a dispatcher-profile swap,
+~$0.14/M input
+on a cache miss and ~$0.0028/M on a hit, with a 1M context.
+`claude-sub` and `codex-sub` are the subscription paths. The three
+`openrouter-*` providers are season 2's salons (task-17): DeepSeek V4 Flash, GLM
+5.3 Flash and Muse Spark 1.3, each a different model behind the same `claude`
+runner, the same `openrouter` dispatcher profile, one `OPENROUTER_API_KEY` and
+one claude pin, so the model is the only variable. The comment block above them
+in `slop_salon.toml` carries the non-obvious parts (the context-window override,
 host pinning, the contributor tier's account gate).
 
 **`codex-sub` is the default since 2026-09-03**, running GPT-5.6-Luna on the ANU
 ChatGPT Team seat, after DeepSeek's balance ran out and every tick 402'd for a
-day. What matters about the *default*, as opposed to the six agent blocks, is
+day. What matters about the _default_, as opposed to the six agent blocks, is
 that it is what a fresh provision or a heal's recreate reaches for --- leaving
 it pointed at a dead endpoint is how a recreated sprite comes back broken.
 
@@ -368,11 +369,11 @@ calls, 62k new input tokens against 1.85M cache reads --- a **96.7% cache hit
 rate** --- and 19k output, for
 **$0.019 a tick**. At the 6-hourly cadence's 24 ticks/day that is ~$0.46/day,
 ~$14/month --- the figure here was once ~270 ticks/day, from the 30-minute
-cadence, and outlived it.
-The uncached arithmetic in task-16 put the same workload an order of magnitude
-higher; prefix caching is the whole difference, and it is invisible on vLLM
-because vLLM reports no cache fields at all. A non-zero `cache_rd` in
-`slop usage` is therefore the first hard proof a swap off vLLM actually took.
+cadence, and outlived it. The uncached arithmetic in task-16 put the same
+workload an order of magnitude higher; prefix caching is the whole difference,
+and it is invisible on vLLM because vLLM reports no cache fields at all. A
+non-zero `cache_rd` in `slop usage` is therefore the first hard proof a swap off
+vLLM actually took.
 
 **The env file is split in two.** `~/.slop-env` holds identity and durable
 secrets (`AGENT_NAME`, `GH_TOKEN`, `BSKY_*`, `REPLICATE_API_TOKEN`); the new
@@ -401,9 +402,9 @@ rather than more env vars. Three differences, none of them worked around:
   also carry `rate_limits.primary.used_percent`, which measures the "can one
   subscription carry six agents" question directly instead of by arithmetic.
 
-**Sharing one OAuth profile across sprites is per-provider, and opted into
-after testing** (`credentials_shareable`). Refresh tokens usually rotate on use,
-and a provider that revokes the old one on rotation would have its sprites
+**Sharing one OAuth profile across sprites is per-provider, and opted into after
+testing** (`credentials_shareable`). Refresh tokens usually rotate on use, and a
+provider that revokes the old one on rotation would have its sprites
 deauthenticate each other, so `slop provider set` refuses to put more than one
 agent on a subscription provider that has not set the flag.
 
