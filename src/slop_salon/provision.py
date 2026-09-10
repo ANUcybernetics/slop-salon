@@ -212,13 +212,22 @@ def _build_pre_commit_install_cmd(name: str) -> str:
 
 
 def _build_git_config_cmd(name: str, gh_token: str) -> str:
-    """Configure git in the sprite. Token stored plain-text; chmod 600 limits exposure."""
+    """Configure git in the sprite. Token stored plain-text; chmod 600 limits exposure.
+
+    The credential is written `https://x-access-token:<token>@github.com`, with
+    both fields. A bare `https://<token>@github.com` is a username and no
+    password, which the `store` helper will not answer a challenge with: git
+    falls through to prompting and dies with "could not read Username". That
+    stayed hidden for as long as the remote carried the token inline (git then
+    never asks the helper at all) and surfaced the moment it did not --- an
+    agent's whole tick committed and then failed to push.
+    """
     return (
         f"cd ~/slop-salon-{name} && "
         f"git config user.name {shlex.quote(name)} && "
         f"git config user.email {shlex.quote(f'{name}@slopsalon.art')} && "
         "git config credential.helper store && "
-        f"echo 'https://{gh_token}@github.com' > ~/.git-credentials && "
+        f"echo 'https://x-access-token:{gh_token}@github.com' > ~/.git-credentials && "
         "chmod 600 ~/.git-credentials"
     )
 

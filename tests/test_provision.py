@@ -187,8 +187,11 @@ def test_git_config_cmd_chmods_credentials():
 
     cmd = _build_git_config_cmd("lou", "ghp_secret")
     assert "git config user.name" in cmd
-    assert "ghp_secret@github.com" in cmd
     assert "chmod 600 ~/.git-credentials" in cmd
+    # Both fields: a username-only credential cannot answer a push challenge,
+    # so git prompts and the tick's work never leaves the sprite.
+    assert "https://x-access-token:ghp_secret@github.com" in cmd
+    assert "git config credential.helper store" in cmd
 
 
 def test_write_env_file_cmd_encodes_safely_and_chmods_600():

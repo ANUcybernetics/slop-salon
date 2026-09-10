@@ -1117,7 +1117,10 @@ def test_rotate_env_rewrites_secrets_and_leaves_the_token_in_one_place(salon_con
     assert "export AGENT_NAME=lou" in body
 
     commands = _exec_commands(instance)
-    assert any("~/.git-credentials" in c and "ghp_rotated" in c for c in commands)
+    assert any(
+        "~/.git-credentials" in c and "https://x-access-token:ghp_rotated@github.com" in c
+        for c in commands
+    )
     # origin loses its inline token, so the next rotation is one file, not two.
     (remote,) = [c for c in commands if "remote set-url" in c]
     assert "https://github.com/ANUcybernetics/slop-salon-lou.git" in remote
