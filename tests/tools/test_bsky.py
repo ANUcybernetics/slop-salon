@@ -939,3 +939,35 @@ def test_notifications_flattens_top_level_author(bsky_env, session_mock, httpx_m
     assert row["reason"] == "reply"
     assert row["text"] == "is there a wound to close"
     assert row["unread"] is True
+
+
+def test_notifications_unread_drops_seen_ones(bsky_env, session_mock, httpx_mock):
+    """A reset marks the old season seen; --unread is how a tick sees only this one."""
+    from slop_salon.tools.bsky import app
+
+    httpx_mock.add_response(
+        method="GET",
+        url=f"{FAKE_PDS}/xrpc/app.bsky.notification.listNotifications?limit=20",
+        json={
+            "notifications": [
+                {
+                    "uri": "at://did:plc:ccc/app.bsky.feed.post/9",
+                    "reason": "reply",
+                    "isRead": True,
+                    "author": {"handle": "mina.slopsalon.art"},
+                    "record": {"text": "from last season"},
+                },
+                {
+                    "uri": "at://did:plc:ddd/app.bsky.feed.post/10",
+                    "reason": "reply",
+                    "isRead": False,
+                    "author": {"handle": "lelia.slopsalon.art"},
+                    "record": {"text": "from this one"},
+                },
+            ]
+        },
+    )
+    result = runner.invoke(app, ["notifications", "--unread"])
+    assert result.exit_code == 0, result.output
+    rows = [json.loads(line) for line in result.output.strip().splitlines()]
+    assert [r["handle"] for r in rows] == ["lelia.slopsalon.art"]

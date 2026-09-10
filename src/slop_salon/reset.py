@@ -13,16 +13,23 @@ starts from commit one again on a different model. Four moves, in order:
 3. recreate the sprite via the ordinary recreate path (which clones that
    branch and installs whatever provider the registry now resolves for it);
 4. Bluesky hygiene from the admin box: unfollow everyone, blank the bio, drop
-   the avatar, and **assert** the `bot` self-label.
+   the avatar, **assert** the `bot` self-label, and mark every notification
+   seen.
 
-The unfollow is the step that matters most for the experiment: without it every
-salon's timeline is cross-contaminated on tick one. The label is asserted, not
-merged, because the exact operation this performs (a profile write) is how three
-season-1 agents lost theirs.
+The unfollow and the seen-mark are the steps that matter most for the
+experiment: without them every salon is cross-contaminated on tick one. The
+first season-2 wake proved the second one --- follows were empty, but
+`listNotifications` still served each agent its season-1 replies, and four of
+six copied those names straight into SIBLINGS.md. Nothing deletes
+notifications; `updateSeen` makes the old ones `isRead`, and the tick routine
+reads only unread ones from then on. The label is asserted, not merged, because
+the exact operation this performs (a profile write) is how three season-1
+agents lost theirs.
 """
 
 from __future__ import annotations
 
+import datetime as dt
 import subprocess
 import tempfile
 from pathlib import Path
@@ -145,8 +152,9 @@ def list_follow_rkeys(client: httpx.Client, did: str) -> list[str]:
 BLUESKY_TIMEOUT = 3 * DEFAULT_TIMEOUT
 
 
-def reset_bluesky(session: Session) -> dict[str, int | dict]:
-    """Unfollow everyone and rewrite the profile as `build_reset_profile`."""
+def reset_bluesky(session: Session) -> dict[str, int | str | dict]:
+    """Unfollow everyone, rewrite the profile as `build_reset_profile`, and
+    mark every notification seen so the routine's unread filter starts now."""
     with httpx.Client(
         base_url=session.pds, headers=session.auth_headers, timeout=BLUESKY_TIMEOUT
     ) as client:
@@ -176,7 +184,9 @@ def reset_bluesky(session: Session) -> dict[str, int | dict]:
                 "record": record,
             },
         )
-    return {"unfollowed": len(rkeys), "profile": record}
+        seen_at = dt.datetime.now(dt.UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+        _xrpc(client, "POST", "app.bsky.notification.updateSeen", json={"seenAt": seen_at})
+    return {"unfollowed": len(rkeys), "profile": record, "seen_at": seen_at}
 
 
 def reset(
@@ -263,9 +273,12 @@ def reset(
         print("[4/5] Skipping sprite recreate (--skip-sprite)")
 
     if session is not None:
-        print("[5/5] Bluesky hygiene: unfollow all, blank profile, assert bot label")
+        print("[5/5] Bluesky hygiene: unfollow all, blank profile, assert bot label, mark seen")
         summary = reset_bluesky(session)
-        print(f"  -> unfollowed {summary['unfollowed']}; profile is now {summary['profile']}")
+        print(
+            f"  -> unfollowed {summary['unfollowed']}; notifications seen to "
+            f"{summary['seen_at']}; profile is now {summary['profile']}"
+        )
     else:
         print("[5/5] Skipping Bluesky hygiene (--skip-bluesky)")
 

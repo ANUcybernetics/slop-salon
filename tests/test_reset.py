@@ -164,6 +164,7 @@ def test_reset_bluesky_unfollows_every_page_and_rewrites_profile(httpx_mock):
     httpx_mock.add_response(
         url=f"{PDS}/xrpc/com.atproto.repo.putRecord", json={"uri": "x", "cid": "y"}
     )
+    httpx_mock.add_response(url=f"{PDS}/xrpc/app.bsky.notification.updateSeen", status_code=200)
 
     summary = reset_bluesky(_session())
 
@@ -183,6 +184,12 @@ def test_reset_bluesky_unfollows_every_page_and_rewrites_profile(httpx_mock):
     }
     assert summary["profile"] == body["record"]
 
+    # Season-1 notifications are not deletable, so they are marked seen: the
+    # routine reads only unread ones, which from here on means "this season".
+    (seen,) = _requests_to(httpx_mock, "updateSeen")
+    seen_at = json.loads(seen.content)["seenAt"]
+    assert seen_at.endswith("Z") and seen_at == summary["seen_at"]
+
 
 def test_reset_bluesky_writes_profile_even_when_none_exists(httpx_mock):
     httpx_mock.add_response(
@@ -195,6 +202,7 @@ def test_reset_bluesky_writes_profile_even_when_none_exists(httpx_mock):
         json={"error": "RecordNotFound", "message": "Could not locate record"},
     )
     httpx_mock.add_response(url=f"{PDS}/xrpc/com.atproto.repo.putRecord", json={})
+    httpx_mock.add_response(url=f"{PDS}/xrpc/app.bsky.notification.updateSeen", status_code=200)
 
     summary = reset_bluesky(_session())
 
@@ -267,7 +275,10 @@ def test_reset_runs_steps_in_order_with_fresh_siblings(reset_config):
         patch.object(
             reset_mod,
             "reset_bluesky",
-            side_effect=lambda *a: order.append("bluesky") or {"unfollowed": 5, "profile": {}},
+            side_effect=lambda *a: (
+                order.append("bluesky")
+                or {"unfollowed": 5, "profile": {}, "seen_at": "2026-09-10T00:00:00.000Z"}
+            ),
         ) as bluesky,
     ):
         sprites = MagicMock()
@@ -342,7 +353,9 @@ def test_reset_retry_after_bluesky_failure_touches_only_bluesky(reset_config):
         patch.object(reset_mod, "push_season_reset") as push,
         patch.object(reset_mod, "recreate") as recreate,
         patch.object(
-            reset_mod, "reset_bluesky", return_value={"unfollowed": 6, "profile": {}}
+            reset_mod,
+            "reset_bluesky",
+            return_value={"unfollowed": 6, "profile": {}, "seen_at": "2026-09-10T00:00:00.000Z"},
         ) as bluesky,
     ):
         reset("lou", skip_repo=True, skip_sprite=True)

@@ -74,7 +74,8 @@ On every tick, in roughly this order:
    `wc -c SIBLINGS.md`. If it prints more than `20000`, distil the file before
    you finish --- see "Keeping SIBLINGS.md readable" below.
 5. Run `bsky notifications --limit 20` to see direct interactions (replies,
-   mentions, quotes).
+   mentions, quotes). Skip any line whose `unread` is `false`: it predates this
+   season and is not addressed to you now, whoever it names.
 6. Run `bsky timeline --limit 20` to see what has been happening on Bluesky
    since your last tick.
 
