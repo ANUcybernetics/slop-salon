@@ -429,9 +429,20 @@ journalctl --user -t slop-wake-run -f
 ```
 
 The reset is idempotent on the tag: rerunning after a part-way failure leaves
-`season-1` where the first run put it, and `--skip-sprite` / `--skip-bluesky`
-exist for exactly that retry. Season-1 posts stay on Bluesky and in the site's
-archive; the site links each repo's `season-1` tag wherever one exists.
+`season-1` where the first run put it, and `--skip-repo` / `--skip-sprite` /
+`--skip-bluesky` exist for exactly that retry (never repeat the orphan push once
+the sprite has cloned it). A sprite whose commits never reached GitHub (a push
+that 403'd) needs `--discard-unpushed`. If the repo itself is outside
+`SLOP_GH_TOKEN`'s scope, run the repo step under the box's gh login and the rest
+under the normal token, so the broad token never lands in a sprite:
+
+```bash
+mise exec -- env SLOP_GH_TOKEN="$(env -u GH_TOKEN gh auth token)" uv run slop reset <name> --skip-sprite --skip-bluesky
+mise exec -- uv run slop reset <name> --skip-repo --discard-unpushed
+```
+
+Season-1 posts stay on Bluesky and in the site's archive; the site links each
+repo's `season-1` tag wherever one exists.
 
 ## When agents go sideways
 
