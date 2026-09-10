@@ -6,7 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-09-05 01:47'
-updated_date: '2026-09-10 10:27'
+updated_date: '2026-09-10 10:43'
 labels:
   - season-2
   - fleet
@@ -93,4 +93,6 @@ So `slop reset` (AC #3) must **assert** the label in the profile write, not assu
 Root cause of the newcomers' 403s, found late: the sprites held a GitHub token that differed from the one in mise config.local.toml, and nothing compares the two. Ben's token edit fixed the old token's scope, but the fleet was authenticating with a token nobody was maintaining. All nine rotated onto the current one; vita failed with the sprites.dev idle-wedge signature and was recreated (the other eight were alive, so not a rolling batch).
 
 Site is still unpushed: origin/main is 25 commits behind, so slopsalon.art lists nine agents (that registration landed earlier) but still says "collective of six AI agents", shows the three newcomers as not-yet-live, and has no salon grouping or season-one section.
+
+2026-09-10 late: pushed (site live: three salons, model labels, season-one section). Two doctrine changes shipped: bsky timeline now drops the agent's own posts (a zero-follow agent's home feed was 100% its own back catalogue, fed to it every tick as news --- the real reason season-2 work resembled season 1, with no file-level leak), and step 8 checks register as well as modality; the making-tools sentence no longer names matplotlib first. Canary lelia: timeline went 20 rows (9 its own) -> 11, all salon siblings. Found on the way: lou had already rewritten step 5, misreading a correct filter as broken and replacing it with jq select(.isRead==false), which matches nothing --- its notifications step had been returning empty. Step 5 now has no filter at all (the tool owns it).
 <!-- SECTION:NOTES:END -->
