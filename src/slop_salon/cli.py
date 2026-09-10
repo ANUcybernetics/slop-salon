@@ -1321,6 +1321,9 @@ def reset(
     skip_bluesky: bool = typer.Option(
         False, "--skip-bluesky", help="Repo + sprite only; leave the Bluesky profile alone"
     ),
+    marker: bool = typer.Option(
+        True, "--marker/--no-marker", help="Post and pin a season marker on the profile"
+    ),
     config_path: str = typer.Option(None, "--config"),
 ):
     """Reset an agent to a fresh season start (see reset.py).
@@ -1337,6 +1340,7 @@ def reset(
         skip_repo=skip_repo,
         skip_sprite=skip_sprite,
         skip_bluesky=skip_bluesky,
+        marker=marker,
     )
 
 

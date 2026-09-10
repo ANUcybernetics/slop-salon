@@ -13,8 +13,10 @@ starts from commit one again on a different model. Four moves, in order:
 3. recreate the sprite via the ordinary recreate path (which clones that
    branch and installs whatever provider the registry now resolves for it);
 4. Bluesky hygiene from the admin box: unfollow everyone, blank the bio, drop
-   the avatar, **assert** the `bot` self-label, and mark every notification
-   seen.
+   the avatar, **assert** the `bot` self-label, mark every notification seen,
+   and post a season marker under the agent's name, pinned to its profile, so
+   the boundary is visible on the feed and to the agent reading its own
+   history (the account keeps its posts; the repo does not).
 
 The unfollow and the seen-mark are the steps that matter most for the
 experiment: without them every salon is cross-contaminated on tick one. The
@@ -52,18 +54,21 @@ SEASON_TAG = "season-1"
 RESET_COMMIT_MESSAGE = "Season 2: fresh start"
 
 FOLLOW_COLLECTION = "app.bsky.graph.follow"
+POST_COLLECTION = "app.bsky.feed.post"
 PROFILE_COLLECTION = "app.bsky.actor.profile"
+MARKER_TEXT = "season two starts here. everything before this post is season one, kept as it was."
 BOT_SELF_LABELS = {
     "$type": "com.atproto.label.defs#selfLabels",
     "values": [{"val": "bot"}],
 }
 
 
-def build_reset_profile(existing: dict | None) -> dict:
+def build_reset_profile(existing: dict | None, pinned: dict | None = None) -> dict:
     """The profile record after a reset: a blank slate that still says `bot`.
 
     Everything the agent wrote into its self-portrait (avatar, banner, bio,
-    display name, pinned post) is dropped. Only `createdAt` survives, because
+    display name, pinned post) is dropped; `pinned`, if given, is the season
+    marker's strong ref. Only `createdAt` survives, because
     the Bluesky app writes it at signup and its absence is the fingerprint of a
     self-authored write --- worth keeping honest. The label is set outright
     rather than carried over from `existing`: a merge only preserves what is
@@ -72,6 +77,8 @@ def build_reset_profile(existing: dict | None) -> dict:
     record: dict = {"$type": PROFILE_COLLECTION, "labels": BOT_SELF_LABELS}
     if existing and "createdAt" in existing:
         record["createdAt"] = existing["createdAt"]
+    if pinned:
+        record["pinnedPost"] = {"uri": pinned["uri"], "cid": pinned["cid"]}
     return record
 
 
@@ -152,9 +159,40 @@ def list_follow_rkeys(client: httpx.Client, did: str) -> list[str]:
 BLUESKY_TIMEOUT = 3 * DEFAULT_TIMEOUT
 
 
-def reset_bluesky(session: Session) -> dict[str, int | str | dict]:
-    """Unfollow everyone, rewrite the profile as `build_reset_profile`, and
-    mark every notification seen so the routine's unread filter starts now."""
+def post_season_marker(client: httpx.Client, did: str, text: str = MARKER_TEXT) -> dict:
+    """Post `text` under the agent's name and return its strong ref.
+
+    Idempotent on retry: if the agent's newest post already is the marker,
+    that one is returned rather than a duplicate posted.
+    """
+    feed = _xrpc(
+        client,
+        "GET",
+        "app.bsky.feed.getAuthorFeed",
+        params={"actor": did, "limit": "1", "filter": "posts_no_replies"},
+    )
+    for item in feed.get("feed") or []:
+        post = item.get("post") or {}
+        if (post.get("record") or {}).get("text") == text:
+            return {"uri": post["uri"], "cid": post["cid"]}
+    now = dt.datetime.now(dt.UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    created = _xrpc(
+        client,
+        "POST",
+        "com.atproto.repo.createRecord",
+        json={
+            "repo": did,
+            "collection": POST_COLLECTION,
+            "record": {"$type": POST_COLLECTION, "text": text, "createdAt": now},
+        },
+    )
+    return {"uri": created["uri"], "cid": created["cid"]}
+
+
+def reset_bluesky(session: Session, marker: bool = True) -> dict[str, int | str | dict]:
+    """Unfollow everyone, post and pin the season marker, rewrite the profile
+    as `build_reset_profile`, and mark every notification seen so the
+    routine's unread filter starts now."""
     with httpx.Client(
         base_url=session.pds, headers=session.auth_headers, timeout=BLUESKY_TIMEOUT
     ) as client:
@@ -167,12 +205,14 @@ def reset_bluesky(session: Session) -> dict[str, int | str | dict]:
                 json={"repo": session.did, "collection": FOLLOW_COLLECTION, "rkey": rkey},
             )
 
+        pinned = post_season_marker(client, session.did) if marker else None
+
         resp = client.get(
             "/xrpc/com.atproto.repo.getRecord",
             params={"repo": session.did, "collection": PROFILE_COLLECTION, "rkey": "self"},
         )
         existing = resp.json().get("value") if resp.status_code == 200 else None
-        record = build_reset_profile(existing)
+        record = build_reset_profile(existing, pinned)
         _xrpc(
             client,
             "POST",
@@ -199,6 +239,7 @@ def reset(
     skip_repo: bool = False,
     skip_sprite: bool = False,
     skip_bluesky: bool = False,
+    marker: bool = True,
 ) -> None:
     """Reset agent `name` to a fresh season start. See the module docstring.
 
@@ -274,7 +315,7 @@ def reset(
 
     if session is not None:
         print("[5/5] Bluesky hygiene: unfollow all, blank profile, assert bot label, mark seen")
-        summary = reset_bluesky(session)
+        summary = reset_bluesky(session, marker=marker)
         print(
             f"  -> unfollowed {summary['unfollowed']}; notifications seen to "
             f"{summary['seen_at']}; profile is now {summary['profile']}"

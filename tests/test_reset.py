@@ -12,6 +12,7 @@ import pytest
 from slop_salon import reset as reset_mod
 from slop_salon.reset import (
     BOT_SELF_LABELS,
+    MARKER_TEXT,
     build_reset_profile,
     push_season_reset,
     reset,
@@ -38,6 +39,14 @@ def test_build_reset_profile_keeps_only_signup_timestamp_and_asserts_bot():
         "labels": BOT_SELF_LABELS,
         "createdAt": "2026-05-20T01:02:03.000Z",
     }
+
+
+def test_build_reset_profile_pins_the_season_marker():
+    record = build_reset_profile(
+        {"createdAt": "2026-05-20T00:00:00.000Z"}, {"uri": "at://m", "cid": "c"}
+    )
+    assert record["pinnedPost"] == {"uri": "at://m", "cid": "c"}
+    assert "pinnedPost" not in build_reset_profile(None)
 
 
 def test_build_reset_profile_does_not_fabricate_created_at():
@@ -149,6 +158,13 @@ def test_reset_bluesky_unfollows_every_page_and_rewrites_profile(httpx_mock):
         url=f"{PDS}/xrpc/com.atproto.repo.deleteRecord", json={}, is_reusable=True
     )
     httpx_mock.add_response(
+        url=f"{PDS}/xrpc/app.bsky.feed.getAuthorFeed?actor=did%3Aplc%3Alou&limit=1&filter=posts_no_replies",
+        json={"feed": [{"post": {"uri": "at://old", "cid": "x", "record": {"text": "old piece"}}}]},
+    )
+    httpx_mock.add_response(
+        url=f"{PDS}/xrpc/com.atproto.repo.createRecord", json={"uri": "at://marker", "cid": "mk"}
+    )
+    httpx_mock.add_response(
         url=f"{PDS}/xrpc/com.atproto.repo.getRecord?repo=did%3Aplc%3Alou&collection=app.bsky.actor.profile&rkey=self",
         json={
             "uri": "at://did:plc:lou/app.bsky.actor.profile/self",
@@ -181,8 +197,15 @@ def test_reset_bluesky_unfollows_every_page_and_rewrites_profile(httpx_mock):
         "$type": "app.bsky.actor.profile",
         "labels": BOT_SELF_LABELS,
         "createdAt": "2026-05-20T00:00:00.000Z",
+        "pinnedPost": {"uri": "at://marker", "cid": "mk"},
     }
     assert summary["profile"] == body["record"]
+
+    # The marker is posted under the agent's name, then pinned above.
+    (create,) = _requests_to(httpx_mock, "createRecord")
+    marker = json.loads(create.content)
+    assert marker["collection"] == "app.bsky.feed.post"
+    assert marker["record"]["text"] == MARKER_TEXT
 
     # Season-1 notifications are not deletable, so they are marked seen: the
     # routine reads only unread ones, which from here on means "this season".
@@ -196,6 +219,13 @@ def test_reset_bluesky_writes_profile_even_when_none_exists(httpx_mock):
         url=f"{PDS}/xrpc/com.atproto.repo.listRecords?repo=did%3Aplc%3Alou&collection=app.bsky.graph.follow&limit=100",
         json={"records": []},
     )
+    # Retry case: the newest post already is the marker, so it is pinned, not reposted.
+    httpx_mock.add_response(
+        url=f"{PDS}/xrpc/app.bsky.feed.getAuthorFeed?actor=did%3Aplc%3Alou&limit=1&filter=posts_no_replies",
+        json={
+            "feed": [{"post": {"uri": "at://marker", "cid": "mk", "record": {"text": MARKER_TEXT}}}]
+        },
+    )
     httpx_mock.add_response(
         url=f"{PDS}/xrpc/com.atproto.repo.getRecord?repo=did%3Aplc%3Alou&collection=app.bsky.actor.profile&rkey=self",
         status_code=400,
@@ -207,7 +237,12 @@ def test_reset_bluesky_writes_profile_even_when_none_exists(httpx_mock):
     summary = reset_bluesky(_session())
 
     assert summary["unfollowed"] == 0
-    assert summary["profile"] == {"$type": "app.bsky.actor.profile", "labels": BOT_SELF_LABELS}
+    assert summary["profile"] == {
+        "$type": "app.bsky.actor.profile",
+        "labels": BOT_SELF_LABELS,
+        "pinnedPost": {"uri": "at://marker", "cid": "mk"},
+    }
+    assert not _requests_to(httpx_mock, "createRecord")
 
 
 @pytest.fixture
@@ -275,7 +310,7 @@ def test_reset_runs_steps_in_order_with_fresh_siblings(reset_config):
         patch.object(
             reset_mod,
             "reset_bluesky",
-            side_effect=lambda *a: (
+            side_effect=lambda *a, **k: (
                 order.append("bluesky")
                 or {"unfollowed": 5, "profile": {}, "seen_at": "2026-09-10T00:00:00.000Z"}
             ),
@@ -292,7 +327,7 @@ def test_reset_runs_steps_in_order_with_fresh_siblings(reset_config):
     create.assert_called_once_with("lou.slopsalon.art", "pw")
     preflight.assert_called_once_with(sprites, "lou", "~/slop-salon-lou")
     recreate.assert_called_once_with("lou", config_path="slop_salon.toml", sprites=sprites)
-    bluesky.assert_called_once_with(session)
+    bluesky.assert_called_once_with(session, marker=True)
 
     remote, files = push.call_args.args
     assert remote == "https://ghp_x@github.com/ANUcybernetics/slop-salon-lou.git"
@@ -358,8 +393,8 @@ def test_reset_retry_after_bluesky_failure_touches_only_bluesky(reset_config):
             return_value={"unfollowed": 6, "profile": {}, "seen_at": "2026-09-10T00:00:00.000Z"},
         ) as bluesky,
     ):
-        reset("lou", skip_repo=True, skip_sprite=True)
+        reset("lou", skip_repo=True, skip_sprite=True, marker=False)
     preflight.assert_not_called()
     push.assert_not_called()
     recreate.assert_not_called()
-    bluesky.assert_called_once_with(session)
+    bluesky.assert_called_once_with(session, marker=False)
