@@ -1,168 +1,49 @@
 #!/usr/bin/env bash
 # slop-tick: run one tick of the agent.
 #
-# Called by `slop wake` (the systemd-timer-driven wake driver, with the
-# fixed prompt "tick") or by `slop talk` (with an admin prompt), both via
-# `sprite exec`. Stateless: each invocation runs `claude --print` once,
-# then commits and pushes anything that changed.
-#
-# Loads AGENT_NAME plus the agent's secrets from ~/.slop-env (mode 600,
-# written by provisioning). sprites.dev has no API for setting env vars
-# from outside, so the file is the canonical place for them.
-
+# Called by `slop wake` (with the prompt "tick") or `slop talk` (with an admin
+# prompt), via `sprite exec`. Everything it needs arrives in the environment:
+# AGENT_NAME, the ANTHROPIC_* endpoint and model, and the tick's secrets
+# (BSKY_PASSWORD, GH_TOKEN, REPLICATE_API_TOKEN). Nothing is read from disk but
+# this repo. Stateless: pull, run `claude -p` once, commit and push.
 set -euo pipefail
 
-# shellcheck disable=SC1090
-if [[ -f "$HOME/.slop-env" ]]; then
-  source "$HOME/.slop-env"
-fi
-
-# The provider block (which runner, which model, which endpoint) is a separate
-# file so `slop provider set` can swap it without touching the agent's secrets.
-# Sourced *second*: it unsets the inference vars a pre-split ~/.slop-env still
-# exports, then exports its own, so it wins whatever is underneath.
-# shellcheck disable=SC1090
-if [[ -f "$HOME/.slop-provider" ]]; then
-  source "$HOME/.slop-provider"
-fi
-
-if [[ -z "${AGENT_NAME:-}" ]]; then
-  echo "error: AGENT_NAME not set (is ~/.slop-env in place?)" >&2
-  exit 1
-fi
-
+: "${AGENT_NAME:?AGENT_NAME not set}"
 if [[ $# -lt 1 ]]; then
-  echo "usage: slop-tick \"<prompt>\"" >&2
+  echo 'usage: slop-tick "<prompt>"' >&2
   exit 1
-fi
-
-# One tick per sprite at a time. `slop wake` firings overlap (the wake driver
-# spawns a transient unit per firing, so a slow tick never blocks the next),
-# and `slop talk` can land mid-tick --- without this guard a second invocation
-# would race a concurrent `claude --print` on the same git repo. Non-blocking:
-# if a tick already holds the lock this one is a clean no-op (exit 75, which
-# `slop wake` renders as `busy` rather than a failure). Nothing long-lived may
-# be spawned before this point: a daemon started earlier would inherit fd 9 and
-# hold the lock for its whole life. fd 9 is likewise closed in the `claude`
-# child (and the git commit/push) below, so no orphan shell or detached git gc
-# can pin it --- one did, and stalled an agent at `busy` for ~16h.
-exec 9>"$HOME/.slop-tick.lock"
-if ! flock -n 9; then
-  echo "slop-tick: a tick is already running in this sprite, skipping" >&2
-  exit 75
 fi
 
 cd "$HOME/slop-salon-$AGENT_NAME"
 
-# Never let git run a background gc during a tick. `git gc --auto` (triggered by
-# our own commit/push) detaches by default, and as a daemon it inherits the lock
-# fd (9) and keeps it open after the tick exits --- pinning ~/.slop-tick.lock so
-# every later wake no-ops as `busy` (this silently stalled mina for ~16h). The
-# detached repack can also wedge in D-state on the read-only remount of an idle
-# checkpoint. These repos are tiny and never need it; gc off-sprite by hand if
-# loose objects ever pile up.
-git config gc.auto 0
-git config maintenance.auto false
-
-# Commit any leftover working-tree state *before* pulling admin-side edits
-# (CLAUDE.md, SOUL.md, etc). Leftovers come from a tick that died mid-run, or
-# from a sprite filesystem rollback to a mid-tick checkpoint (rahel,
-# 2026-07-14: .git reverted past an already-pushed commit, leaving that tick's
-# note files untracked --- and untracked files that origin also has block
-# `git pull` with "untracked working tree files would be overwritten by
-# merge", on every subsequent tick, forever). Committed first, the rebase
-# replays leftovers cleanly, and in the rollback case drops the commit as
-# patch-identical to the one already on origin. A genuine content conflict
-# still aborts the tick loudly; the admin intervenes per "When things go
-# wrong". fd 9 closed so a fetch-triggered maintenance run can't inherit the
-# lock.
+# Commit leftovers from a tick that died mid-run before pulling, so the rebase
+# replays them cleanly instead of refusing to overwrite untracked files.
 if ! git diff --quiet HEAD || [[ -n "$(git ls-files --others --exclude-standard)" ]]; then
   git add -A
-  git commit -m "session $(date -Iseconds) (pre-tick leftovers)" 9>&-
+  git commit -q -m "session $(date -Iseconds) (pre-tick leftovers)"
 fi
-git pull --rebase 9>&-
+git pull --rebase --quiet
 
-# Enrich the vacuous "tick" prompt with a short studio-state preamble: an
-# automated read of the agent's own recent practice (how long since it revised
-# CLAUDE.md or its avatar, whether recent output is all still images). Computed
-# in-sprite by `slop-studio` from the agent's own git history + public profile;
-# it stays silent unless something crosses a threshold, so a healthy tick is
-# unchanged. Only the scheduled "tick" is augmented --- an admin `slop talk`
-# prompt is left exactly as sent. Fail-open: any error leaves the prompt as-is.
-PROMPT="$1"
-if [[ "$PROMPT" == "tick" ]]; then
-  cue="$(timeout 15 slop-studio 2>/dev/null || true)"
-  if [[ -n "$cue" ]]; then
-    PROMPT="$cue"$'\n\n'"$1"
-  fi
-fi
-
-# Bound the worst case: an agent CLI can wedge with orphan BashTool persistent
-# shells (they make themselves session leaders, so they don't die with the
-# runner's process group). Without a hard cap a single bad tick stalls the
-# wake driver for hours. 2h is generous against a 6-hourly cadence (healthy
-# ticks run 10--30m) and well inside the wake run's 8h RuntimeMaxSec.
+# A hard wall-clock cap so a wedged tick cannot stall the wake driver; on hit
+# the run is killed (timeout exit 124). AskUserQuestion is taken away rather
+# than discouraged: nobody is there to answer.
 TICK_TIMEOUT="${SLOP_TICK_TIMEOUT:-2h}"
-
-# Which agent CLI drives this tick. It remains explicit alongside the shared
-# dispatcher profile because Codex needs AGENTS.md rendered before agent-run is
-# invoked. Defaults preserve sprites provisioned before either config split.
-RUNNER="${SLOP_RUNNER:-claude}"
-PROFILE="${AGENT_PROFILE:-}"
-
-# agent-run owns the provider/auth boundary. The tick keeps its behavioural
-# settings, but they are per-runner and must be passed that way: agent-run
-# rejects an option belonging to a runner other than the profile's, so a
-# blanket list of both fails every tick before the model is reached. No
-# --ephemeral: its session files are what `slop usage` tallies.
-DENIED_TOOLS="${SLOP_DENIED_TOOLS:-AskUserQuestion}"
-RUNNER_OPTS=()
-
-case "$RUNNER" in
-claude)
-  PROFILE="${PROFILE:-claude-api}"
-  # AskUserQuestion is unavailable in a headless run: nobody is there to answer.
-  RUNNER_OPTS=(--claude-disallowed-tools "$DENIED_TOOLS")
-  ;;
-codex)
-  PROFILE="${PROFILE:-codex-sub}"
-  # Codex has no `@` import syntax, so CLAUDE.md's SOUL/MEMORY/TOOLS imports
-  # would silently drop out of the prompt. Render them into a flat AGENTS.md
-  # (gitignored, rewritten every tick) before the run. Fail-open: a stale
-  # AGENTS.md beats no tick.
-  slop-prompt agents-md --root "$PWD" 2>/dev/null || true
-  # The sprite itself is the sandbox, so codex needs none of its own.
-  RUNNER_OPTS=(--codex-sandbox danger-full-access)
-  ;;
-*)
-  echo "slop-tick: unknown SLOP_RUNNER '$RUNNER' (want claude or codex)" >&2
-  exit 1
-  ;;
-esac
-
-RUNNER_CMD=(
-  agent-run
-  --profile "$PROFILE"
-  --cwd "$PWD"
-  "${RUNNER_OPTS[@]}"
-  "$PROMPT"
-)
-
 rc=0
-timeout --kill-after=15 "$TICK_TIMEOUT" "${RUNNER_CMD[@]}" 9>&- || rc=$?
+timeout --kill-after=15 "$TICK_TIMEOUT" \
+  claude -p "$1" \
+  ${ANTHROPIC_MODEL:+--model "$ANTHROPIC_MODEL"} \
+  --disallowedTools "${SLOP_DENIED_TOOLS:-AskUserQuestion}" || rc=$?
 if [[ $rc -eq 124 ]]; then
-  echo "slop-tick: $RUNNER exceeded ${TICK_TIMEOUT}, killed" >&2
+  echo "slop-tick: claude exceeded ${TICK_TIMEOUT}, killed" >&2
 elif [[ $rc -ne 0 ]]; then
-  echo "slop-tick: $RUNNER exited $rc" >&2
+  echo "slop-tick: claude exited $rc" >&2
 fi
 
-# Reap any orphan BashTool persistent shells the runner left behind.
+# Reap orphan BashTool shells claude leaves behind (they are session leaders).
 pkill -f "shell-snapshots/snapshot-zsh" 2>/dev/null || true
 
 if ! git diff --quiet HEAD || [[ -n "$(git ls-files --others --exclude-standard)" ]]; then
   git add -A
-  # Close the lock fd (9) for commit/push --- belt-and-braces with the gc.auto
-  # disable above, so nothing git spawns here can inherit and pin the lock.
-  git commit -m "session $(date -Iseconds)" 9>&-
-  git push 9>&-
+  git commit -q -m "session $(date -Iseconds)"
+  git push --quiet
 fi

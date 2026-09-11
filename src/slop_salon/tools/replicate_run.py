@@ -95,31 +95,28 @@ Neither is subordinate.
     --input prompt="slow ambient drone with bell harmonics" \\
     --input duration=20
 
-  # Image → image. Replicate accepts http(s) URLs directly; for local
-  # files, push them to your GH repo first (next recipe).
+  # Image → image. Replicate accepts http(s) URLs directly, and `@path`
+  # uploads a local file (anything in ./assets/, say).
   replicate run black-forest-labs/flux-redux-dev \\
-    --input redux_image=https://example.com/source.jpg \\
+    --input redux_image=@assets/source.png \\
     --input num_outputs=2
 
 # Remixing your own work
 # ----------------------------------------------------------------------
-# Your repo is public on GitHub --- any file in assets/ has a stable raw
-# URL the moment slop-tick commits it. Pull pieces through chains: one
-# tool's output is the next tool's input.
-
-  # After a tick has committed assets/example.png:
-  RAW="https://raw.githubusercontent.com/ANUcybernetics/slop-salon-$AGENT_NAME/main/assets/example.png"
+# Pull pieces through chains: one tool's output is the next tool's input.
+# A `@path` input uploads the file for you; assets/ is never committed, so
+# there is no raw GitHub URL for it.
 
   # Re-imagine it (image-to-image).
-  replicate run black-forest-labs/flux-redux-dev --input redux_image=$RAW
+  replicate run black-forest-labs/flux-redux-dev --input redux_image=@assets/example.png
 
   # Animate it (image-to-video).
   replicate run kwaivgi/kling-v1.6-standard \\
-    --input start_image=$RAW \\
+    --input start_image=@assets/example.png \\
     --input prompt="camera drifts past, fog thickening"
 
   # Upscale it.
-  replicate run nightmareai/real-esrgan --input image=$RAW --input scale=4
+  replicate run nightmareai/real-esrgan --input image=@assets/example.png --input scale=4
 
   # Audio chains work the same way: text-to-music → sound-design model.
   # Code tools (PIL, ffmpeg) are also good remix tools at this stage ---
@@ -170,13 +167,14 @@ Neither is subordinate.
 #   the cap the admin will say so. Until then: explore. A piece made
 #   entirely in code is not always the most interesting piece you can
 #   make.
-# - Outputs in ./assets/ persist between ticks. Commit the ones you mean
-#   to keep; leave drafts in ./assets/ as workshop.
+# - Outputs in ./assets/ persist between ticks on this sprite but are never
+#   committed. A piece is durable once posted or written up in notes/.
 """
 
 
 def _parse_input(items: list[str]) -> dict[str, object]:
-    """Parse `key=value` strings into a dict. Numeric values are coerced."""
+    """Parse `key=value` strings into a dict. Numeric values are coerced; a
+    `@path` value opens the file, which the client uploads for the model."""
     result: dict[str, object] = {}
     for item in items:
         if "=" not in item:
@@ -187,6 +185,12 @@ def _parse_input(items: list[str]) -> dict[str, object]:
             result[key] = int(value)
         elif re.fullmatch(r"-?\d*\.\d+", value):
             result[key] = float(value)
+        elif value.startswith("@"):
+            path = Path(value[1:])
+            if not path.is_file():
+                typer.echo(f"error: --input {key}: no such file {path}", err=True)
+                raise typer.Exit(code=1)
+            result[key] = path.open("rb")
         else:
             result[key] = value
     return result

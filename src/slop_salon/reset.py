@@ -1,32 +1,19 @@
 """Reset an agent to a fresh season start, keeping its sprite and accounts.
 
-A reset is what neither `slop new` nor `recreate` is: `new` commits templates on
-top of whatever history the repo already has, and `recreate` preserves the repo
-on purpose. Season 2 (task-17) needs the third thing --- the same GitHub repo,
-sprite and Bluesky account, but with the agent's accumulated self erased so it
-starts from commit one again on a different model. Four moves, in order:
+Four moves, in order:
 
-1. tag the current head `season-1` on GitHub, so nothing is lost, only moved;
-2. force-push an orphan commit of freshly interpolated templates to the default
-   branch, so `git log` in the sprite starts at one commit with stub
-   `SIBLINGS.md` and seed `MEMORY.md` / `TOOLS.md`;
-3. recreate the sprite via the ordinary recreate path (which clones that
-   branch and installs whatever provider the registry now resolves for it);
-4. Bluesky hygiene from the admin box: unfollow everyone, blank the bio, drop
-   the avatar, **assert** the `bot` self-label, mark every notification seen,
-   and post a season marker under the agent's name, pinned to its profile, so
-   the boundary is visible on the feed and to the agent reading its own
-   history (the account keeps its posts; the repo does not).
+1. tag the repo head (`season-N`) on GitHub, so nothing is lost, only moved;
+2. force-push an orphan commit of freshly interpolated templates and the
+   agent's soul, so `git log` in the sprite starts at one commit;
+3. recreate the sprite from that branch;
+4. Bluesky hygiene from the admin box: unfollow everyone, follow the siblings
+   (the home feed is the salon), blank the profile, assert the `bot`
+   self-label, mark every notification seen, and post a pinned season marker.
 
-The unfollow and the seen-mark are the steps that matter most for the
-experiment: without them every salon is cross-contaminated on tick one. The
-first season-2 wake proved the second one --- follows were empty, but
-`listNotifications` still served each agent its season-1 replies, and four of
-six copied those names straight into SIBLINGS.md. Nothing deletes
-notifications; `updateSeen` makes the old ones `isRead`, and the tick routine
-reads only unread ones from then on. The label is asserted, not merged, because
-the exact operation this performs (a profile write) is how three season-1
-agents lost theirs.
+The unfollow, the follow and the seen-mark are what close the salon: without
+them every salon is cross-contaminated on tick one (the first season-2 wake
+proved it for notifications). The label is asserted rather than merged because
+a profile write is exactly how three season-1 agents lost theirs.
 """
 
 from __future__ import annotations
@@ -39,41 +26,33 @@ from pathlib import Path
 import httpx
 
 from .config import load_config
-from .provision import (
-    _build_template_files,
-    missing_provider_secrets,
-    resolve_secrets,
-    write_files,
-)
+from .provision import build_template_files, write_files
 from .recreate import recreate
-from .sprites import SpritesClient
-from .strip_assets import _preflight_sprite, _sprite_sh
+from .sprites import SpriteExecutor, SpritesClient
 from .tools.bsky import DEFAULT_TIMEOUT, Session, create_session
 
-SEASON_TAG = "season-1"
-RESET_COMMIT_MESSAGE = "Season 2: fresh start"
+SEASON = 3
+RESET_COMMIT_MESSAGE = f"Season {SEASON}: fresh start"
+MARKER_TEXT = (
+    f"season {SEASON} starts here. everything before this post is an earlier season, "
+    "kept as it was."
+)
 
 FOLLOW_COLLECTION = "app.bsky.graph.follow"
 POST_COLLECTION = "app.bsky.feed.post"
 PROFILE_COLLECTION = "app.bsky.actor.profile"
-MARKER_TEXT = "season two starts here. everything before this post is season one, kept as it was."
 BOT_SELF_LABELS = {
     "$type": "com.atproto.label.defs#selfLabels",
     "values": [{"val": "bot"}],
 }
+# The PDS shards answer in well under a second, but one reset saw a 20s read
+# timeout on a routine call; be patient rather than clever.
+BLUESKY_TIMEOUT = 3 * DEFAULT_TIMEOUT
 
 
 def build_reset_profile(existing: dict | None, pinned: dict | None = None) -> dict:
-    """The profile record after a reset: a blank slate that still says `bot`.
-
-    Everything the agent wrote into its self-portrait (avatar, banner, bio,
-    display name, pinned post) is dropped; `pinned`, if given, is the season
-    marker's strong ref. Only `createdAt` survives, because
-    the Bluesky app writes it at signup and its absence is the fingerprint of a
-    self-authored write --- worth keeping honest. The label is set outright
-    rather than carried over from `existing`: a merge only preserves what is
-    present at read time, and this is the write that dropped it before.
-    """
+    """A blank-slate profile that still says `bot`. Only `createdAt` survives
+    (the app writes it at signup); `pinned` is the season marker's strong ref."""
     record: dict = {"$type": PROFILE_COLLECTION, "labels": BOT_SELF_LABELS}
     if existing and "createdAt" in existing:
         record["createdAt"] = existing["createdAt"]
@@ -82,31 +61,18 @@ def build_reset_profile(existing: dict | None, pinned: dict | None = None) -> di
     return record
 
 
-def _git(args: list[str], cwd: Path, env: dict[str, str] | None = None) -> str:
-    result = subprocess.run(
-        ["git", *args],
-        cwd=cwd,
-        check=True,
-        capture_output=True,
-        text=True,
-        env=env,
-    )
-    return result.stdout
+def _git(args: list[str], cwd: Path) -> str:
+    return subprocess.run(
+        ["git", *args], cwd=cwd, check=True, capture_output=True, text=True
+    ).stdout
 
 
-def push_season_reset(
-    remote: str,
-    files: dict[str, str],
-    tag: str = SEASON_TAG,
-    message: str = RESET_COMMIT_MESSAGE,
-) -> str:
+def push_season_reset(remote: str, files: dict[str, str], tag: str) -> str:
     """Tag the remote's head `tag`, then replace its default branch with one
-    orphan commit containing exactly `files`. Returns the branch name pushed.
+    orphan commit containing exactly `files`. Returns the branch pushed.
 
-    Idempotent on the tag: if `tag` already exists on the remote it is left
-    where it is, so re-running after a failure part-way cannot move the
-    season-1 marker onto the reset commit. The branch push is a force-push by
-    design --- the orphan shares no history with what it replaces.
+    Idempotent on the tag: an existing `tag` is left where it is, so a retry
+    cannot move the old-season marker onto the reset commit.
     """
     with tempfile.TemporaryDirectory() as tmp:
         clone = Path(tmp) / "repo"
@@ -126,7 +92,7 @@ def push_season_reset(
         _git(["clean", "-fdxq"], cwd=clone)
         write_files(clone, files)
         _git(["add", "-A"], cwd=clone)
-        _git(["commit", "--quiet", "-m", message], cwd=clone)
+        _git(["commit", "--quiet", "-m", RESET_COMMIT_MESSAGE], cwd=clone)
         _git(["push", "--quiet", "--force", "origin", f"HEAD:refs/heads/{branch}"], cwd=clone)
         return branch
 
@@ -138,8 +104,11 @@ def _xrpc(client: httpx.Client, method: str, nsid: str, **kwargs) -> dict:
     return resp.json() if resp.content else {}
 
 
+def _now_iso() -> str:
+    return dt.datetime.now(dt.UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
 def list_follow_rkeys(client: httpx.Client, did: str) -> list[str]:
-    """Every `app.bsky.graph.follow` record key in the repo, across pages."""
     rkeys: list[str] = []
     cursor: str | None = None
     while True:
@@ -153,18 +122,27 @@ def list_follow_rkeys(client: httpx.Client, did: str) -> list[str]:
             return rkeys
 
 
-# The PDS shards answer in well under a second, but one reset saw a 20s read
-# timeout on a routine call; the step is the last one and cheap to retry, so
-# be patient rather than clever.
-BLUESKY_TIMEOUT = 3 * DEFAULT_TIMEOUT
+def follow(client: httpx.Client, did: str, handle: str) -> None:
+    subject = _xrpc(client, "GET", "com.atproto.identity.resolveHandle", params={"handle": handle})
+    _xrpc(
+        client,
+        "POST",
+        "com.atproto.repo.createRecord",
+        json={
+            "repo": did,
+            "collection": FOLLOW_COLLECTION,
+            "record": {
+                "$type": FOLLOW_COLLECTION,
+                "subject": subject["did"],
+                "createdAt": _now_iso(),
+            },
+        },
+    )
 
 
 def post_season_marker(client: httpx.Client, did: str, text: str = MARKER_TEXT) -> dict:
-    """Post `text` under the agent's name and return its strong ref.
-
-    Idempotent on retry: if the marker is already among the agent's recent
-    posts, that one is returned rather than a duplicate posted.
-    """
+    """Post `text` under the agent's name and return its strong ref. On retry an
+    existing marker among recent posts is returned rather than duplicated."""
     feed = _xrpc(
         client,
         "GET",
@@ -175,7 +153,6 @@ def post_season_marker(client: httpx.Client, did: str, text: str = MARKER_TEXT) 
         post = item.get("post") or {}
         if (post.get("record") or {}).get("text") == text:
             return {"uri": post["uri"], "cid": post["cid"]}
-    now = dt.datetime.now(dt.UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
     created = _xrpc(
         client,
         "POST",
@@ -183,16 +160,16 @@ def post_season_marker(client: httpx.Client, did: str, text: str = MARKER_TEXT) 
         json={
             "repo": did,
             "collection": POST_COLLECTION,
-            "record": {"$type": POST_COLLECTION, "text": text, "createdAt": now},
+            "record": {"$type": POST_COLLECTION, "text": text, "createdAt": _now_iso()},
         },
     )
     return {"uri": created["uri"], "cid": created["cid"]}
 
 
-def reset_bluesky(session: Session, marker: bool = True) -> dict[str, int | str | dict]:
-    """Unfollow everyone, post and pin the season marker, rewrite the profile
-    as `build_reset_profile`, and mark every notification seen so the
-    routine's unread filter starts now."""
+def reset_bluesky(session: Session, siblings: list[str], marker: bool = True) -> dict:
+    """Unfollow everyone, follow `siblings`, post and pin the season marker,
+    rewrite the profile as `build_reset_profile`, and mark every notification
+    seen so the routine's unread filter starts now."""
     with httpx.Client(
         base_url=session.pds, headers=session.auth_headers, timeout=BLUESKY_TIMEOUT
     ) as client:
@@ -204,6 +181,8 @@ def reset_bluesky(session: Session, marker: bool = True) -> dict[str, int | str 
                 "com.atproto.repo.deleteRecord",
                 json={"repo": session.did, "collection": FOLLOW_COLLECTION, "rkey": rkey},
             )
+        for handle in siblings:
+            follow(client, session.did, handle)
 
         pinned = post_season_marker(client, session.did) if marker else None
 
@@ -224,112 +203,117 @@ def reset_bluesky(session: Session, marker: bool = True) -> dict[str, int | str 
                 "record": record,
             },
         )
-        seen_at = dt.datetime.now(dt.UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+        seen_at = _now_iso()
         _xrpc(client, "POST", "app.bsky.notification.updateSeen", json={"seenAt": seen_at})
-    return {"unfollowed": len(rkeys), "profile": record, "seen_at": seen_at}
+    return {
+        "unfollowed": len(rkeys),
+        "followed": list(siblings),
+        "profile": record,
+        "seen_at": seen_at,
+    }
+
+
+def _sprite_sh(sprites: SpriteExecutor, sprite_id: str, script: str):
+    return sprites.exec(sprite_id, ["bash", "-lc", script])
+
+
+def preflight_sprite(sprites: SpriteExecutor, sprite_id: str, repo_dir: str, strict: bool) -> None:
+    """Refuse a sprite mid-tick; with `strict`, also one holding unpushed commits
+    (the tag would miss them)."""
+    running = _sprite_sh(
+        sprites, sprite_id, "pgrep -f '[c]laude -p' || pgrep -f '[c]laude --print' || true"
+    )
+    if running.stdout.strip():
+        raise SystemExit(f"{sprite_id}: a tick is running; wait for it before resetting")
+    if not strict:
+        return
+    unpushed = _sprite_sh(
+        sprites,
+        sprite_id,
+        f"cd {repo_dir} && git fetch --quiet && git log --oneline @{{u}}..HEAD 2>/dev/null | wc -l",
+    )
+    if unpushed.exit_code != 0 or unpushed.stdout.strip() not in ("", "0"):
+        raise SystemExit(
+            f"{sprite_id}: unpushed commits or an unreadable repo ({unpushed.stdout.strip()!r}); "
+            "push or pass --discard-unpushed"
+        )
 
 
 def reset(
     name: str,
     config_path: str | Path = "slop_salon.toml",
     templates_dir: str | Path = "templates",
-    soul_path: str | Path = "SOUL.md",
+    souls_dir: str | Path = "souls",
     sprites: SpritesClient | None = None,
-    tag: str = SEASON_TAG,
+    tag: str = f"season-{SEASON - 1}",
     skip_repo: bool = False,
     skip_sprite: bool = False,
     skip_bluesky: bool = False,
     marker: bool = True,
     discard_unpushed: bool = False,
 ) -> None:
-    """Reset agent `name` to a fresh season start. See the module docstring.
+    """Reset agent `name` to a fresh season start (module docstring).
 
     Everything that can fail on the admin box is checked before the first
-    destructive step: the provider must resolve with its secrets present, the
-    Bluesky password must open a session, and the sprite must be idle with
-    nothing unpushed (otherwise the tag would miss work the reset destroys).
-
-    The `skip_*` flags make a part-way failure retryable. `skip_repo` is the
-    one that matters: the orphan push is the only step that is not safe to
-    repeat once the sprite has cloned it (a second orphan commit would leave
-    the sprite on an unrelated history), so a retry after a Bluesky timeout
-    is `--skip-repo --skip-sprite`. `discard_unpushed` relaxes the pre-flight
-    for a sprite whose commits never reached GitHub (a false start behind a
-    push that 403'd): a running tick still refuses, unpushed work does not.
+    destructive step. The `skip_*` flags make a part-way failure retryable;
+    the orphan push is the one step not safe to repeat once the sprite has
+    cloned it, so a retry after a Bluesky timeout is `--skip-repo --skip-sprite`.
     """
+    from .tick import tick_env
+
     config = load_config(config_path)
     if name not in config.agents:
         raise SystemExit(f"agent {name!r} missing from {config_path}")
     agent = config.agents[name]
-
-    provider = config.provider_for(name)
-    missing = missing_provider_secrets(provider)
-    if missing:
-        raise SystemExit(f"provider {provider.name!r} needs {missing} in the admin env")
-    if agent.provider and agent.provider != (
-        config.salons[agent.salon].provider if agent.salon else ""
-    ):
-        print(
-            f"note: {name} carries a provider override ({agent.provider!r}); the reset "
-            f"installs that, not the salon's --- delete the override first if that is wrong"
-        )
-
-    env = resolve_secrets(name, list(config.agents.keys()))
-    gh_token = env.get("GH_TOKEN")
-    if not gh_token:
-        raise SystemExit("missing GH_TOKEN in resolved env; check SLOP_GH_TOKEN")
+    env = tick_env(config, agent)
+    salon_provider = config.salons[agent.salon].provider if agent.salon else ""
+    if agent.provider and agent.provider != salon_provider:
+        print(f"note: {name} carries a provider override ({agent.provider!r}); delete it if wrong")
 
     session: Session | None = None
-    if not skip_bluesky:
-        password = env.get("BSKY_PASSWORD")
-        if not password:
-            raise SystemExit(f"no bsky_password for {name} in secrets.toml")
-        print(f"[1/5] Opening Bluesky session as {agent.handle}")
-        session = create_session(agent.handle, password)
-    else:
+    if skip_bluesky:
         print("[1/5] Skipping Bluesky (--skip-bluesky)")
+    else:
+        print(f"[1/5] Opening Bluesky session as {agent.handle}")
+        session = create_session(agent.handle, env["BSKY_PASSWORD"])
 
     sprites = sprites or SpritesClient()
-    if not skip_sprite:
+    if skip_sprite:
+        print("[2/5] Skipping sprite pre-flight (--skip-sprite)")
+    else:
         if not agent.sprite_id:
             raise SystemExit(f"{name} has no sprite_id; use `slop new`, not a reset")
-        if discard_unpushed:
-            print(f"[2/5] Pre-flighting sprite {agent.sprite_id!r} (idle; unpushed work discarded)")
-            running = _sprite_sh(sprites, agent.sprite_id, "pgrep -f '[c]laude --print' || true")
-            if running.stdout.strip():
-                raise SystemExit(f"{name}: a tick is running; wait for it before resetting")
-        else:
-            print(f"[2/5] Pre-flighting sprite {agent.sprite_id!r} (idle, nothing unpushed)")
-            _preflight_sprite(sprites, agent.sprite_id, f"~/slop-salon-{name}")
-    else:
-        print("[2/5] Skipping sprite pre-flight (--skip-sprite)")
-
-    if not skip_repo:
-        print(f"[3/5] Tagging {agent.github_repo} head as {tag}, pushing an orphan reset commit")
-        siblings = [(s, config.agents[s].handle) for s in agent.siblings if s in config.agents]
-        files = _build_template_files(
-            Path(templates_dir), Path(soul_path), agent.name, agent.handle, siblings
+        print(f"[2/5] Pre-flighting sprite {agent.sprite_id!r}")
+        preflight_sprite(
+            sprites, agent.sprite_id, f"~/slop-salon-{name}", strict=not discard_unpushed
         )
-        remote = f"https://{gh_token}@github.com/{agent.github_repo}.git"
+
+    if skip_repo:
+        print("[3/5] Skipping tag + orphan push (--skip-repo)")
+    else:
+        print(f"[3/5] Tagging {agent.github_repo} head as {tag}, pushing an orphan reset commit")
+        files = build_template_files(config, agent, templates_dir, souls_dir)
+        remote = f"https://{env['GH_TOKEN']}@github.com/{agent.github_repo}.git"
         branch = push_season_reset(remote, files, tag=tag)
         print(f"  -> {branch} is now one commit; {tag} holds the old head")
-    else:
-        print("[3/5] Skipping tag + orphan push (--skip-repo)")
 
-    if not skip_sprite:
-        print(f"[4/5] Recreating sprite on provider {provider.name!r}")
-        recreate(name, config_path=str(config_path), sprites=sprites)
-    else:
+    if skip_sprite:
         print("[4/5] Skipping sprite recreate (--skip-sprite)")
-
-    if session is not None:
-        print("[5/5] Bluesky hygiene: unfollow all, blank profile, assert bot label, mark seen")
-        summary = reset_bluesky(session, marker=marker)
-        print(
-            f"  -> unfollowed {summary['unfollowed']}; notifications seen to "
-            f"{summary['seen_at']}; profile is now {summary['profile']}"
-        )
     else:
-        print("[5/5] Skipping Bluesky hygiene (--skip-bluesky)")
+        print("[4/5] Recreating sprite")
+        recreate(name, config_path=str(config_path), sprites=sprites)
 
-    print(f"\nReset {name}: fresh start on {provider.name}.")
+    if session is None:
+        print("[5/5] Skipping Bluesky hygiene (--skip-bluesky)")
+    else:
+        siblings = [config.agents[s].handle for s in agent.siblings]
+        print("[5/5] Bluesky: unfollow all, follow siblings, blank profile, bot label, mark seen")
+        summary = reset_bluesky(session, siblings, marker=marker)
+        print(
+            f"  -> unfollowed {summary['unfollowed']}, followed {summary['followed']}; "
+            f"notifications seen to {summary['seen_at']}"
+        )
+
+    print(
+        f"\nReset {name}: season {SEASON} on {config.provider_for(name).name}, soul {agent.soul}."
+    )

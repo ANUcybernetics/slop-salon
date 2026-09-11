@@ -1,4 +1,4 @@
-"""Parse and represent slop_salon.toml configuration."""
+"""Parse and represent slop_salon.toml."""
 
 from __future__ import annotations
 
@@ -7,94 +7,45 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
-# The agent CLIs we know how to drive. `slop-tick` dispatches on this.
-RUNNERS = ("claude", "codex")
+AUTH_MODES = ("connector", "secret_env", "credentials")
 
 
 @dataclass(frozen=True)
-class Pricing:
-    """Per-million-token rates for a metered provider.
-
-    Only providers that actually bill per token carry one. A self-hosted
-    endpoint or a subscription has no per-token price, and `slop usage` prints
-    `--` for those rather than a number --- the previous behaviour, a notional
-    Sonnet-equivalent applied to every provider alike, overstated a real
-    DeepSeek wake by ~40x while looking exactly like a real figure.
-    """
-
-    input: float
-    output: float
-    cache_read: float = 0.0
-    cache_write: float = 0.0
-
-
-@dataclass
 class Provider:
-    """One intelligence provider --- where an agent's thinking comes from.
+    """Where an agent's thinking comes from: an endpoint, a model, an auth mode.
 
-    A provider is two separable things: which agent CLI runs the tick
-    (`runner`), and how that CLI reaches a model (`env` + `secret_env`, or an
-    on-disk OAuth profile via `credentials_*`). Subscription auth is the case
-    that makes the split worth having: it sets no env at all, because Claude
-    Code resolves ANTHROPIC_API_KEY -> ANTHROPIC_AUTH_TOKEN -> the credentials
-    file, and only falls through to the file when neither var is set.
-
-    `secret_env` maps a *sprite-side* var name to the name of an admin-side env
-    var holding the value (e.g. ANTHROPIC_API_KEY <- DEEPSEEK_API_TOKEN). The
-    value never appears here: slop_salon.toml is tracked, and is inlined
-    verbatim into the public site bundle by `site/src/lib/agents.ts`.
+    `connector` sends a placeholder token that the sprites.dev gateway
+    overrides with the org's stored key. `secret_env` names the admin-side env
+    var `slop wake` passes as the bearer token at tick time. `credentials` is
+    reserved for a subscription OAuth profile and is not implemented.
     """
 
     name: str
-    runner: str = "claude"
-    # Shared dotfiles dispatcher profile. Runner remains explicit because
-    # sprite-side preparation (AGENTS.md rendering, hooks, usage parsing) needs
-    # to know which CLI the profile launches without loading another registry.
-    profile: str = ""
-    # Literal, non-secret env for the sprite (base URL, model, timeouts).
-    env: dict[str, str] = field(default_factory=dict)
-    # sprite var name -> admin env var name holding its value.
-    secret_env: dict[str, str] = field(default_factory=dict)
-    # Pin the in-sprite Claude Code to this version. Empty means "leave it".
-    claude_version: str = ""
-    # Optional liveness probe for `slop wake-check`. Hosted APIs have none.
-    health_url: str = ""
-    # OAuth profile to drop into the sprite, and the admin-side path to read it
-    # from. Both or neither.
-    credentials_dest: str = ""
-    credentials_source_env: str = ""
-    # May more than one sprite hold this OAuth profile at once? False by
-    # default: refresh tokens usually rotate on use, and a provider that
-    # revokes the old one on rotation would have its sprites deauthenticate
-    # each other. Set only where that has actually been tested.
-    credentials_shareable: bool = False
-    # Per-token rates, when the provider is metered. None means "not billed per
-    # token" (self-hosted, or a subscription), not "free".
-    pricing: Pricing | None = None
+    base_url: str
+    model: str
+    auth: str = "connector"
+    secret_env: str = ""
+    context_window: int = 0
 
     @property
-    def is_subscription(self) -> bool:
-        return bool(self.credentials_dest)
+    def model_id(self) -> str:
+        """The model without its OpenRouter preset suffix --- the provenance stamp."""
+        return self.model.split("@", 1)[0]
 
 
-@dataclass
+@dataclass(frozen=True)
 class Salon:
-    """One salon: the agents that know of each other, and the model they share.
-
-    Season 2 runs several salons side by side on different models to see
-    whether they individuate, so a salon is where the experiment's one variable
-    lives: `provider` is the model, and everything else is held constant. An
-    agent's siblings are *derived* from its salon --- every other agent in the
-    same salon --- rather than listed by hand, so the sibling graph is closed
-    by construction and adding an agent is one line, not N.
-    """
+    """The agents that know of each other, and the model they share."""
 
     name: str
-    # Human-readable name for the site ("GLM 5.3 Flash"). Defaults to the id.
     label: str = ""
-    # Provider id every agent in the salon runs on, unless its own block
-    # overrides it. "" defers to `default_provider`.
     provider: str = ""
+
+
+@dataclass(frozen=True)
+class Soul:
+    name: str
+    label: str = ""
 
 
 @dataclass
@@ -103,14 +54,14 @@ class Agent:
     handle: str
     github_repo: str
     sprite_id: str = ""
-    # Filled by the loader from `salon`; never read from the file.
+    salon: str = ""
+    soul: str = ""
+    # Every other agent in the salon, in registry order. Derived, never listed.
     siblings: list[str] = field(default_factory=list)
     namesake: str = ""
     namesake_url: str = ""
     live: bool = False
-    # Salon id, or "" for an agent that knows nobody.
-    salon: str = ""
-    # Provider id override, or "" to take the salon's, then the registry default.
+    # Provider override, or "" to take the salon's, then the registry default.
     provider: str = ""
 
 
@@ -120,27 +71,12 @@ class Config:
     agents: dict[str, Agent]
     providers: dict[str, Provider] = field(default_factory=dict)
     salons: dict[str, Salon] = field(default_factory=dict)
+    souls: dict[str, Soul] = field(default_factory=dict)
     default_provider: str = ""
-
-    def members(self, salon_name: str) -> list[str]:
-        """Agent names in salon `salon_name`, in registry order."""
-        if salon_name not in self.salons:
-            raise KeyError(f"unknown salon {salon_name!r}")
-        return [a.name for a in self.agents.values() if a.salon == salon_name]
+    claude_version: str = ""
 
     def provider_for(self, agent_name: str) -> Provider:
-        """The provider agent `agent_name` runs on.
-
-        Precedence: the agent's own `provider`, then its salon's, then the
-        registry `default_provider`. There is no fourth fallback: a config
-        that resolves to nothing is a config error, and saying so beats
-        quietly inventing an endpoint. The registry briefly carried a
-        hardcoded vLLM provider for exactly that case, which meant the one
-        situation it existed to rescue would have returned a tunnel that was
-        switched off the same week.
-        """
-        if agent_name not in self.agents:
-            raise KeyError(f"unknown agent {agent_name!r}")
+        """The agent's own `provider`, then its salon's, then `default_provider`."""
         agent = self.agents[agent_name]
         salon_provider = self.salons[agent.salon].provider if agent.salon else ""
         chosen = agent.provider or salon_provider or self.default_provider
@@ -151,53 +87,33 @@ class Config:
             )
         return self.providers[chosen]
 
+    def live_agents(self) -> list[Agent]:
+        return [a for a in self.agents.values() if a.live and a.sprite_id]
+
 
 def _parse_provider(name: str, fields: dict) -> Provider:
-    runner = fields.get("runner", "claude")
-    if runner not in RUNNERS:
-        raise ValueError(f"provider {name!r}: unknown runner {runner!r} (want one of {RUNNERS})")
-    raw_pricing = fields.get("pricing")
-    pricing = None
-    if raw_pricing is not None:
-        missing = {"input", "output"} - set(raw_pricing)
-        if missing:
-            raise ValueError(f"provider {name!r}: pricing needs {sorted(missing)}")
-        pricing = Pricing(
-            input=float(raw_pricing["input"]),
-            output=float(raw_pricing["output"]),
-            cache_read=float(raw_pricing.get("cache_read", 0.0)),
-            cache_write=float(raw_pricing.get("cache_write", 0.0)),
+    for key in ("base_url", "model"):
+        if not fields.get(key):
+            raise ValueError(f"provider {name!r}: `{key}` is required")
+    auth = fields.get("auth", "connector")
+    if auth not in AUTH_MODES:
+        raise ValueError(f"provider {name!r}: unknown auth {auth!r} (want one of {AUTH_MODES})")
+    secret_env = fields.get("secret_env", "")
+    if (auth == "secret_env") != bool(secret_env):
+        raise ValueError(
+            f"provider {name!r}: `secret_env` is required by, and only by, auth = 'secret_env'"
         )
-    credentials_dest = fields.get("credentials_dest", "")
-    default_profile = (
-        "codex-sub" if runner == "codex" else "claude-sub" if credentials_dest else "claude-api"
-    )
-    provider = Provider(
+    return Provider(
         name=name,
-        runner=runner,
-        profile=fields.get("profile", default_profile),
-        env={k: str(v) for k, v in fields.get("env", {}).items()},
-        secret_env=dict(fields.get("secret_env", {})),
-        claude_version=fields.get("claude_version", ""),
-        health_url=fields.get("health_url", ""),
-        credentials_dest=credentials_dest,
-        credentials_source_env=fields.get("credentials_source_env", ""),
-        credentials_shareable=bool(fields.get("credentials_shareable", False)),
-        pricing=pricing,
+        base_url=fields["base_url"].rstrip("/"),
+        model=fields["model"],
+        auth=auth,
+        secret_env=secret_env,
+        context_window=int(fields.get("context_window", 0)),
     )
-    if bool(provider.credentials_dest) != bool(provider.credentials_source_env):
-        raise ValueError(
-            f"provider {name!r}: credentials_dest and credentials_source_env must be set together"
-        )
-    if provider.credentials_shareable and not provider.credentials_dest:
-        raise ValueError(
-            f"provider {name!r}: credentials_shareable is meaningless without credentials_dest"
-        )
-    return provider
 
 
 def load_config(path: Path | str = "slop_salon.toml") -> Config:
-    """Parse slop_salon.toml and return a Config."""
     p = Path(path)
     if not p.exists():
         raise FileNotFoundError(f"config file not found: {p}")
@@ -218,6 +134,11 @@ def load_config(path: Path | str = "slop_salon.toml") -> Config:
             raise ValueError(f"salon {name!r}: provider {provider!r} has no [providers.*] block")
         salons[name] = Salon(name=name, label=fields.get("label", name), provider=provider)
 
+    souls = {
+        name: Soul(name=name, label=fields.get("label", name))
+        for name, fields in data.get("souls", {}).items()
+    }
+
     agents = {}
     for name, fields in data.get("agents", {}).items():
         if "siblings" in fields:
@@ -228,15 +149,19 @@ def load_config(path: Path | str = "slop_salon.toml") -> Config:
         salon = fields.get("salon", "")
         if salon and salon not in salons:
             raise ValueError(f"agent {name!r}: salon {salon!r} has no [salons.*] block")
+        soul = fields.get("soul", "")
+        if soul and soul not in souls:
+            raise ValueError(f"agent {name!r}: soul {soul!r} has no [souls.*] block")
         agents[name] = Agent(
             name=name,
             handle=fields["handle"],
             github_repo=fields["github_repo"],
             sprite_id=fields.get("sprite_id", ""),
+            salon=salon,
+            soul=soul,
             namesake=fields.get("namesake", ""),
             namesake_url=fields.get("namesake_url", ""),
             live=bool(fields.get("live", False)),
-            salon=salon,
             provider=provider,
         )
     for agent in agents.values():
@@ -251,39 +176,25 @@ def load_config(path: Path | str = "slop_salon.toml") -> Config:
         agents=agents,
         providers=providers,
         salons=salons,
+        souls=souls,
         default_provider=default_provider,
+        claude_version=data.get("claude_version", ""),
     )
-
-
-def _set_agent_field(config: Config, agent_name: str, key: str, value: str) -> None:
-    """Set `key = "value"` inside the `[agents.<agent_name>]` block, in place.
-
-    Rewrites the TOML textually rather than round-tripping it, so comments and
-    layout survive. If the key is already there its value is replaced; if not,
-    the line is inserted right after the section header.
-    """
-    text = config.path.read_text()
-    replace_pattern = re.compile(
-        rf"(\[agents\.{re.escape(agent_name)}\][^\[]*{re.escape(key)}\s*=\s*)\"[^\"]*\"",
-        re.DOTALL,
-    )
-    new_text, n = replace_pattern.subn(rf'\1"{value}"', text)
-    if n == 1:
-        config.path.write_text(new_text)
-        return
-
-    insert_pattern = re.compile(rf"(\[agents\.{re.escape(agent_name)}\]\n)")
-    new_text, n = insert_pattern.subn(rf'\1{key} = "{value}"\n', text)
-    if n != 1:
-        raise ValueError(f"could not find [agents.{agent_name}] section in {config.path}")
-    config.path.write_text(new_text)
 
 
 def save_sprite_id(config: Config, agent_name: str, sprite_id: str) -> None:
-    """Update slop_salon.toml in place to record a freshly-provisioned sprite ID."""
-    _set_agent_field(config, agent_name, "sprite_id", sprite_id)
-
-
-def save_provider(config: Config, agent_name: str, provider: str) -> None:
-    """Update slop_salon.toml in place to record an agent's provider."""
-    _set_agent_field(config, agent_name, "provider", provider)
+    """Set `sprite_id` inside the `[agents.<name>]` block, textually, so comments
+    and layout survive. Replaces the value if present, else inserts it after the
+    section header."""
+    text = config.path.read_text()
+    replace_pattern = re.compile(
+        rf"(\[agents\.{re.escape(agent_name)}\][^\[]*sprite_id\s*=\s*)\"[^\"]*\"",
+        re.DOTALL,
+    )
+    new_text, n = replace_pattern.subn(rf'\1"{sprite_id}"', text)
+    if n != 1:
+        insert_pattern = re.compile(rf"(\[agents\.{re.escape(agent_name)}\]\n)")
+        new_text, n = insert_pattern.subn(rf'\1sprite_id = "{sprite_id}"\n', text)
+        if n != 1:
+            raise ValueError(f"could not find [agents.{agent_name}] section in {config.path}")
+    config.path.write_text(new_text)

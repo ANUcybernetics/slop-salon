@@ -13,6 +13,13 @@ createSession against bsky.social, then follows didDoc to find the user's
 real PDS, so every call hits the right server even when AppView is lagging
 on a freshly-changed handle.
 
+Two things the tick environment adds, both enforced here rather than asked
+for in prose: every feed post is stamped with the model that made it
+(SLOP_MODEL / SLOP_SALON, as a `provenance` field on the record), and the
+salon boundary is closed --- a follow, reply, quote or mention that reaches
+an artist in another salon (SLOP_COLLECTIVE minus SLOP_SIBLINGS) is refused,
+and their posts are dropped from the timeline and notification reads.
+
 We ship no record-shape helpers for *writes* — the agent constructs JSON bodies
 itself (typically with `jq`). The reasoning: a single thin wrapper is easier for
 an agent to model than a fleet of per-operation tools, and the agent's
@@ -220,6 +227,10 @@ the single-quoted jq `'...'` program, where an apostrophe ends the quote.
     '{repo:$did, collection:"app.bsky.actor.profile", rkey:"self",
       record:($prof + {"$type":"app.bsky.actor.profile", description:$desc})}' > /tmp/post.json \\
     && bsky post com.atproto.repo.putRecord --file /tmp/post.json
+
+  # The salon boundary is enforced by this tool: a follow, reply, quote or
+  # mention reaching an artist in another salon is refused, and their posts
+  # never appear in `bsky timeline` or `bsky notifications`.
 
   # Set avatar / displayName / description. Read existing profile first so
   # you don't clobber the other fields. The profile record's rkey is always "self".
@@ -429,6 +440,91 @@ def _embed_image_count(record: dict) -> int:
     return len(images) if isinstance(images, list) else 0
 
 
+APPVIEW = "https://public.api.bsky.app"
+_handle_cache: dict[str, str] = {}
+
+
+def _salon() -> tuple[set[str], set[str]]:
+    """(siblings, outsiders): the handles in the agent's salon, and every other
+    artist in the collective. Both empty when the environment carries no salon."""
+    siblings = set(os.environ.get("SLOP_SIBLINGS", "").split())
+    collective = set(os.environ.get("SLOP_COLLECTIVE", "").split())
+    me = os.environ.get("BSKY_HANDLE", "")
+    return siblings, collective - siblings - {me}
+
+
+def _handle_of(did: str) -> str:
+    """Resolve a DID to its current handle via the public AppView (no auth)."""
+    if did not in _handle_cache:
+        try:
+            resp = httpx.get(
+                f"{APPVIEW}/xrpc/app.bsky.actor.getProfile",
+                params={"actor": did},
+                timeout=DEFAULT_TIMEOUT,
+            )
+            _handle_cache[did] = resp.json().get("handle", "") if resp.status_code == 200 else ""
+        except httpx.HTTPError:
+            _handle_cache[did] = ""
+    return _handle_cache[did]
+
+
+def _did_of_uri(uri: str) -> str | None:
+    return uri.removeprefix("at://").split("/", 1)[0] if uri.startswith("at://") else None
+
+
+def _referenced_dids(record: dict) -> set[str]:
+    """Every account a post record reaches: reply parent and root, quoted
+    record, and mention facets."""
+    dids: set[str] = set()
+    reply = record.get("reply") or {}
+    for key in ("parent", "root"):
+        did = _did_of_uri((reply.get(key) or {}).get("uri", ""))
+        if did:
+            dids.add(did)
+    uris: set[str] = set()
+    _collect_strings(record.get("embed") or {}, "uri", uris)
+    dids.update(d for d in (_did_of_uri(u) for u in uris) if d)
+    for facet in record.get("facets") or []:
+        for feature in facet.get("features") or []:
+            if isinstance(feature, dict) and feature.get("did"):
+                dids.add(feature["did"])
+    return dids
+
+
+def _guard_salon(collection: str, record: dict) -> None:
+    """Refuse a write that reaches an artist outside the agent's salon."""
+    _, outsiders = _salon()
+    if not outsiders:
+        return
+    if collection == "app.bsky.graph.follow":
+        dids = {str(record.get("subject", ""))}
+    elif collection == "app.bsky.feed.post":
+        dids = _referenced_dids(record)
+    else:
+        return
+    for did in dids:
+        handle = _handle_of(did)
+        if handle in outsiders:
+            typer.echo(
+                f"error: {handle} is an artist in another salon. Your salon is your only "
+                "collective on Bluesky; this write would cross it, so it is refused.",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+
+
+def _stamp_provenance(record: dict) -> None:
+    """Record which model made this post. Lexicon objects are open, so the PDS
+    stores the extra field and the site reads it back."""
+    model = os.environ.get("SLOP_MODEL")
+    if not model:
+        return
+    stamp = {"model": model}
+    if os.environ.get("SLOP_SALON"):
+        stamp["salon"] = os.environ["SLOP_SALON"]
+    record["provenance"] = stamp
+
+
 def _norm_text(text: str | None) -> str:
     """Collapse whitespace so a trivially-reformatted re-issue still matches."""
     return re.sub(r"\s+", " ", (text or "").strip())
@@ -593,6 +689,14 @@ def post(
                 err=True,
             )
             raise typer.Exit(code=1)
+    if (
+        nsid == "com.atproto.repo.createRecord"
+        and isinstance(parsed, dict)
+        and isinstance(parsed.get("record"), dict)
+    ):
+        _guard_salon(str(parsed.get("collection", "")), parsed["record"])
+        if parsed.get("collection") == "app.bsky.feed.post":
+            _stamp_provenance(parsed["record"])
     session = _get_session()
     url = f"{session.pds}/xrpc/{nsid}"
     # Idempotency guard: createRecord is a non-idempotent write, so a slow or
@@ -613,15 +717,17 @@ def post(
             )
             typer.echo(json.dumps({"uri": uri, "cid": cid}))
             raise typer.Exit(code=0)
-    if file is not None:
+    if parsed is not None:
+        # A parsed body (inline, or a --file createRecord) is re-serialised so
+        # the provenance stamp travels with it.
+        resp = httpx.post(url, headers=session.auth_headers, json=parsed, timeout=DEFAULT_TIMEOUT)
+    elif file is not None:
         resp = httpx.post(
             url,
             headers={**session.auth_headers, "Content-Type": _mime_of(file)},
             content=file_bytes,
             timeout=UPLOAD_TIMEOUT,
         )
-    elif json_body is not None:
-        resp = httpx.post(url, headers=session.auth_headers, json=parsed, timeout=DEFAULT_TIMEOUT)
     else:
         resp = httpx.post(url, headers=session.auth_headers, timeout=DEFAULT_TIMEOUT)
     if resp.status_code != 200:
@@ -678,6 +784,7 @@ def timeline(
     raw XRPC dump into context.
     """
     session = _get_session()
+    _, outsiders = _salon()
     data = _xrpc_get(session, "app.bsky.feed.getTimeline", (("limit", str(limit)),))
     for item in data.get("feed") or []:
         post = item.get("post") or {}
@@ -685,6 +792,8 @@ def timeline(
         if not mine and (
             author.get("did") == session.did or author.get("handle") == session.handle
         ):
+            continue
+        if author.get("handle") in outsiders:
             continue
         record = post.get("record") or {}
         typer.echo(
@@ -721,9 +830,12 @@ def notifications(
     this rule ("skip lines marked read") was ignored on the first wake.
     """
     session = _get_session()
+    _, outsiders = _salon()
     data = _xrpc_get(session, "app.bsky.notification.listNotifications", (("limit", str(limit)),))
     for note in data.get("notifications") or []:
         if not include_read and note.get("isRead", False):
+            continue
+        if (note.get("author") or {}).get("handle") in outsiders:
             continue
         record = note.get("record") or {}
         typer.echo(

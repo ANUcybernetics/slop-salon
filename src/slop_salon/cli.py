@@ -1,19 +1,18 @@
 """Admin `slop` CLI.
 
-Subcommands:
-    status         one-line dashboard per agent
-    feed           recent Bluesky posts (across or per agent)
-    logs           recent transcripts from a sprite
-    diff           repo changes since a given duration
-    drift          template vs. live-repo divergence per agent
-    talk           one-shot stateless prompt to an agent
-    wake           fire a tick at every live agent in parallel
-    usage          per-tick token and cost tally across live agents
-    provider       show, swap, or sync agents' intelligence providers
-    rotate-env     rewrite sprites' secrets + git credentials from the admin box
-    new            provision a new agent (see provision.py)
-    reset          season reset: tag, orphan templates, recreate, bluesky hygiene
-    sync-siblings  backfill missing sibling entries in live SIBLINGS.md
+status      one line per agent: handle, sprite state
+feed        recent Bluesky posts (across or per agent)
+logs        recent tick transcripts from a sprite
+diff        repo changes since a duration
+drift       template vs live-repo divergence per agent
+talk        one-shot prompt to an agent, run as a tick
+wake        a tick at every live agent (the timer's job)
+wake-check  dead-man check on the pipeline
+cadence     show or change how often the fleet ticks
+policy      (re)apply the egress allowlist to sprites
+new         provision a new agent
+recreate    destroy and rebuild an agent's sprite from its repo
+reset       season reset: tag, orphan templates, recreate, Bluesky hygiene
 """
 
 from __future__ import annotations
@@ -21,44 +20,29 @@ from __future__ import annotations
 import datetime as dt
 import difflib
 import json
-import os
-import re
 import shlex
 import subprocess
 import tempfile
 import time
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from statistics import mean, median
 
 import httpx
 import typer
 
-from slop_salon import cadence as cadence_mod
-from slop_salon import wake_slots, watchdog
-from slop_salon.config import load_config, save_provider
-from slop_salon.healing import SKIP_BUSY_CODE, claude_failed, heal_wedged, is_wedge
-from slop_salon.provision import (
-    SLOP_SALON_REPO,
-    _build_detoken_remote_cmd,
-    _build_git_config_cmd,
-    _build_install_ambient_hook_cmd,
-    _build_template_files,
-    _build_write_env_file_cmd,
-    _interpolate,
-    _render_sibling_block,
-    missing_provider_secrets,
-    provider_steps,
-    provision_agent,
-    resolve_secrets,
-)
-from slop_salon.recreate import recreate
-from slop_salon.reset import SEASON_TAG
-from slop_salon.reset import reset as reset_agent
-from slop_salon.sprites import ExecResult, SpriteExecutor, SpritesClient
-from slop_salon.tools.usage import session_cost
+from . import cadence as cadence_mod
+from . import wake as wake_mod
+from . import watchdog
+from .config import load_config
+from .provision import EGRESS_RULES, build_template_files, provision_agent
+from .recreate import recreate as recreate_agent
+from .reset import SEASON
+from .reset import reset as reset_agent
+from .sprites import SpritesClient
+from .tick import tick_env
 
 app = typer.Typer(add_completion=False, help="Slop Salon admin CLI.")
+
+CONFIG_OPTION = typer.Option(None, "--config", help="Path to slop_salon.toml")
 
 
 @app.callback()
@@ -70,11 +54,31 @@ def _config(path: str | None = None):
     return load_config(path or "slop_salon.toml")
 
 
+def _agent(config, name: str):
+    agent = config.agents.get(name)
+    if agent is None:
+        typer.echo(f"error: unknown agent {name!r}", err=True)
+        raise typer.Exit(code=1)
+    if not agent.sprite_id:
+        typer.echo(f"error: agent {name!r} has no sprite_id (not provisioned?)", err=True)
+        raise typer.Exit(code=1)
+    return agent
+
+
+def _targets(config, name: str | None):
+    """One agent, or every live one for `all`/None."""
+    if name in (None, "all"):
+        targets = config.live_agents()
+        if not targets:
+            typer.echo("no live agents", err=True)
+            raise typer.Exit(code=1)
+        return targets
+    return [_agent(config, name)]
+
+
 @app.command()
-def status(
-    config_path: str = typer.Option(None, "--config", help="Path to slop_salon.toml"),
-):
-    """Print one line per agent: name, handle, sprite state."""
+def status(config_path: str = CONFIG_OPTION):
+    """Print one line per agent: name, handle, salon, soul, sprite state."""
     config = _config(config_path)
     sprites = SpritesClient()
     for name, agent in config.agents.items():
@@ -85,65 +89,41 @@ def status(
                 sprite_state = f"error: {e}"
         else:
             sprite_state = "not provisioned"
-        typer.echo(f"{name:12s}  {agent.handle:30s}  {sprite_state}")
+        typer.echo(
+            f"{name:10s} {agent.handle:26s} {agent.salon:11s} {agent.soul:8s} {sprite_state}"
+        )
 
 
-def _require_sprite_id(config, agent_name: str) -> str:
-    agent = config.agents.get(agent_name)
-    if agent is None:
-        typer.echo(f"error: unknown agent {agent_name!r}", err=True)
-        raise typer.Exit(code=1)
-    if not agent.sprite_id:
-        typer.echo(f"error: agent {agent_name!r} has no sprite_id (not provisioned?)", err=True)
-        raise typer.Exit(code=1)
-    return agent.sprite_id
+# --- Reading ---
+
+_SLOPLOG_DELIM = "<<<SLOPLOG "
 
 
 @app.command()
 def logs(
     name: str = typer.Argument(..., help="Agent name"),
-    sessions: int = typer.Option(
-        1, "--sessions", "-n", help="How many recent tick sessions to show (newest first)"
-    ),
-    config_path: str = typer.Option(None, "--config"),
+    sessions: int = typer.Option(1, "--sessions", "-n", help="Recent tick sessions, newest first"),
+    config_path: str = CONFIG_OPTION,
 ):
     """Print recent claude tick transcripts from the agent's sprite, rendered as turns."""
     config = _config(config_path)
-    sprite_id = _require_sprite_id(config, name)
-    sprites = SpritesClient()
-    # Claude Code writes one JSONL transcript per session under
-    # ~/.claude/projects/<munged-cwd>/. Ticks run in ~/slop-salon-<name>, so the
-    # session dir ends in `slop-salon-<name>`. Stream the newest N files, each
-    # preceded by a delimiter line carrying its basename and mtime, then render
-    # the raw JSONL into readable turns client-side.
-    quoted_name = shlex.quote(name)
-    count = max(1, sessions)
+    agent = _agent(config, name)
+    # One JSONL transcript per session under ~/.claude/projects/<munged cwd>/.
     remote = (
-        f"ls -t ~/.claude/projects/*slop-salon-{quoted_name}/*.jsonl 2>/dev/null "
-        f"| head -{count} | while read -r f; do "
+        f"ls -t ~/.claude/projects/*slop-salon-{shlex.quote(name)}/*.jsonl 2>/dev/null "
+        f"| head -{max(1, sessions)} | while read -r f; do "
         f'echo "{_SLOPLOG_DELIM}$(basename "$f") '
         '$(date -u -r "$f" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)>>>"; '
         'cat "$f"; done'
     )
-    result = sprites.exec(sprite_id, ["bash", "-lc", remote])
+    result = SpritesClient().exec(agent.sprite_id, ["bash", "-lc", remote])
     if result.stderr.strip():
         typer.echo(result.stderr, err=True)
     rendered = _render_transcripts(result.stdout)
     typer.echo(rendered if rendered.strip() else "(no transcripts found)")
 
 
-# Sentinel that `slop logs` prepends to each streamed transcript so the client
-# can split a multi-session dump back into per-session blocks.
-_SLOPLOG_DELIM = "<<<SLOPLOG "
-
-
 def _render_transcripts(stream: str) -> str:
-    """Render the delimited JSONL stream emitted by `slop logs` into readable turns.
-
-    The stream is a run of sessions, each introduced by a
-    ``<<<SLOPLOG <basename> <mtime>>>>`` line and followed by that session's raw
-    JSONL transcript. Returns an empty string when no sessions are present.
-    """
     sessions: list[tuple[str, list[str]]] = []
     header: str | None = None
     body: list[str] = []
@@ -161,7 +141,6 @@ def _render_transcripts(stream: str) -> str:
 
 
 def _render_session(header: str, raw_lines: list[str]) -> str:
-    """Render one session: a header line plus the rendered turns."""
     parts = header.split()
     session_id = parts[0].removesuffix(".jsonl")[:8] if parts else "?"
     mtime = parts[1] if len(parts) > 1 else ""
@@ -180,7 +159,6 @@ def _render_session(header: str, raw_lines: list[str]) -> str:
 
 
 def _render_entry(obj: dict) -> list[str]:
-    """Render one transcript JSONL object as zero or more display lines."""
     typ = obj.get("type")
     ts = _short_ts(obj.get("timestamp", ""))
     content = (obj.get("message") or {}).get("content")
@@ -217,7 +195,6 @@ def _render_entry(obj: dict) -> list[str]:
 
 
 def _block_text(block: dict) -> str:
-    """Pull text out of a tool_result block (content is a str or a list of parts)."""
     content = block.get("content")
     if isinstance(content, str):
         return content
@@ -249,32 +226,25 @@ def _truncate(text: str, limit: int) -> str:
 
 
 def _short_ts(iso: str) -> str:
-    """`2026-06-02T10:02:21.478Z` -> `10:02:21`; missing/garbage -> blanks."""
     return iso.split("T", 1)[1][:8] if "T" in iso else " " * 8
 
 
 @app.command()
 def diff(
     name: str = typer.Argument(..., help="Agent name"),
-    since: str = typer.Option(
-        "1.day",
-        "--since",
-        help="Git revspec or duration (e.g. '1.day', '2.hours')",
-    ),
-    config_path: str = typer.Option(None, "--config"),
+    since: str = typer.Option("1.day", "--since", help="Git revspec or duration ('2.hours')"),
+    config_path: str = CONFIG_OPTION,
 ):
     """Show recent repo changes from the agent's sprite."""
     config = _config(config_path)
-    sprite_id = _require_sprite_id(config, name)
-    sprites = SpritesClient()
-    quoted_name = shlex.quote(name)
-    quoted_since = shlex.quote(since)
-    result = sprites.exec(
-        sprite_id,
+    agent = _agent(config, name)
+    result = SpritesClient().exec(
+        agent.sprite_id,
         [
             "bash",
             "-lc",
-            f"cd ~/slop-salon-{quoted_name} && git log --since={quoted_since} --stat -p",
+            f"cd ~/slop-salon-{shlex.quote(name)} && "
+            f"git log --since={shlex.quote(since)} --stat -p",
         ],
     )
     typer.echo(result.stdout)
@@ -285,56 +255,54 @@ def diff(
 APPVIEW = "https://public.api.bsky.app"
 
 
-def _fetch_author_feed(handle: str, limit: int) -> list[dict]:
-    """Fetch recent posts for `handle` from the public Bluesky AppView (unauthenticated)."""
-    response = httpx.get(
-        f"{APPVIEW}/xrpc/app.bsky.feed.getAuthorFeed",
-        params={"actor": handle, "limit": limit, "filter": "posts_and_author_threads"},
-        timeout=10.0,
-    )
-    response.raise_for_status()
-    return response.json().get("feed", [])
-
-
 @app.command()
 def feed(
     name: str = typer.Argument(None, help="Agent name (default: all agents)"),
     limit: int = typer.Option(10, "--limit", help="Posts per agent"),
-    config_path: str = typer.Option(None, "--config"),
+    config_path: str = CONFIG_OPTION,
 ):
     """Print recent Bluesky posts from one agent (or all agents)."""
     config = _config(config_path)
     targets = [config.agents[name]] if name else list(config.agents.values())
-
     for agent in targets:
         typer.echo(f"=== {agent.name} ({agent.handle}) ===")
         try:
-            entries = _fetch_author_feed(agent.handle, limit)
+            response = httpx.get(
+                f"{APPVIEW}/xrpc/app.bsky.feed.getAuthorFeed",
+                params={
+                    "actor": agent.handle,
+                    "limit": limit,
+                    "filter": "posts_and_author_threads",
+                },
+                timeout=10.0,
+            )
+            response.raise_for_status()
         except httpx.HTTPError as e:
             typer.echo(f"  (error: {e})")
             continue
-        for entry in entries:
+        for entry in response.json().get("feed", []):
             post = entry.get("post", {})
             record = post.get("record", {})
-            text = record.get("text", "")
             when = record.get("createdAt") or post.get("indexedAt", "")
-            typer.echo(f"  [{when}] {text}")
+            typer.echo(f"  [{when}] {record.get('text', '')}")
+
+
+# --- Ticking ---
 
 
 @app.command()
 def talk(
     name: str = typer.Argument(..., help="Agent name"),
     prompt: str = typer.Argument(..., help="One-shot prompt for the agent"),
-    config_path: str = typer.Option(None, "--config"),
+    config_path: str = CONFIG_OPTION,
 ):
-    """Send a one-shot stateless prompt to an agent. Runs as a tick."""
+    """Send a one-shot prompt to an agent. Runs as a tick, blocking until it ends."""
     config = _config(config_path)
-    sprite_id = _require_sprite_id(config, name)
-    sprites = SpritesClient()
-    quoted = shlex.quote(prompt)
-    result = sprites.exec(
-        sprite_id,
-        ["bash", "-lc", f"slop-tick {quoted}"],
+    agent = _agent(config, name)
+    result = SpritesClient().exec(
+        agent.sprite_id,
+        ["bash", "-lc", f"slop-tick {shlex.quote(prompt)}"],
+        env=tick_env(config, agent),
     )
     typer.echo(result.stdout)
     if result.stderr:
@@ -343,204 +311,36 @@ def talk(
         raise typer.Exit(code=result.exit_code)
 
 
-# How many agents tick concurrently in `wake`. The collective shares one
-# vLLM instance; capping concurrency keeps it saturated without queue thrash.
-# Raise toward saturation, lower for more headroom.
-#
-# Enforced twice, and it needs both: as the thread-pool width within one run,
-# and as a set of file locks (`wake_slots`) shared by every run on the box.
-# Firings deliberately overlap --- the dispatcher spawns each as a transient unit
-# --- so the pool alone bounds nothing globally, and two runs together once put
-# six concurrent ticks on a vLLM capped at four.
-WAKE_CONCURRENCY = 4
-
-
-def _exec_tick_with_retry(sprites: SpritesClient, sprite_id: str) -> tuple[ExecResult, bool]:
-    """Run one `slop-tick "tick"`, retrying once on the transient wedge signature.
-
-    A cold-start i/o-timeout to the sprite's exec proxy (the `is_wedge`
-    signature) is usually transient --- the sprite was idle/cold and the first
-    connect raced its warm-up; an immediate second attempt typically lands.
-    Absorbing it here keeps a one-off blip from being counted as a wedge, which
-    would otherwise redden the run and, after two in a row, trip an unnecessary
-    recreate. A genuinely wedged sprite fails both attempts --- the second result
-    still carries the wedge signature, so `heal_wedged` classifies and heals it
-    exactly as before. Returns (result, retried).
-    """
-    cmd = ["bash", "-lc", 'slop-tick "tick"']
-    result = sprites.exec(sprite_id, cmd)
-    if not is_wedge(result):
-        return result, False
-    return sprites.exec(sprite_id, cmd), True
-
-
-_ERROR_LINE = re.compile(r"error|fatal|rejected|exceeds|exceeded|traceback|exited", re.IGNORECASE)
-
-
-def _failure_tail(result: ExecResult, limit: int = 5) -> list[str]:
-    """The lines worth printing under a failed tick.
-
-    Both streams, tagged. `claude --print` reports its own errors on stdout
-    while git writes progress to stderr, so showing `stderr or stdout` renders
-    the git output of a claude-err tick and silently drops the reason claude
-    died --- which is the one thing the line exists to tell us.
-
-    Within a stream, prefer the lines that look like errors over the last few:
-    a tick that dies mid-run still commits, so stdout *ends* with git's commit
-    summary and a plain tail buries the `API Error` further up.
-    """
-    lines: list[str] = []
-    for label, blob in (("err", result.stderr), ("out", result.stdout)):
-        stream = (blob or "").strip().splitlines()
-        if not stream:
-            continue
-        hits = [line for line in stream if _ERROR_LINE.search(line)]
-        lines.extend(f"[{label}] {line}" for line in (hits or stream)[-limit:])
-    return lines
-
-
 @app.command()
 def wake(
-    config_path: str = typer.Option(None, "--config"),
+    only: list[str] = typer.Option(None, "--only", help="Tick just these agents (repeatable)"),
+    config_path: str = CONFIG_OPTION,
 ):
-    """Fire a `tick` at every live agent, a few at a time.
+    """Fire a `tick` at every live agent, a few at a time. Non-zero if any failed.
 
-    Driven by the `slop-wake.timer` systemd user unit on the admin box, which
-    spawns each wake as a transient unit so a slow run never blocks the next
-    firing. Ticks run `sprite exec ... slop-tick "tick"`; concurrency is
-    capped at WAKE_CONCURRENCY so the shared vLLM is saturated but not
-    thrashed. An agent still mid-tick from an overlapping run skips cleanly
-    (shown as `busy`, exit SKIP_BUSY_CODE), so only idle agents tick. Exits
-    non-zero if any agent genuinely failed, so systemd records a red run.
-
-    Because firings overlap, the cap is enforced globally via `wake_slots`, not
-    just by this run's pool. An agent that waits out `SLOP_WAKE_SLOT_WAIT`
-    without getting a slot is reported `deferred` and left for the next firing:
-    not a failure, and not fed to the healer, since it produced no tick result.
+    Driven by `slop-wake.timer` on the admin box. A wedged sprite (the
+    connection i/o-timeout signature) is retried once, and recreated after a
+    second consecutive wedged wake unless three or more wedge together.
     """
     config = _config(config_path)
-    live = [a for a in config.agents.values() if a.live and a.sprite_id]
-    if not live:
-        typer.echo("no live agents to wake", err=True)
-        raise typer.Exit(code=1)
-
-    sprites = SpritesClient()
-
-    slot_wait = wake_slots.slot_wait_from_env()
-
-    def _tick(agent):
-        start = time.monotonic()
-        # The slot is held for the tick itself, so the global cap counts work in
-        # flight rather than agents enqueued.
-        with wake_slots.acquire(WAKE_CONCURRENCY, wait=slot_wait) as acquired:
-            if not acquired:
-                return agent, None, time.monotonic() - start, False
-            result, retried = _exec_tick_with_retry(sprites, agent.sprite_id)
-        return agent, result, time.monotonic() - start, retried
-
-    failed = 0
-    deferred: list[str] = []
-    statuses: dict[str, str] = {}
-    results: dict[str, ExecResult] = {}
-    with ThreadPoolExecutor(max_workers=min(WAKE_CONCURRENCY, len(live))) as pool:
-        for agent, result, elapsed, retried in pool.map(_tick, live):
-            if result is None:
-                # No slot came free: another run is saturating vLLM. Not a
-                # failure and deliberately absent from `results` --- there is no
-                # tick outcome to classify, and feeding healing a synthetic one
-                # would corrupt its consecutive-state counters.
-                deferred.append(agent.name)
-                statuses[agent.name] = "deferred"
-                typer.echo(f"{agent.name:12s}  {'deferred':12s}  {elapsed:6.1f}s  (no free slot)")
-                continue
-            results[agent.name] = result
-            if result.exit_code == 0:
-                # slop-tick exits 0 even when `claude` itself errored (it still
-                # commits partial work), so an exit-0 tick isn't necessarily a
-                # working one --- surface that instead of a false `ok`.
-                status = "claude-err" if claude_failed(result) else "ok"
-            elif result.exit_code == SKIP_BUSY_CODE:
-                status = "busy"
-            else:
-                status = f"fail({result.exit_code})"
-            statuses[agent.name] = status
-            summary = f"{agent.name:12s}  {status:12s}  {elapsed:6.1f}s"
-            if retried:
-                summary += "  (retried i/o-timeout)"
-            typer.echo(summary)
-            # A claude-err tick produced nothing --- count it as a failure so the
-            # run goes red, the same as a non-zero exit would.
-            if result.exit_code not in (0, SKIP_BUSY_CODE) or claude_failed(result):
-                failed += 1
-                for line in _failure_tail(result):
-                    typer.echo(f"    {line}", err=True)
-
-    _heal_wedged_agents(results)
-
-    # Before the exit code, so a red run still records that a wake completed ---
-    # `slop wake-check` needs to tell "no wake is firing" apart from "wakes fire
-    # and fail", which are different outages with different fixes.
+    report = wake_mod.run(
+        config,
+        SpritesClient(),
+        only=list(only) if only else None,
+        recreate_fn=lambda n: recreate_agent(n, config_path=config_path or "slop_salon.toml"),
+        echo=typer.echo,
+    )
     try:
-        watchdog.write_stamp(statuses, now=dt.datetime.now(dt.UTC))
+        wake_mod.write_stamp(report.statuses, now=dt.datetime.now(dt.UTC))
     except OSError as exc:
-        typer.echo(f"[watchdog] could not write wake stamp (ignored): {exc!r}", err=True)
-
-    if failed:
+        typer.echo(f"could not write wake stamp (ignored): {exc!r}", err=True)
+    if not report.ok:
         raise typer.Exit(code=1)
-
-
-def _probe_inference(endpoint: str, token: str | None, timeout: float) -> watchdog.Probe:
-    """GET `<endpoint>/health`, classifying the two shapes that mean "down".
-
-    vLLM answers 503 on `EngineDeadError`, which is the zombie state that took
-    the collective down on 2026-07-28 while both boxes' units stayed green. Any
-    non-200 is reported: unlike cybersonic's prober (which *restarts* on a bad
-    probe, so must be conservative) this only files a todo, and a 401 from a
-    rotated key is a real outage worth hearing about.
-    """
-    # `endpoint` is a full health URL (from the provider's `health_url`), not a
-    # base to append to --- providers differ in where, or whether, they expose one.
-    url = endpoint
-    headers = {"Authorization": f"Bearer {token}"} if token else {}
-    try:
-        response = httpx.get(url, headers=headers, timeout=timeout)
-    except httpx.HTTPError as exc:
-        return watchdog.Probe(ok=False, detail=f"{url} unreachable ({type(exc).__name__})")
-    if response.status_code == 200:
-        return watchdog.Probe(ok=True, detail=f"{url} 200")
-    if response.status_code == 503:
-        return watchdog.Probe(
-            ok=False, detail=f"{url} 503 --- vLLM engine is dead (needs a restart)"
-        )
-    return watchdog.Probe(ok=False, detail=f"{url} returned {response.status_code}")
-
-
-def _money(value: float | None, width: int = 0) -> str:
-    """Render a cost, or `--` when the provider is not billed per token.
-
-    Deliberately not `$0.000`: a self-hosted endpoint or a subscription has a
-    real cost, it just is not per-token. Printing zero would understate as badly
-    as the old notional-Sonnet figure overstated.
-    """
-    text = "--" if value is None else f"${value:.3f}"
-    return f"{text:>{width}}" if width else text
-
-
-def _format_duration(seconds: float) -> str:
-    return f"{seconds / 60:.0f}min" if seconds < 3600 else f"{seconds / 3600:.1f}h"
 
 
 def _timer_stopped_for(timer: str) -> float | None:
-    """Seconds the timer has been inactive, or None while it is armed.
-
-    A duration rather than a boolean because stopping the wake timer is the
-    documented way to pause the fleet, so `wake-check` has to tell a pause in
-    progress from one nobody ever undid. Read off systemd's monotonic clock,
-    which is the same CLOCK_MONOTONIC `time.monotonic()` reads, so there is no
-    locale or timezone in the formatted timestamp to parse. A timer that has not
-    run at all this boot reports 0 and so reads as stopped for the whole uptime,
-    which it has been.
-    """
+    """Seconds the timer has been inactive, or None while armed. Read off
+    systemd's monotonic clock, the same one `time.monotonic()` reads."""
     completed = subprocess.run(
         [
             "systemctl",
@@ -566,136 +366,48 @@ def _timer_stopped_for(timer: str) -> float | None:
     return max(0.0, time.monotonic() - since_boot)
 
 
+def _format_duration(seconds: float) -> str:
+    return f"{seconds / 60:.0f}min" if seconds < 3600 else f"{seconds / 3600:.1f}h"
+
+
 @app.command(name="wake-check")
 def wake_check(
     max_age: str = typer.Option(
-        None, "--max-age", help="Staleness limit (default: derived from the timer's cadence)"
+        None, "--max-age", help="Staleness limit, e.g. '3.hours' (default: from the cadence)"
     ),
-    endpoint: str = typer.Option(
-        None, "--endpoint", help="Override the health URL to probe (default: from the providers)"
-    ),
-    timer: str = typer.Option(
-        "slop-wake.timer", "--timer", help="Wake timer unit to require active"
-    ),
-    timeout: float = typer.Option(15.0, "--timeout", help="Inference probe timeout, seconds"),
-    config_path: str = typer.Option(None, "--config"),
+    timer: str = typer.Option("slop-wake.timer", "--timer", help="Wake timer unit"),
 ):
-    """Dead-man check on the whole tick pipeline. Non-zero if anything is wrong.
+    """Dead-man check on the tick pipeline. Non-zero if anything is wrong.
 
-    Driven hourly by `slop-wake-watchdog.timer` on weddle, whose
-    `OnFailure=unit-oncall@%n.service` turns a non-zero exit into a deduped `nb`
-    todo (and `OnSuccess=unit-oncall-clear@` clears it on recovery), so this
-    needs no alerting of its own.
-
-    Checks three independent things, because each of the two July outages was
-    invisible to at least one of them: the timer has not been stopped longer
-    than a pause takes, a wake finished recently, and the model is reachable.
-    See `slop_salon.watchdog`.
+    Run hourly by `slop-wake-watchdog.timer`, whose OnFailure= files an oncall
+    todo. Both limits derive from the timer's cadence (see `slop_salon.cadence`).
     """
-    # Probe only what the providers in use actually expose. A self-hosted vLLM
-    # has /health; a hosted API has nothing to probe, and inventing a green
-    # probe for it would quietly turn this into a two-question check that still
-    # claims to ask three.
-    config = _config(config_path)
-    if endpoint:
-        health_urls = [endpoint]
-    else:
-        health_urls = sorted(
-            {
-                config.provider_for(name).health_url
-                for name, agent in config.agents.items()
-                if agent.live and config.provider_for(name).health_url
-            }
-        )
-
-    token = os.environ.get("SLOP_ANTHROPIC_AUTH_TOKEN") or os.environ.get("ANTHROPIC_AUTH_TOKEN")
-    probes = [_probe_inference(url, token, timeout) for url in health_urls]
-    # Collapse to one verdict: any unhealthy endpoint is a problem, and the
-    # detail names which.
-    inference = None
-    if probes:
-        bad = [p for p in probes if not p.ok]
-        inference = (
-            watchdog.Probe(ok=False, detail="; ".join(p.detail for p in bad))
-            if bad
-            else watchdog.Probe(ok=True, detail="; ".join(p.detail for p in probes))
-        )
-
-    # Derived from the timer unless overridden, so changing cadence cannot leave
-    # a 90-minute dead-man check pointed at a 6-hourly timer --- that mismatch
-    # files an oncall todo every hour, and an alert that always fires is an
-    # alert that gets silenced.
     limit = _parse_duration(max_age) if max_age else cadence_mod.current_max_age(timer)
-    # Only the staleness limit is overridable; the grace stays tied to the
-    # cadence, since --max-age exists for probing this check by hand and a hand
-    # run should not also redefine what counts as a pause.
     grace = cadence_mod.current_grace(timer)
     stopped_for = _timer_stopped_for(timer)
-
     found = watchdog.problems(
         stamp=watchdog.read_stamp(),
         now=dt.datetime.now(dt.UTC),
         max_age=limit,
         timer_stopped_for=stopped_for,
         timer_grace=grace,
-        inference=inference,
         timer_name=timer,
     )
-
     if not found:
-        served = inference.detail if inference else "no health endpoint to probe (hosted provider)"
-        # Say so when the timer is down but inside its grace: a deliberate pause
-        # should be visible in the journal, just not worth a todo.
         armed = (
             f"{timer} armed"
             if stopped_for is None
-            else (
-                f"{timer} stopped {_format_duration(stopped_for)} ago, inside the "
-                f"{_format_duration(grace)} a pause is given"
-            )
+            else f"{timer} stopped {_format_duration(stopped_for)} ago, inside the "
+            f"{_format_duration(grace)} a pause is given"
         )
-        typer.echo(f"ok: {armed}, wake stamp fresh (<{_format_duration(limit)}), {served}")
+        typer.echo(f"ok: {armed}, wake stamp fresh (<{_format_duration(limit)})")
         return
-
     for problem in found:
         typer.echo(f"WAKE-CHECK: {problem}", err=True)
     raise typer.Exit(code=1)
 
 
-def _heal_wedged_agents(results: dict[str, ExecResult]) -> None:
-    """Auto-recreate sprites wedged across consecutive wakes (guardrailed).
-
-    Never raises --- self-heal must not crash the wake. Honours `SLOP_AUTOHEAL=0`
-    (detect + alert only, no recreate) and an optional `SLOP_ALERT_WEBHOOK`
-    (a curl POST of each alert line).
-    """
-
-    def _alert(msg: str) -> None:
-        typer.echo(f"[heal] {msg}", err=True)
-        hook = os.environ.get("SLOP_ALERT_WEBHOOK")
-        if hook:
-            subprocess.run(["curl", "-fsS", "-m", "10", "--data-binary", msg, hook], check=False)
-
-    try:
-        report = heal_wedged(
-            results,
-            recreate_fn=recreate,
-            alert_fn=_alert,
-            now=dt.datetime.now(dt.UTC),
-            enabled=os.environ.get("SLOP_AUTOHEAL", "1") != "0",
-        )
-        if report.recreated:
-            typer.echo(f"[heal] recreated: {', '.join(report.recreated)}")
-        if report.failing:
-            typer.echo(
-                f"[heal] failing with no known signature: {', '.join(report.failing)}",
-                err=True,
-            )
-    except Exception as exc:  # noqa: BLE001 --- self-heal must never crash the wake
-        typer.echo(f"[heal] error (ignored): {exc!r}", err=True)
-
-
-SINCE_UNITS = {
+_DURATION_UNITS = {
     "min": 60,
     "mins": 60,
     "minute": 60,
@@ -704,29 +416,11 @@ SINCE_UNITS = {
     "hours": 3600,
     "day": 86400,
     "days": 86400,
-    "week": 604800,
-    "weeks": 604800,
 }
 
 
-def _parse_since(s: str | None) -> float | None:
-    """`6.hours` / `1.day` → unix-timestamp cutoff. None or empty → no filter."""
-    if not s:
-        return None
-    if "." not in s:
-        raise typer.BadParameter(f"--since must be <number>.<unit>, got {s!r}")
-    num_str, unit = s.split(".", 1)
-    try:
-        n = float(num_str)
-    except ValueError as e:
-        raise typer.BadParameter(f"--since: not a number: {num_str!r}") from e
-    if unit not in SINCE_UNITS:
-        raise typer.BadParameter(f"--since: unknown unit {unit!r} (try hours, days)")
-    return time.time() - n * SINCE_UNITS[unit]
-
-
 def _parse_duration(s: str) -> float:
-    """`90.mins` / `3.hours` → seconds. Same `<number>.<unit>` shape as --since."""
+    """`90.mins` / `3.hours` -> seconds."""
     if "." not in s:
         raise typer.BadParameter(f"duration must be <number>.<unit>, got {s!r}")
     num_str, unit = s.split(".", 1)
@@ -734,220 +428,9 @@ def _parse_duration(s: str) -> float:
         n = float(num_str)
     except ValueError as e:
         raise typer.BadParameter(f"duration: not a number: {num_str!r}") from e
-    if unit not in SINCE_UNITS:
+    if unit not in _DURATION_UNITS:
         raise typer.BadParameter(f"duration: unknown unit {unit!r} (try mins, hours)")
-    return n * SINCE_UNITS[unit]
-
-
-@app.command()
-def usage(
-    name: str = typer.Argument(None, help="Agent name (omit for all live)"),
-    since: str = typer.Option(None, "--since", help="Window e.g. '6.hours', '1.day', '7.days'"),
-    per_tick: bool = typer.Option(False, "--per-tick", help="One row per session, no aggregation"),
-    json_out: bool = typer.Option(False, "--json", help="Emit JSON instead of a table"),
-    config_path: str = typer.Option(None, "--config"),
-):
-    """Per-tick token usage and cost across live agents.
-
-    Fans out to each live sprite, runs `slop-usage tally <name>` in-sprite to
-    read its Claude Code session transcripts, and aggregates the results.
-    Dollar figures come from the provider registry's `pricing` block, so on a
-    metered provider they are real money, not an effort proxy; an unmetered
-    provider reports `--` rather than a made-up number.
-
-    COVERAGE: the tally counts transcripts that still exist on the sprite, not
-    ticks that happened. A recreated sprite starts from an empty transcript
-    directory, so its lifetime row understates by however much history it lost
-    --- gert and lelia read as near-idle next to vita in August 2026 for exactly
-    this reason, while their commit counts were in line with the fleet. The
-    `from` column is where each agent's data actually starts; compare agents
-    only inside an explicit `--since` window that postdates every `from`.
-    See `slop_salon.tools.usage`.
-    """
-    config = _config(config_path)
-    if name:
-        if name not in config.agents:
-            typer.echo(f"error: unknown agent {name!r}", err=True)
-            raise typer.Exit(code=1)
-        targets = [config.agents[name]]
-    else:
-        targets = [a for a in config.agents.values() if a.live and a.sprite_id]
-    if not targets:
-        typer.echo("no live agents", err=True)
-        raise typer.Exit(code=1)
-
-    cutoff = _parse_since(since)
-    sprites = SpritesClient()
-
-    def _fetch(agent):
-        cmd = f"slop-usage tally {shlex.quote(agent.name)}"
-        result = sprites.exec(agent.sprite_id, ["bash", "-lc", cmd])
-        if result.exit_code != 0:
-            return agent, [], (result.stderr or result.stdout or "").strip()
-        rows = []
-        for line in result.stdout.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                rows.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
-        if cutoff is not None:
-            rows = [r for r in rows if r.get("mtime", 0) >= cutoff]
-        # Price here, not in the sprite: the registry is the only place that
-        # knows what a provider charges, and an agent's provider can differ from
-        # its neighbour's. `cost_usd` stays absent for an unmetered provider
-        # (self-hosted or subscription) so the table can say `--` rather than
-        # imply a number nobody is billed.
-        pricing = config.provider_for(agent.name).pricing
-        for r in rows:
-            # Drop anything the sprite sent. Sprites installed before this change
-            # still emit a notional Sonnet `cost_usd`, and silently trusting it
-            # would keep reporting a real DeepSeek wake at ~40x until every
-            # sprite happened to be upgraded.
-            r.pop("cost_usd", None)
-            if pricing is not None:
-                r["cost_usd"] = round(session_cost(r, pricing), 6)
-        return agent, rows, None
-
-    with ThreadPoolExecutor(max_workers=len(targets)) as pool:
-        results = list(pool.map(_fetch, targets))
-
-    if per_tick:
-        for agent, rows, err in results:
-            if err:
-                typer.echo(f"{agent.name}: ERROR {err[:80]}", err=True)
-                continue
-            for r in rows:
-                if json_out:
-                    typer.echo(json.dumps(r))
-                else:
-                    # `calls` is API calls, `blocks` the transcript records they
-                    # were written as (~3x more). Showing both keeps anyone
-                    # reading this from re-deriving the old 3.2x-inflated figure.
-                    typer.echo(
-                        f"{agent.name:<8} {r['session']:<10} calls={r['turns']:<3} "
-                        f"blocks={r.get('blocks', '?'):<4} "
-                        f"in_new={r['in_new']:>6} cache_cr={r['cache_create']:>7} "
-                        f"cache_rd={r['cache_read']:>8} out={r['output']:>6} "
-                        f"{_money(r.get('cost_usd'))}"
-                    )
-        return
-
-    if json_out:
-        out = []
-        for agent, rows, err in results:
-            non_empty = [r for r in rows if r["turns"] > 0]
-            mtimes = [r["mtime"] for r in rows if r.get("mtime")]
-            entry = {
-                "agent": agent.name,
-                "ticks": len(non_empty),
-                "empty": len(rows) - len(non_empty),
-                # Same caveat as the table's `from` column: a consumer summing
-                # `total_cost_usd` across agents needs to know the rows cover
-                # different spans. See this command's docstring.
-                "covers_from": (
-                    dt.datetime.fromtimestamp(min(mtimes), tz=dt.UTC).astimezone().isoformat()
-                    if mtimes
-                    else None
-                ),
-            }
-            if err:
-                entry["error"] = err
-            elif non_empty:
-                costs = sorted(r["cost_usd"] for r in non_empty if "cost_usd" in r)
-                entry.update(
-                    {
-                        "provider": config.provider_for(agent.name).name,
-                        "median_turns": int(median(r["turns"] for r in non_empty)),
-                        "median_output_tokens": int(median(r["output"] for r in non_empty)),
-                    }
-                )
-                if costs:
-                    entry.update(
-                        {
-                            "median_cost_usd": round(median(costs), 4),
-                            "mean_cost_usd": round(mean(costs), 4),
-                            "max_cost_usd": round(max(costs), 4),
-                            "total_cost_usd": round(sum(costs), 4),
-                        }
-                    )
-            out.append(entry)
-        typer.echo(json.dumps(out, indent=2))
-        return
-
-    typer.echo(
-        f"{'agent':<8}{'ticks':>6}{'empty':>6}  {'turns':>5}  {'output':>8}  "
-        f"{'med $/tick':>12}  {'p95 $/tick':>12}  {'total $':>10}  {'from':>10}"
-    )
-    typer.echo("-" * 88)
-    grand_total = 0.0
-    coverage: dict[str, float] = {}
-    for agent, rows, err in results:
-        if err:
-            typer.echo(f"{agent.name:<8}  ERROR: {err[:60]}")
-            continue
-        non_empty = [r for r in rows if r["turns"] > 0]
-        empty = len(rows) - len(non_empty)
-        if not non_empty:
-            typer.echo(f"{agent.name:<8}{0:>6}{empty:>6}  (no ticks in window)")
-            continue
-        costs = sorted(r["cost_usd"] for r in non_empty if "cost_usd" in r)
-        med = costs[len(costs) // 2] if costs else None
-        # Nearest-rank: ceil(0.95 * n) - 1. The old `int(0.95 * (n - 1))` floored
-        # to index 0 for n <= 2, so the "p95" column printed the *cheapest* tick
-        # and came out below the median --- visibly nonsense on any short window.
-        p95 = costs[-(-95 * len(costs) // 100) - 1] if costs else None
-        total = sum(costs) if costs else None
-        grand_total += total or 0.0
-        med_turns = sorted(r["turns"] for r in non_empty)[len(non_empty) // 2]
-        med_out = sorted(r["output"] for r in non_empty)[len(non_empty) // 2]
-        # Where this agent's data starts. Without it a row that lost its history
-        # is indistinguishable from an agent that barely ticked.
-        mtimes = [r["mtime"] for r in rows if r.get("mtime")]
-        oldest = min(mtimes) if mtimes else None
-        if oldest is not None:
-            coverage[agent.name] = oldest
-        since_str = (
-            dt.datetime.fromtimestamp(oldest, tz=dt.UTC).astimezone().strftime("%Y-%m-%d")
-            if oldest
-            else "?"
-        )
-        typer.echo(
-            f"{agent.name:<8}{len(non_empty):>6}{empty:>6}  {med_turns:>5}  "
-            f"{med_out:>8}  {_money(med, 12)}  {_money(p95, 12)}  {_money(total, 10)}  "
-            f"{since_str:>10}"
-        )
-    blanks = f"{'':>6}{'':>6}  {'':>5}  {'':>8}  {'':>12}  {'':>12}"
-    typer.echo(f"{'total':<8}{blanks}  {_money(grand_total, 10)}")
-    # A total summed over uneven coverage is a floor, not a bill, and the
-    # per-agent split is not a ranking. Say so rather than leaving the reader to
-    # notice the `from` column disagrees with itself.
-    if (
-        cutoff is None
-        and len(coverage) > 1
-        and max(coverage.values()) - min(coverage.values()) > 86400
-    ):
-        newest = (
-            dt.datetime.fromtimestamp(max(coverage.values()), tz=dt.UTC)
-            .astimezone()
-            .strftime("%Y-%m-%d")
-        )
-        typer.echo(
-            f"\nuneven coverage: transcripts survive from {newest} for the newest agent "
-            f"and earlier for others, so this total is a floor and the rows are not\n"
-            f"comparable. For a like-for-like read: --since a window starting after {newest}."
-        )
-    unpriced = sorted(
-        {
-            config.provider_for(a.name).name
-            for a, rows, err in results
-            if not err and any("cost_usd" not in r for r in rows if r["turns"] > 0)
-        }
-    )
-    if unpriced:
-        typer.echo(f"\n`--` = not billed per token (providers: {', '.join(unpriced)})")
+    return n * _DURATION_UNITS[unit]
 
 
 @app.command()
@@ -957,20 +440,12 @@ def cadence(
 ):
     """Show or change how often the fleet ticks. Takes effect immediately.
 
-    `slop cadence` prints the current schedule; `slop cadence 6h` changes it via
-    a systemd drop-in and restarts the timer.
-
-    Cadence is the only lever with real leverage over cost. A tick's price is
-    dominated by a fixed floor --- the ~29k prompt prefix plus the mandatory
-    reads in the numbered routine --- so a rest tick that does nothing still
-    costs ~60% of one that makes and posts a piece. Ticks can be made rarer far
-    more easily than cheaper.
-
-    It is not only a cost knob: it sets how much of the salon's own activity an
-    agent sees between ticks, and so how conversational the work feels.
+    Cadence is the only lever with real leverage over cost: a tick's price is
+    dominated by its fixed prompt floor, so ticks are far easier to make rarer
+    than cheaper. It also sets how much of the salon an agent sees between
+    ticks, and so how conversational the work feels.
     """
     dropin = Path.home() / ".config/systemd/user" / cadence_mod.DROPIN_DIR / cadence_mod.DROPIN_NAME
-
     if spec:
         try:
             oncalendar = cadence_mod.spec_to_oncalendar(spec)
@@ -978,21 +453,17 @@ def cadence(
         except ValueError as exc:
             typer.echo(f"error: {exc}", err=True)
             raise typer.Exit(code=1) from exc
-
         dropin.parent.mkdir(parents=True, exist_ok=True)
         dropin.write_text(cadence_mod.render_dropin(oncalendar))
         subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
         typer.echo(f"cadence set: {oncalendar}\n  {dropin}")
-        # Restart only if it was already running. Changing the schedule of a
-        # stopped timer must not start it: the fleet is deliberately paused at
-        # times, and a config command that quietly resumes ticking is the kind
-        # of surprise you find out about from the Bluesky feed.
+        # Never start a stopped timer from here: the fleet is paused on purpose
+        # at times, and a config command that resumes ticking is a surprise.
         if _timer_stopped_for(timer) is None:
             subprocess.run(["systemctl", "--user", "restart", timer], check=True)
         else:
             typer.echo(
-                f"  note: {timer} is not running, so nothing ticks yet.\n"
-                f"        start it with `systemctl --user start {timer}`"
+                f"  note: {timer} is not running; start it with `systemctl --user start {timer}`"
             )
     else:
         oncalendar = cadence_mod.active_oncalendar(timer)
@@ -1001,339 +472,40 @@ def cadence(
             raise typer.Exit(code=1)
         analysis = cadence_mod.analyse(oncalendar)
         typer.echo(f"cadence: {oncalendar}")
-
     gap = cadence_mod.longest_gap(cadence_mod.parse_elapses(analysis))
     if gap:
         typer.echo(f"  every {_format_duration(gap)} ({int(86400 / gap)} ticks/agent/day)")
-        # Surfaced because it moves with cadence and nobody would think to look:
-        # `wake-check` derives its staleness limit from this timer, so slowing
-        # the fleet also slows how fast a dead pipeline is noticed.
-        limit = cadence_mod.max_age_for(gap)
-        typer.echo(f"  dead-man check now allows {_format_duration(limit)} of silence")
+        typer.echo(
+            f"  dead-man check now allows "
+            f"{_format_duration(cadence_mod.max_age_for(gap))} of silence"
+        )
     for line in analysis.splitlines():
         if "Next elapse" in line:
             typer.echo(f"  {line.strip()}")
 
 
-provider_app = typer.Typer(
-    add_completion=False,
-    help="Show or swap an agent's intelligence provider.",
-    no_args_is_help=True,
-)
-app.add_typer(provider_app, name="provider")
-
-# Anything not on this list is treated as a secret and never printed. An
-# allowlist rather than a denylist: a new provider adding a differently-named
-# key must not leak it just because nobody remembered to add a pattern.
-PROVIDER_PUBLIC_VARS = (
-    "AGENT_MODEL",
-    "AGENT_PROFILE",
-    "SLOP_RUNNER",
-    "ANTHROPIC_BASE_URL",
-    "ANTHROPIC_MODEL",
-    "ANTHROPIC_SMALL_FAST_MODEL",
-    "API_TIMEOUT_MS",
-)
+# --- Sprites and repos ---
 
 
-def _read_live_provider(sprites: SpriteExecutor, sprite_id: str) -> dict[str, str]:
-    """Read back the sprite's `~/.slop-provider`, secrets redacted.
-
-    What is actually running, as opposed to what the registry says should be ---
-    the two diverge the moment a swap half-fails, and that gap is exactly what
-    is worth seeing.
-    """
-    result = sprites.exec(sprite_id, ["bash", "-lc", "cat ~/.slop-provider 2>/dev/null || true"])
-    live: dict[str, str] = {}
-    for line in result.stdout.splitlines():
-        line = line.strip()
-        if not line.startswith("export "):
-            continue
-        key, _, value = line.removeprefix("export ").partition("=")
-        live[key] = value.strip("'\"") if key in PROVIDER_PUBLIC_VARS else "<set>"
-    return live
-
-
-@provider_app.command("list")
-def provider_list(config_path: str = typer.Option(None, "--config")):
-    """The provider registry, and who runs on what."""
-    config = _config(config_path)
-    if not config.providers:
-        typer.echo("no [providers.*] blocks; every agent falls back to the built-in vllm provider")
-        return
-
-    users: dict[str, list[str]] = {}
-    for name in config.agents:
-        users.setdefault(config.provider_for(name).name, []).append(name)
-
-    for pid, provider in config.providers.items():
-        default = " (default)" if pid == config.default_provider else ""
-        auth = "subscription" if provider.is_subscription else "api key"
-        # AGENT_MODEL is agent-run's runner-agnostic knob (codex reads only that);
-        # ANTHROPIC_MODEL is what the claude runner reads directly.
-        model = provider.env.get("AGENT_MODEL") or provider.env.get("ANTHROPIC_MODEL") or "-"
-        typer.echo(f"{pid}{default}")
-        typer.echo(
-            f"  profile={provider.profile}  runner={provider.runner}  auth={auth}  model={model}"
-        )
-        if provider.claude_version:
-            typer.echo(f"  claude pinned to {provider.claude_version}")
-        missing = missing_provider_secrets(provider)
-        if missing:
-            typer.echo(f"  UNUSABLE: missing admin env {missing}")
-        typer.echo(f"  agents: {', '.join(users.get(pid, [])) or '(none)'}")
-
-
-@provider_app.command("show")
-def provider_show(
-    name: str = typer.Argument(None, help="Agent name (omit for all)"),
-    live: bool = typer.Option(False, "--live", help="Also read ~/.slop-provider off each sprite"),
-    config_path: str = typer.Option(None, "--config"),
-):
-    """What provider each agent is configured for --- and, with --live, running."""
-    config = _config(config_path)
-    if name and name not in config.agents:
-        typer.echo(f"error: unknown agent {name!r}", err=True)
-        raise typer.Exit(code=1)
-    targets = [config.agents[name]] if name else list(config.agents.values())
-
-    sprites = SpritesClient() if live else None
-    for agent in targets:
-        provider = config.provider_for(agent.name)
-        source = "explicit" if agent.provider else "default"
-        typer.echo(f"{agent.name:<8} {provider.name:<12} runner={provider.runner:<7} ({source})")
-        # Guard on `sprites`, not `live`: they say the same thing (it is non-None
-        # exactly when --live), but this way the reader --- and the type checker
-        # --- can see it is set without tracing back to where it was built.
-        if not (sprites and agent.sprite_id):
-            continue
-        try:
-            running = _read_live_provider(sprites, agent.sprite_id)
-        except Exception as exc:  # noqa: BLE001 --- a dead sprite must not abort the sweep
-            typer.echo(f"         live: unreachable ({type(exc).__name__})")
-            continue
-        if not running:
-            typer.echo("         live: no ~/.slop-provider (pre-split sprite, using ~/.slop-env)")
-            continue
-        summary = "  ".join(f"{k}={v}" for k, v in sorted(running.items()))
-        typer.echo(f"         live: {summary}")
-
-
-@provider_app.command("set")
-def provider_set(
-    name: str = typer.Argument(..., help="Agent name, or 'all' for every live agent"),
-    provider_id: str = typer.Argument(..., help="Provider id from the registry"),
-    config_path: str = typer.Option(None, "--config"),
-):
-    """Swap an agent onto another provider, live. Takes effect next tick.
-
-    Rewrites `~/.slop-provider` in the sprite and records the choice in
-    slop_salon.toml. Nothing is restarted and nothing else in the sprite is
-    touched: ticks are stateless, so the next wake simply reads the new file.
-
-    A swap and a fresh provision run the same `provider_steps`, so the state
-    they leave behind is identical --- a swapped sprite is not a special case
-    anyone has to reason about later.
-    """
-    config = _config(config_path)
-    if provider_id not in config.providers:
-        known = ", ".join(config.providers) or "(none defined)"
-        typer.echo(f"error: unknown provider {provider_id!r}; known: {known}", err=True)
-        raise typer.Exit(code=1)
-    provider = config.providers[provider_id]
-
-    if name == "all":
-        targets = [a for a in config.agents.values() if a.live and a.sprite_id]
-    elif name in config.agents:
-        targets = [config.agents[name]]
-    else:
-        typer.echo(f"error: unknown agent {name!r}", err=True)
-        raise typer.Exit(code=1)
-
-    if not targets:
-        typer.echo("no matching agents with a sprite", err=True)
-        raise typer.Exit(code=1)
-
-    # Resolve once, before touching anything: either every target can be swapped
-    # or none should be, so a missing token doesn't leave the fleet split across
-    # two providers mid-command.
-    try:
-        steps = provider_steps(provider)
-    except RuntimeError as exc:
-        typer.echo(f"error: {exc}", err=True)
-        raise typer.Exit(code=1) from exc
-
-    if provider.is_subscription and not provider.credentials_shareable and len(targets) > 1:
-        typer.echo(
-            f"refusing to put {len(targets)} agents on {provider_id!r} at once: "
-            "subscription OAuth profiles rotate refresh tokens on use, and whether "
-            "two sprites sharing one profile deauthenticate each other is untested "
-            "for this provider. Canary a single agent, establish that a refresh by "
-            "one holder does not revoke another's token, then set "
-            "credentials_shareable on the provider.",
-            err=True,
-        )
-        raise typer.Exit(code=1)
-
-    sprites = SpritesClient()
-    failed = []
-    for agent in targets:
-        if not agent.sprite_id:
-            typer.echo(f"{agent.name}: no sprite_id, skipping")
-            continue
-        typer.echo(f"{agent.name} -> {provider_id}")
-        try:
-            for label, command in steps:
-                result = sprites.exec(agent.sprite_id, ["bash", "-lc", command])
-                if result.exit_code != 0:
-                    raise RuntimeError(f"{label} failed (exit={result.exit_code}): {result.stderr}")
-                typer.echo(f"  ok: {label}")
-        except Exception as exc:  # noqa: BLE001
-            typer.echo(f"  FAILED: {exc}", err=True)
-            failed.append(agent.name)
-            continue
-        save_provider(config, agent.name, provider_id)
-
-    if failed:
-        typer.echo(f"\nfailed: {', '.join(failed)}", err=True)
-        raise typer.Exit(code=1)
-    typer.echo("\nDone. Takes effect on each agent's next tick.")
-
-
-@provider_app.command("sync")
-def provider_sync(
+@app.command()
+def policy(
     name: str = typer.Argument(None, help="Agent name; omit or 'all' for every live agent"),
-    config_path: str = typer.Option(None, "--config"),
+    config_path: str = CONFIG_OPTION,
 ):
-    """Push each agent's *resolved* provider to its sprite, recording nothing.
-
-    `provider set` moves one agent off what the registry says; this makes
-    sprites match what it already says --- after a salon's `provider` changes,
-    or after a provider block's env does. Because it writes nothing back,
-    moving a whole salon onto a new model stays one edit in the registry rather
-    than three per-agent overrides that then have to be unpicked.
-
-    Takes one agent so a model swap can be canaried before the rest of its
-    salon follows.
-    """
+    """(Re)apply the DNS egress allowlist to sprites. Provisioning and recreate
+    already do this; run it after editing `EGRESS_RULES` for a live fleet."""
     config = _config(config_path)
-    if name in (None, "all"):
-        targets = [a for a in config.agents.values() if a.live and a.sprite_id]
-    elif name in config.agents:
-        targets = [config.agents[name]]
-    else:
-        typer.echo(f"error: unknown agent {name!r}", err=True)
-        raise typer.Exit(code=1)
-    if not targets:
-        typer.echo("no matching agents with a sprite", err=True)
-        raise typer.Exit(code=1)
-
-    # Resolve every target before touching any sprite: either all of them can
-    # be synced or none should be, so a missing token cannot leave a salon
-    # split across two models mid-command.
-    plans: dict[str, list[tuple[str, str]]] = {}
-    try:
-        for agent in targets:
-            provider = config.provider_for(agent.name)
-            if provider.name not in plans:
-                plans[provider.name] = provider_steps(provider)
-    except (RuntimeError, ValueError) as exc:
-        typer.echo(f"error: {exc}", err=True)
-        raise typer.Exit(code=1) from exc
-
     sprites = SpritesClient()
-    failed = []
-    for agent in targets:
-        provider = config.provider_for(agent.name)
-        typer.echo(f"{agent.name} -> {provider.name}")
-        try:
-            for label, command in plans[provider.name]:
-                result = sprites.exec(agent.sprite_id, ["bash", "-lc", command])
-                if result.exit_code != 0:
-                    raise RuntimeError(f"{label} failed (exit={result.exit_code}): {result.stderr}")
-                typer.echo(f"  ok: {label}")
-        except Exception as exc:  # noqa: BLE001
-            typer.echo(f"  FAILED: {exc}", err=True)
-            failed.append(agent.name)
-
-    if failed:
-        typer.echo(f"\nfailed: {', '.join(failed)}", err=True)
-        raise typer.Exit(code=1)
-    typer.echo("\nDone. Takes effect on each agent's next tick.")
+    for agent in _targets(config, name):
+        sprites.set_network_policy(agent.sprite_id, EGRESS_RULES)
+        typer.echo(f"{agent.name:12s}  policy applied ({len(EGRESS_RULES)} rules)")
 
 
-@app.command(name="rotate-env")
-def rotate_env(
-    name: str = typer.Argument(None, help="Agent name; omit or 'all' for every live agent"),
-    config_path: str = typer.Option(None, "--config"),
-):
-    """Rewrite each sprite's `~/.slop-env` and git credentials from current secrets.
-
-    sprites.dev has no API for setting env from outside, so a sprite keeps its
-    own copy of every secret, written once at provision time. Rotate a token on
-    the admin box and that copy silently goes stale: the fleet kept pushing with
-    a token nobody was maintaining any more, and the drift was invisible because
-    nothing compares the two. This is the command the runbook has always pointed
-    at for that.
-
-    Leaves the provider file alone (`slop provider sync` owns it) and repoints
-    `origin` at a token-free URL, so the token afterwards lives in exactly one
-    file per sprite.
-    """
-    config = _config(config_path)
-    if name in (None, "all"):
-        targets = [a for a in config.agents.values() if a.live and a.sprite_id]
-    elif name in config.agents:
-        targets = [config.agents[name]]
-    else:
-        typer.echo(f"error: unknown agent {name!r}", err=True)
-        raise typer.Exit(code=1)
-    if not targets:
-        typer.echo("no matching agents with a sprite", err=True)
-        raise typer.Exit(code=1)
-
-    all_names = list(config.agents.keys())
-    sprites = SpritesClient()
-    failed = []
-    for agent in targets:
-        env = resolve_secrets(agent.name, all_names)
-        gh_token = env.get("GH_TOKEN")
-        if not gh_token:
-            typer.echo("error: SLOP_GH_TOKEN missing from the admin env", err=True)
-            raise typer.Exit(code=1)
-        env["BSKY_HANDLE"] = agent.handle
-        steps = [
-            ("write ~/.slop-env", _build_write_env_file_cmd({"AGENT_NAME": agent.name, **env})),
-            ("write ~/.git-credentials", _build_git_config_cmd(agent.name, gh_token)),
-            ("de-token origin", _build_detoken_remote_cmd(agent.name, agent.github_repo)),
-        ]
-        typer.echo(f"{agent.name}")
-        try:
-            for label, command in steps:
-                result = sprites.exec(agent.sprite_id, ["bash", "-lc", command])
-                if result.exit_code != 0:
-                    raise RuntimeError(f"{label} failed (exit={result.exit_code}): {result.stderr}")
-                typer.echo(f"  ok: {label}")
-        except Exception as exc:  # noqa: BLE001
-            typer.echo(f"  FAILED: {exc}", err=True)
-            failed.append(agent.name)
-
-    if failed:
-        typer.echo(f"\nfailed: {', '.join(failed)}", err=True)
-        raise typer.Exit(code=1)
-    typer.echo("\nDone. Takes effect on each agent's next tick.")
-
-
-# .gitignore is here because nothing else ships it: an admin re-sync only
-# overwrites CLAUDE.md, so a rule added to the template never reaches a live
-# agent. The AGENTS.md rule sat unshipped that way until the codex swap made
-# every tick commit the generated file.
-DRIFT_DEFAULT_FILES = ("SOUL.md", "CLAUDE.md", "slop-tick", ".gitignore")
-DRIFT_DEFAULT_HELP = ", ".join(DRIFT_DEFAULT_FILES)
+DRIFT_DEFAULT_FILES = ("SOUL.md", "CLAUDE.md", "slop-tick", "setup.sh", ".gitignore")
+DRIFT_FILES_HELP = f"Files to check (default: {', '.join(DRIFT_DEFAULT_FILES)})"
 
 
 def _fetch_live_files(repo: str, files: list[str]) -> dict[str, str | None]:
-    """Shallow-clone `repo` and return {filename: content or None if missing}."""
     with tempfile.TemporaryDirectory() as td:
         clone_dir = Path(td) / "repo"
         subprocess.run(
@@ -1347,121 +519,59 @@ def _fetch_live_files(repo: str, files: list[str]) -> dict[str, str | None]:
 @app.command()
 def drift(
     name: str = typer.Argument(None, help="Agent name (omit to scan all)"),
-    file: list[str] = typer.Option(
-        None, "--file", "-f", help=f"Files to check (default: {DRIFT_DEFAULT_HELP})"
-    ),
+    file: list[str] = typer.Option(None, "--file", "-f", help=DRIFT_FILES_HELP),
     templates_dir: str = typer.Option("templates", "--templates"),
-    soul_path: str = typer.Option("SOUL.md", "--soul"),
-    config_path: str = typer.Option(None, "--config"),
+    souls_dir: str = typer.Option("souls", "--souls"),
+    config_path: str = CONFIG_OPTION,
 ):
-    """Diff live agent repos against the canonical templates.
-
-    Use to spot SOUL.md tampering (should always be clean) and to inspect
-    how each agent has edited its own CLAUDE.md (drift is expected there).
-    Also flags template files missing from a live repo --- e.g. an agent
-    provisioned before a new template file was added.
-    """
+    """Diff live agent repos against the templates. SOUL.md drift is a bug;
+    CLAUDE.md and setup.sh drift is expected, and the point."""
     config = _config(config_path)
-    if name:
-        if name not in config.agents:
-            typer.echo(f"error: unknown agent {name!r}", err=True)
-            raise typer.Exit(code=1)
-        targets = [config.agents[name]]
-    else:
-        targets = list(config.agents.values())
-
+    targets = [config.agents[name]] if name in config.agents else list(config.agents.values())
+    if name and name not in config.agents:
+        typer.echo(f"error: unknown agent {name!r}", err=True)
+        raise typer.Exit(code=1)
     files = list(file) if file else list(DRIFT_DEFAULT_FILES)
-
     for i, agent in enumerate(targets):
         if i:
             typer.echo("")
-        siblings = [(s, config.agents[s].handle) for s in agent.siblings if s in config.agents]
-        expected = _build_template_files(
-            Path(templates_dir),
-            Path(soul_path),
-            agent.name,
-            agent.handle,
-            siblings,
-        )
+        expected = build_template_files(config, agent, templates_dir, souls_dir)
         try:
             live = _fetch_live_files(agent.github_repo, files)
         except subprocess.CalledProcessError as e:
             stderr = (e.stderr.decode().strip() if e.stderr else "").splitlines()
-            tail = stderr[-1] if stderr else f"exit {e.returncode}"
-            typer.echo(f"{agent.name}\n  could not fetch {agent.github_repo}: {tail}")
+            typer.echo(
+                f"{agent.name}\n  could not fetch {agent.github_repo}: "
+                f"{stderr[-1] if stderr else e.returncode}"
+            )
             continue
         typer.echo(agent.name)
         for f in files:
-            exp = expected.get(f)
-            got = live.get(f)
+            exp, got = expected.get(f), live.get(f)
             if exp is None:
                 typer.echo(f"  {f:14s}  no template")
-                continue
-            if got is None:
+            elif got is None:
                 typer.echo(f"  {f:14s}  MISSING from live repo")
-                continue
-            if exp == got:
+            elif exp == got:
                 typer.echo(f"  {f:14s}  clean")
-                continue
-            diff_lines = list(
-                difflib.unified_diff(
-                    exp.splitlines(keepends=True),
-                    got.splitlines(keepends=True),
-                    fromfile=f"template/{f}",
-                    tofile=f"{agent.name}/{f}",
+            else:
+                diff_lines = list(
+                    difflib.unified_diff(
+                        exp.splitlines(keepends=True),
+                        got.splitlines(keepends=True),
+                        fromfile=f"template/{f}",
+                        tofile=f"{agent.name}/{f}",
+                    )
                 )
-            )
-            added = sum(1 for ln in diff_lines if ln.startswith("+") and not ln.startswith("+++"))
-            removed = sum(1 for ln in diff_lines if ln.startswith("-") and not ln.startswith("---"))
-            typer.echo(f"  {f:14s}  drift (+{added}/-{removed})")
-            for line in diff_lines:
-                typer.echo(f"    {line.rstrip()}")
-
-
-@app.command(name="install-hooks")
-def install_hooks(
-    name: str = typer.Argument(..., help="Agent name (use 'all' for every live agent)"),
-    config_path: str = typer.Option(None, "--config"),
-):
-    """Push the ambient-recall hook + Claude Code settings to a live sprite.
-
-    Idempotent retrofit for sprites provisioned before the hook existed.
-    Also runs `uv tool upgrade slop-salon` so `slop-recall` is on PATH.
-    `provision_agent` runs the same install step for new agents.
-    """
-    config = _config(config_path)
-    if name == "all":
-        targets = [a for a in config.agents.values() if a.live and a.sprite_id]
-        if not targets:
-            typer.echo("no live agents", err=True)
-            raise typer.Exit(code=1)
-    else:
-        _require_sprite_id(config, name)
-        targets = [config.agents[name]]
-
-    sprites = SpritesClient()
-    # --reinstall pulls the latest commit on git+https sources without
-    # caring about the package version, which we don't bump per-change.
-    upgrade_cmd = f"~/.local/bin/uv tool install --reinstall {SLOP_SALON_REPO}"
-    hook_cmd = _build_install_ambient_hook_cmd()
-
-    failed = 0
-    for agent in targets:
-        typer.echo(f"{agent.name:12s}  reinstalling slop-salon...")
-        result = sprites.exec(agent.sprite_id, ["bash", "-lc", upgrade_cmd])
-        if result.exit_code != 0:
-            typer.echo(f"  upgrade failed: {result.stderr or result.stdout}", err=True)
-            failed += 1
-            continue
-        typer.echo(f"{agent.name:12s}  installing hook...")
-        result = sprites.exec(agent.sprite_id, ["bash", "-lc", hook_cmd])
-        if result.exit_code != 0:
-            typer.echo(f"  hook install failed: {result.stderr or result.stdout}", err=True)
-            failed += 1
-            continue
-        typer.echo(f"{agent.name:12s}  ok")
-    if failed:
-        raise typer.Exit(code=1)
+                added = sum(
+                    1 for ln in diff_lines if ln.startswith("+") and not ln.startswith("+++")
+                )
+                removed = sum(
+                    1 for ln in diff_lines if ln.startswith("-") and not ln.startswith("---")
+                )
+                typer.echo(f"  {f:14s}  drift (+{added}/-{removed})")
+                for line in diff_lines:
+                    typer.echo(f"    {line.rstrip()}")
 
 
 @app.command()
@@ -1470,44 +580,40 @@ def new(
     yes_dns: bool = typer.Option(
         False, "--yes-dns", help="Skip the manual DNS confirmation prompt"
     ),
-    config_path: str = typer.Option(None, "--config"),
+    config_path: str = CONFIG_OPTION,
 ):
     """Provision a new agent end-to-end."""
-    provision_agent(
-        name,
-        config_path=config_path or "slop_salon.toml",
-        skip_dns_confirm=yes_dns,
-    )
+    provision_agent(name, config_path=config_path or "slop_salon.toml", skip_dns_confirm=yes_dns)
+
+
+@app.command()
+def recreate(
+    name: str = typer.Argument(..., help="Agent whose sprite to destroy and rebuild"),
+    config_path: str = CONFIG_OPTION,
+):
+    """Destroy and rebuild an agent's sprite from its repo (the wedge remedy)."""
+    recreate_agent(name, config_path=config_path or "slop_salon.toml")
 
 
 @app.command()
 def reset(
     name: str = typer.Argument(..., help="Agent to reset (must have a sprite and a repo)"),
-    tag: str = typer.Option(SEASON_TAG, "--tag", help="Tag to leave on the old head"),
+    tag: str = typer.Option(f"season-{SEASON - 1}", "--tag", help="Tag to leave on the old head"),
     skip_repo: bool = typer.Option(
-        False, "--skip-repo", help="Retry without the tag + orphan push (already done)"
+        False, "--skip-repo", help="Retry without the tag + orphan push"
     ),
-    skip_sprite: bool = typer.Option(
-        False, "--skip-sprite", help="Repo + Bluesky only; leave the sprite alone"
-    ),
+    skip_sprite: bool = typer.Option(False, "--skip-sprite", help="Leave the sprite alone"),
     skip_bluesky: bool = typer.Option(
-        False, "--skip-bluesky", help="Repo + sprite only; leave the Bluesky profile alone"
+        False, "--skip-bluesky", help="Leave the Bluesky profile alone"
     ),
-    marker: bool = typer.Option(
-        True, "--marker/--no-marker", help="Post and pin a season marker on the profile"
-    ),
+    marker: bool = typer.Option(True, "--marker/--no-marker", help="Post and pin a season marker"),
     discard_unpushed: bool = typer.Option(
         False, "--discard-unpushed", help="Reset even if the sprite holds commits not on GitHub"
     ),
-    config_path: str = typer.Option(None, "--config"),
+    config_path: str = CONFIG_OPTION,
 ):
-    """Reset an agent to a fresh season start (see reset.py).
-
-    Tags the repo head, force-pushes an orphan commit of fresh templates,
-    recreates the sprite on the provider the registry resolves now, then
-    unfollows everyone, blanks the profile and asserts the bot label. Stop the
-    wake timer first: the pre-flight refuses a sprite mid-tick.
-    """
+    """Reset an agent to a fresh season start (see reset.py). Stop the wake
+    timer first: the pre-flight refuses a sprite mid-tick."""
     reset_agent(
         name,
         config_path=config_path or "slop_salon.toml",
@@ -1518,88 +624,3 @@ def reset(
         marker=marker,
         discard_unpushed=discard_unpushed,
     )
-
-
-SIBLINGS_HEADER_RE = re.compile(r"^## (\S+)\s*$", re.MULTILINE)
-
-
-@app.command(name="sync-siblings")
-def sync_siblings(
-    name: str = typer.Argument(None, help="Agent name (omit to sync all live agents)"),
-    config_path: str = typer.Option(None, "--config"),
-    dry_run: bool = typer.Option(
-        False, "--dry-run", help="Report missing entries but do not commit/push"
-    ),
-):
-    """Backfill missing sibling entries in each live agent's SIBLINGS.md.
-
-    Preserves existing entries (and any notes the agent has accumulated);
-    appends fresh stubs for siblings listed in slop_salon.toml but not yet
-    present as `## <name>` headers. Idempotent.
-    """
-    config = _config(config_path)
-    if name:
-        if name not in config.agents:
-            typer.echo(f"error: unknown agent {name!r}", err=True)
-            raise typer.Exit(code=1)
-        targets = [config.agents[name]]
-    else:
-        targets = [a for a in config.agents.values() if a.live]
-    if not targets:
-        typer.echo("no live agents to sync", err=True)
-        raise typer.Exit(code=1)
-
-    gh_token = resolve_secrets(targets[0].name, list(config.agents.keys())).get("GH_TOKEN")
-    if not gh_token:
-        typer.echo("error: SLOP_GH_TOKEN missing from env", err=True)
-        raise typer.Exit(code=1)
-    push_env = {**os.environ, "GH_TOKEN": gh_token}
-
-    for agent in targets:
-        sibling_handles = {s: config.agents[s].handle for s in agent.siblings if s in config.agents}
-        with tempfile.TemporaryDirectory() as tmp:
-            clone_dir = Path(tmp) / "repo"
-            subprocess.run(
-                ["gh", "repo", "clone", agent.github_repo, str(clone_dir)],
-                check=True,
-                capture_output=True,
-                env=push_env,
-            )
-            siblings_path = clone_dir / "SIBLINGS.md"
-            current = siblings_path.read_text() if siblings_path.exists() else ""
-            present = set(SIBLINGS_HEADER_RE.findall(current))
-            missing = [s for s in agent.siblings if s in sibling_handles and s not in present]
-
-            if not missing:
-                typer.echo(f"{agent.name:12s}  clean")
-                continue
-
-            new_blocks = "\n\n".join(_render_sibling_block(s, sibling_handles[s]) for s in missing)
-            if current.strip():
-                new_content = current.rstrip() + "\n\n" + new_blocks + "\n"
-            else:
-                # Render from the canonical template so the header prose can't
-                # drift from what provisioning seeds.
-                template = Path("templates/SIBLINGS.md").read_text()
-                new_content = _interpolate(template, agent.name, agent.handle, new_blocks)
-
-            if dry_run:
-                typer.echo(f"{agent.name:12s}  would add: {', '.join(missing)}")
-                continue
-
-            siblings_path.write_text(new_content)
-            subprocess.run(["git", "add", "SIBLINGS.md"], cwd=clone_dir, check=True)
-            subprocess.run(
-                ["git", "commit", "-m", "Sync siblings from slop_salon.toml"],
-                cwd=clone_dir,
-                check=True,
-                capture_output=True,
-            )
-            subprocess.run(
-                ["git", "push"],
-                cwd=clone_dir,
-                check=True,
-                capture_output=True,
-                env=push_env,
-            )
-            typer.echo(f"{agent.name:12s}  added: {', '.join(missing)}")

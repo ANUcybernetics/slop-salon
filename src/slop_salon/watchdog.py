@@ -1,84 +1,25 @@
-"""Dead-man checks for the wake driver: is anything still ticking at all?
+"""Dead-man check: is anything still ticking at all?
 
-Every failure mode the driver already handles is one it observes *during* a wake:
-`healing` classifies tick results, so it can only ever notice things that happen
-while a wake is running. Two outages in 2026-07 were invisible to it because the
-question was never asked:
-
-- 10:02, the fleet went dark for 3h20m --- `slop-wake.timer` was stopped during
-  `apt` maintenance and never restarted. A unit that never runs never fails, so
-  no `OnFailure=` can catch this; only a separate clock can notice absence.
-  Note the *never restarted*: stopping that timer is also how the fleet is held
-  still on purpose, so the question is how long it has been stopped, not whether
-  it is stopped right now. Asked the instantaneous way, this check called every
-  deliberate pause an outage and filed an hourly todo until the operator was
-  done.
-- 13:14, vLLM's EngineCore died and every tick failed for hours. Wakes *were*
-  running and completing here, so freshness alone stays silent --- which is why
-  the inference probe below is a first-class check and not a nicety.
-
-So this asks three independent questions, and each one alone would have missed at
-least one of those outages: is the timer armed, did a wake finish recently, and
-can anything actually reach the model. It returns problems as strings for a
-caller to print and exit non-zero on; on weddle the `OnFailure=unit-oncall@` /
-`OnSuccess=unit-oncall-clear@` drop-ins turn that exit code into a deduped `nb`
-todo, so the alerting half needs nothing new.
+Everything `slop wake` knows, it learns during a wake, so it is blind to the
+pipeline not running. Two independent questions catch the two outages that
+have actually happened: has the wake timer been stopped longer than a pause
+takes (stopping it is also how the fleet is held still on purpose, so the
+question is how long, not whether), and did a wake finish recently. A wake in
+which every agent failed is flagged too, since freshness alone reads that as
+fine. Problems come back as strings; the caller prints them and exits
+non-zero, and the systemd `OnFailure=` oncall pattern does the alerting.
 """
 
 from __future__ import annotations
 
 import datetime as dt
 import json
-import os
-from dataclasses import dataclass
 from pathlib import Path
 
-# Statuses that mean a tick was actually serviced. `deferred` counts: the global
-# slot cap turned it away on purpose, which is healthy behaviour, not a failure.
-_HEALTHY_STATUSES = frozenset({"ok", "busy", "deferred"})
-
-
-def stamp_path() -> Path:
-    base = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
-    return Path(base) / "slop" / "last-wake.json"
-
-
-@dataclass(frozen=True)
-class Probe:
-    """Outcome of reaching for the inference endpoint."""
-
-    ok: bool
-    detail: str
-
-
-def write_stamp(
-    statuses: dict[str, str],
-    *,
-    now: dt.datetime,
-    path: Path | None = None,
-) -> None:
-    """Record that a wake finished, and what each agent's tick did.
-
-    Written unconditionally, including for an all-red run: for a dead-man check
-    the signal is *completion*, and whether the ticks worked is a separate
-    question answered by `statuses` and the inference probe. Deliberately not
-    folded into `heal.json` --- that file's mtime happens to move on every wake
-    today, but leaning on an incidental side effect is one refactor away from a
-    watchdog that silently reports stale-as-fresh.
-    """
-    target = path or stamp_path()
-    target.parent.mkdir(parents=True, exist_ok=True)
-    payload = {
-        "finished_at": now.astimezone(dt.UTC).isoformat(),
-        "statuses": statuses,
-    }
-    tmp = target.with_suffix(".tmp")
-    tmp.write_text(json.dumps(payload, indent=2, sort_keys=True))
-    tmp.replace(target)
+from .wake import stamp_path
 
 
 def read_stamp(path: Path | None = None) -> dict | None:
-    """The last wake's stamp, or None if absent/corrupt."""
     target = path or stamp_path()
     try:
         data = json.loads(target.read_text())
@@ -87,7 +28,7 @@ def read_stamp(path: Path | None = None) -> dict | None:
     return data if isinstance(data, dict) else None
 
 
-def _format_age(seconds: float) -> str:
+def format_age(seconds: float) -> str:
     if seconds < 90:
         return f"{int(seconds)}s"
     minutes = seconds / 60
@@ -103,60 +44,44 @@ def problems(
     max_age: float,
     timer_stopped_for: float | None,
     timer_grace: float,
-    inference: Probe | None,
     timer_name: str = "slop-wake.timer",
 ) -> list[str]:
     """Everything wrong right now, as printable lines. Empty means healthy.
-
-    `timer_stopped_for` is how long the wake timer has been inactive, or None
-    while it is armed; a stop shorter than `timer_grace` is a pause in progress.
-    """
+    `timer_stopped_for` is None while the timer is armed."""
     found: list[str] = []
 
     if timer_stopped_for is not None and timer_stopped_for > timer_grace:
         found.append(
-            f"{timer_name} has been stopped for {_format_age(timer_stopped_for)}, past the "
-            f"{_format_age(timer_grace)} a pause is given --- no wake will fire until it is "
-            f"started (`systemctl --user start {timer_name}`). This is how the fleet went "
-            "dark for 3h20m on 2026-07-28."
+            f"{timer_name} has been stopped for {format_age(timer_stopped_for)}, past the "
+            f"{format_age(timer_grace)} a pause is given; no wake will fire until it is "
+            f"started (`systemctl --user start {timer_name}`)"
         )
 
     if stamp is None:
-        found.append("no wake stamp found --- no wake has completed since this check was installed")
+        found.append("no wake stamp found; no wake has completed since this check was installed")
+        return found
+
+    raw = stamp.get("finished_at")
+    finished = None
+    if isinstance(raw, str):
+        try:
+            finished = dt.datetime.fromisoformat(raw)
+        except ValueError:
+            finished = None
+    if finished is None:
+        found.append(f"wake stamp has an unreadable finished_at: {raw!r}")
     else:
-        raw = stamp.get("finished_at")
-        finished = None
-        if isinstance(raw, str):
-            try:
-                finished = dt.datetime.fromisoformat(raw)
-            except ValueError:
-                finished = None
-        if finished is None:
-            found.append(f"wake stamp has an unreadable finished_at: {raw!r}")
-        else:
-            if finished.tzinfo is None:
-                finished = finished.replace(tzinfo=dt.UTC)
-            age = (now - finished).total_seconds()
-            if age > max_age:
-                found.append(
-                    f"last wake finished {_format_age(age)} ago, over the "
-                    f"{_format_age(max_age)} limit --- ticks have stopped"
-                )
+        if finished.tzinfo is None:
+            finished = finished.replace(tzinfo=dt.UTC)
+        age = (now - finished).total_seconds()
+        if age > max_age:
+            found.append(
+                f"last wake finished {format_age(age)} ago, over the {format_age(max_age)} "
+                "limit; ticks have stopped"
+            )
 
-        statuses = stamp.get("statuses")
-        if isinstance(statuses, dict) and statuses:
-            healthy = [n for n, s in statuses.items() if s in _HEALTHY_STATUSES]
-            if not healthy:
-                # Wakes completing with nothing working is exactly the shape of
-                # the 13:14 vLLM outage, and freshness alone reads it as fine.
-                broken = ", ".join(f"{n}={s}" for n, s in sorted(statuses.items()))
-                found.append(f"every agent failed in the last wake: {broken}")
-
-    # `None` means no provider in use declares a health endpoint --- a hosted API
-    # has nothing to probe. Not a problem, and deliberately not faked into a
-    # green probe: the ok line says the check was skipped, so nobody reads this
-    # as three questions answered when only two were asked.
-    if inference is not None and not inference.ok:
-        found.append(f"inference endpoint unhealthy: {inference.detail}")
-
+    statuses = stamp.get("statuses")
+    if isinstance(statuses, dict) and statuses and not any(s == "ok" for s in statuses.values()):
+        broken = ", ".join(f"{n}={s}" for n, s in sorted(statuses.items()))
+        found.append(f"every agent failed in the last wake: {broken}")
     return found

@@ -160,3 +160,31 @@ def test_cookbook_prints_recipes_with_whitespace_preserved():
     assert "api.replicate.com" in result.output
     assert "openapi_schema" in result.output
     assert "collections" in result.output
+
+
+def test_at_path_input_opens_the_file_for_upload(replicate_env, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "assets").mkdir()
+    (tmp_path / "assets" / "src.png").write_bytes(PNG)
+    with patch("slop_salon.tools.replicate_run.replicate") as mock_replicate:
+        mock_replicate.run.return_value = "ok"
+        from slop_salon.tools.replicate_run import app
+
+        result = runner.invoke(
+            app, ["run", "x/y", "--input", "image=@assets/src.png", "--input", "scale=2"]
+        )
+        assert result.exit_code == 0, result.output
+        inputs = mock_replicate.run.call_args.kwargs["input"]
+        assert inputs["scale"] == 2
+        assert inputs["image"].read() == PNG
+
+
+def test_at_path_input_to_a_missing_file_fails_before_the_run(replicate_env, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    with patch("slop_salon.tools.replicate_run.replicate") as mock_replicate:
+        from slop_salon.tools.replicate_run import app
+
+        result = runner.invoke(app, ["run", "x/y", "--input", "image=@nope.png"])
+        assert result.exit_code == 1
+        assert "no such file" in result.output
+        mock_replicate.run.assert_not_called()

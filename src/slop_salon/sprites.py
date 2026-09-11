@@ -1,19 +1,10 @@
 """sprites.dev client.
 
-Two surfaces:
-
-- HTTP for endpoints that take a JSON envelope (create, get_status). The REST
-  API is documented at <https://docs.sprites.dev>; this module covers what we
-  actually drive from provisioning code.
-- A subprocess shell-out to the `sprite` CLI for `exec`. The REST exec path is
-  a streaming-bytes channel without an exit-code envelope; the canonical
-  protocol is the WebSocket one the CLI implements. We rely on the CLI here
-  rather than building a WS client.
-
-Sprites are addressed by **name** (the slug used at creation, e.g. `lou`).
-The API also returns an `id` field (a UUID-prefixed string), but `name` is
-what the CLI and most of our code use, and what we store as `sprite_id` in
-`slop_salon.toml`.
+HTTP for the endpoints that take a JSON envelope (create, destroy, status,
+labels, network policy); a shell-out to the `sprite` CLI for `exec`, whose
+canonical protocol is the WebSocket one the CLI implements. Sprites are
+addressed by name (`lou`), which is what `slop_salon.toml` stores as
+`sprite_id`.
 """
 
 from __future__ import annotations
@@ -26,9 +17,10 @@ from typing import Protocol
 import httpx
 
 SPRITES_BASE_URL = "https://api.sprites.dev/v1"
-ENDPOINT_CREATE = "/sprites"
-ENDPOINT_EXEC = "/sprites/{name}/exec"
-ENDPOINT_STATUS = "/sprites/{name}"
+
+# Every agent sprite carries this label; the connectors' access policies are
+# gated on it, so a sprite without it cannot reach the model.
+AGENT_LABEL = "slop"
 
 
 @dataclass
@@ -39,21 +31,12 @@ class ExecResult:
 
 
 class SpriteExecutor(Protocol):
-    """The only thing most callers need from a sprite client: run a command.
-
-    Provisioning wants the full `SpritesClient`, but the read-only helpers ---
-    repo pre-flight, reading back `~/.slop-provider` --- only ever shell out.
-    Naming that seam lets them be tested against a scripted double that the
-    type checker accepts on its own merits, instead of a fake that satisfies an
-    annotation it does not actually implement.
-    """
-
-    def exec(self, sprite_id: str, command: list[str]) -> ExecResult: ...
+    def exec(
+        self, sprite_id: str, command: list[str], env: dict[str, str] | None = None
+    ) -> ExecResult: ...
 
 
 class SpritesClient:
-    """sprites.dev client: HTTP for create/status, CLI shell-out for exec."""
-
     def __init__(self, base_url: str = SPRITES_BASE_URL):
         token = os.environ.get("SPRITES_API_TOKEN")
         if not token:
@@ -64,37 +47,50 @@ class SpritesClient:
             timeout=httpx.Timeout(60.0),
         )
 
-    def create_sprite(self, name: str) -> str:
-        """Provision a new sprite. Returns the sprite's name (used for addressing).
-
-        Note: sprites.dev has no API for setting env vars from outside ---
-        the `env` field on create is silently ignored, and there's no
-        update-env endpoint. Provisioning writes secrets to a file inside
-        the sprite instead (see `provision._build_write_env_file_cmd`).
-        """
-        response = self._client.post(ENDPOINT_CREATE, json={"name": name})
+    def create_sprite(self, name: str, labels: list[str] | None = None) -> str:
+        """Create a sprite. Returns its name."""
+        body: dict = {"name": name}
+        if labels:
+            body["labels"] = labels
+        response = self._client.post("/sprites", json=body)
         response.raise_for_status()
         return response.json()["name"]
 
-    def exec(self, sprite_id: str, command: list[str]) -> ExecResult:
-        """Execute a command in the sprite via the `sprite` CLI.
+    def destroy_sprite(self, name: str) -> None:
+        response = self._client.delete(f"/sprites/{name}")
+        if response.status_code != 404:
+            response.raise_for_status()
 
-        `sprite_id` here is the sprite's name. The CLI handles its own auth via
-        `~/.sprites/keyring/` (set up once with `sprite auth setup --token`).
-        """
-        result = subprocess.run(
-            ["sprite", "exec", "-s", sprite_id, "--", *command],
-            capture_output=True,
-            text=True,
-        )
-        return ExecResult(
-            stdout=result.stdout,
-            stderr=result.stderr,
-            exit_code=result.returncode,
-        )
+    def set_labels(self, name: str, labels: list[str]) -> None:
+        response = self._client.put(f"/sprites/{name}", json={"labels": labels})
+        response.raise_for_status()
 
-    def get_status(self, sprite_id: str) -> str:
-        """Return the sprite's lifecycle status (e.g. `cold`, `warm`, `running`)."""
-        response = self._client.get(ENDPOINT_STATUS.format(name=sprite_id))
+    def set_network_policy(self, name: str, rules: list[dict]) -> None:
+        """Replace the sprite's DNS egress allowlist. Must be done from outside
+        the sprite; existing connections to newly-blocked domains are cut."""
+        response = self._client.post(f"/sprites/{name}/policy/network", json={"rules": rules})
+        response.raise_for_status()
+
+    def get_status(self, name: str) -> str:
+        response = self._client.get(f"/sprites/{name}")
         response.raise_for_status()
         return response.json()["status"]
+
+    def exec(
+        self, sprite_id: str, command: list[str], env: dict[str, str] | None = None
+    ) -> ExecResult:
+        """Run `command` in the sprite via the CLI, with `env` in its environment.
+
+        The CLI takes env as `KEY=value,KEY2=value2`, so no value may contain a
+        comma; `tick.tick_env` guarantees that for the values it builds.
+        """
+        args = ["sprite", "exec", "-s", sprite_id]
+        if env:
+            for key, value in env.items():
+                if "," in value:
+                    raise ValueError(
+                        f"env var {key} contains a comma, which `sprite exec --env` cannot carry"
+                    )
+            args += ["--env", ",".join(f"{k}={v}" for k, v in env.items())]
+        result = subprocess.run([*args, "--", *command], capture_output=True, text=True)
+        return ExecResult(stdout=result.stdout, stderr=result.stderr, exit_code=result.returncode)

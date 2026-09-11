@@ -1,394 +1,95 @@
-"""Per-agent provisioning workflow.
+"""Provisioning: the agent repo is the source, the sprite is a cache built from it.
 
-Idempotent where possible (GitHub repo creation will fail loudly if the repo
-already exists; the cleanest re-provision flow is to delete and recreate).
-
-The bash commands run inside the sprite are built by pure `_build_*_cmd`
-functions so each is unit-testable in isolation. `provision_agent` is a thin
-orchestrator that composes them.
+A sprite is create + clone + `setup.sh`, and nothing else; `recreate` runs the
+same `bootstrap_sprite`. The bash that runs inside the sprite is built by pure
+`_build_*` functions so each is testable on its own.
 """
 
 from __future__ import annotations
 
-import base64
 import os
 import shlex
 import subprocess
-import tomllib
+import tempfile
 from pathlib import Path
 
 import typer
 
-from slop_salon.config import Provider, load_config, save_sprite_id
-from slop_salon.sprites import SpritesClient
+from .config import Agent, Config, load_config, save_sprite_id
+from .sprites import AGENT_LABEL, SpritesClient
 
-SPRITE_HOME = "/home/sprite"
-# Default sprite image already ships git, curl, jq, node, python, go, ruby,
-# rust, gh, plus claude/gemini/codex CLIs. Only media tooling is missing.
-APT_PACKAGES = "imagemagick ffmpeg sox"
-SLOP_SALON_REPO = "git+https://github.com/ANUcybernetics/slop-salon"
-
-# Env vars that belong to the provider, not to the agent. Kept out of
-# ~/.slop-env entirely and written to ~/.slop-provider instead, so swapping
-# provider rewrites one small file and can never drop the bsky password. They
-# are also `unset` at the top of that file: sprites provisioned before the split
-# still carry these in ~/.slop-env, and a subscription provider only works when
-# *no* key var is set (claude resolves ANTHROPIC_API_KEY -> ANTHROPIC_AUTH_TOKEN
-# -> the OAuth profile, reaching the profile only if both are absent).
-PROVIDER_OWNED_ENV = (
-    "AGENT_MODEL",
-    "AGENT_PROFILE",
-    # Admin-box paths to the OAuth profiles a subscription provider ships. Read
-    # admin-side only (credentials_source_env); listing them here keeps a path
-    # that means nothing in a sprite out of its ~/.slop-env.
-    "CLAUDE_CREDENTIALS_PATH",
-    "CODEX_AUTH_PATH",
-    "ANTHROPIC_BASE_URL",
-    "ANTHROPIC_AUTH_TOKEN",
-    "ANTHROPIC_API_KEY",
-    "ANTHROPIC_MODEL",
-    "ANTHROPIC_SMALL_FAST_MODEL",
-    "API_TIMEOUT_MS",
-    "CLAUDE_CODE_MAX_CONTEXT_TOKENS",
-    "DEEPSEEK_API_TOKEN",
-    "OPENROUTER_API_KEY",
-)
-
-DEFAULT_AGENT_RUN_SOURCE = Path("~/.dotfiles/bin/agent-run").expanduser()
-DEFAULT_AGENT_RUN_PROFILES_SOURCE = Path("~/.config/agent-run/profiles.toml").expanduser()
-
-
-def resolve_secrets(
-    name: str,
-    all_agent_names: list[str],
-    secrets_path: str | Path = "secrets.toml",
-) -> dict[str, str]:
-    """Resolve the env dict for a sprite-side install of `name`.
-
-    Two sources, merged:
-    - Shared admin tokens come from `SLOP_*` env vars (e.g. `SLOP_GH_TOKEN`
-      → `GH_TOKEN`). Any `SLOP_<AGENT>_*` are skipped — per-agent secrets
-      live in the file, not the env.
-    - Per-agent secrets come from `[agents.<name>]` in `secrets_path`. TOML
-      keys are uppercased into env names (bsky_password → BSKY_PASSWORD).
-      File values win on key collision.
-
-    Non-`SLOP_`-prefixed env vars (e.g. `SPRITES_API_TOKEN`) stay admin-side.
-    """
-    agent_prefixes = tuple(f"SLOP_{n.upper()}_" for n in all_agent_names)
-    env: dict[str, str] = {}
-    for k, v in os.environ.items():
-        if k.startswith("SLOP_") and not k.startswith(agent_prefixes):
-            stripped = k.removeprefix("SLOP_")
-            # Inference config is the provider's, not the agent's --- it goes to
-            # ~/.slop-provider so a swap touches nothing else. See
-            # PROVIDER_OWNED_ENV.
-            if stripped in PROVIDER_OWNED_ENV:
-                continue
-            env[stripped] = v
-
-    p = Path(secrets_path)
-    if p.exists():
-        with p.open("rb") as f:
-            data = tomllib.load(f)
-        agent_secrets = data.get("agents", {}).get(name, {})
-        for k, v in agent_secrets.items():
-            if v:  # skip empty placeholders
-                env[k.upper()] = v
-    return env
-
-
-def missing_provider_secrets(
-    provider: Provider,
-    environ: dict[str, str] | None = None,
-) -> list[str]:
-    """Admin-side env vars the provider references but that are unset.
-
-    Returned as the *admin* names (e.g. `DEEPSEEK_API_TOKEN`), which is what the
-    operator has to go and set. Checked before any write, so a half-configured
-    provider fails on the admin box rather than on the next tick.
-    """
-    src = os.environ if environ is None else environ
-    missing = [admin for admin in provider.secret_env.values() if not src.get(admin)]
-    if provider.credentials_source_env and not src.get(provider.credentials_source_env):
-        missing.append(provider.credentials_source_env)
-    return missing
-
-
-def resolve_provider_env(
-    provider: Provider,
-    environ: dict[str, str] | None = None,
-) -> dict[str, str]:
-    """The env block for `~/.slop-provider`: literal config plus resolved secrets.
-
-    `SLOP_RUNNER` is always present --- `slop-tick` dispatches on it, and a
-    provider file without it would silently fall back to the claude runner.
-    """
-    src = os.environ if environ is None else environ
-    env: dict[str, str] = {
-        "SLOP_RUNNER": provider.runner,
-        "AGENT_PROFILE": provider.profile,
-        **provider.env,
-    }
-    for sprite_var, admin_var in provider.secret_env.items():
-        value = src.get(admin_var)
-        if value:
-            env[sprite_var] = value
-    return env
-
-
-SIBLING_STUB = "(No observations yet. Update this file as you encounter their work.)"
-
-
-def _render_sibling_block(name: str, handle: str) -> str:
-    """One sibling entry as it appears in SIBLINGS.md."""
-    return f"## {name}\n\nHandle: `{handle}`\n\n{SIBLING_STUB}"
-
-
-def _build_siblings_section(siblings: list[tuple[str, str]]) -> str:
-    """The body that replaces {{siblings_section}} in templates/SIBLINGS.md."""
-    return "\n\n".join(_render_sibling_block(n, h) for n, h in siblings)
-
-
-def _interpolate(
-    text: str,
-    name: str,
-    handle: str,
-    siblings_section: str = "",
-) -> str:
-    return (
-        text.replace("{{name}}", name)
-        .replace("{{handle}}", handle)
-        .replace("{{siblings_section}}", siblings_section)
-    )
-
-
-# --- Pure command builders (testable in isolation) ---
-
-
-def _build_apt_install_cmd() -> str:
-    return f"sudo apt-get update && sudo apt-get install -y {APT_PACKAGES}"
-
-
-def _build_claude_pin_cmd(version: str) -> str:
-    """Pin the in-sprite Claude Code to `version`.
-
-    `claude install <version>` repoints the ~/.local/bin/claude launcher at the
-    requested native build; `--force` reinstalls even though the base image
-    always ships some version already.
-
-    Only some providers need this. The base image ships whatever version was
-    current when it was built, and newer builds (seen on 2.1.168) surface the
-    available-Skills list as a `system`-role message *inside* `messages` --- the
-    self-hosted vLLM only allows user/assistant there and 400s every tick,
-    silently killing the agent (slop-tick still exits 0). Against a provider
-    that accepts those messages the pin is just dead weight, so it is declared
-    per-provider (`claude_version`) rather than fleet-wide.
-    """
-    return f"claude install {shlex.quote(version)} --force"
-
-
-def _build_uv_and_slop_install_cmd() -> str:
-    return (
-        "curl -LsSf https://astral.sh/uv/install.sh | sh && "
-        f"~/.local/bin/uv tool install {SLOP_SALON_REPO}"
-    )
-
-
-def _build_clone_and_symlink_cmd(name: str, repo_url: str) -> str:
-    repo_dir = f"~/slop-salon-{name}"
-    return (
-        f"git clone {shlex.quote(repo_url)} {repo_dir} && "
-        "mkdir -p ~/.local/bin && "
-        f"ln -sf {repo_dir}/slop-tick ~/.local/bin/slop-tick && "
-        f"chmod +x {repo_dir}/slop-tick"
-    )
-
-
-def _build_pre_commit_install_cmd(name: str) -> str:
-    return (
-        f"~/.local/bin/uv tool install pre-commit && cd ~/slop-salon-{name} && pre-commit install"
-    )
-
-
-def _build_git_config_cmd(name: str, gh_token: str) -> str:
-    """Configure git in the sprite. Token stored plain-text; chmod 600 limits exposure.
-
-    The credential is written `https://x-access-token:<token>@github.com`, with
-    both fields. A bare `https://<token>@github.com` is a username and no
-    password, which the `store` helper will not answer a challenge with: git
-    falls through to prompting and dies with "could not read Username". That
-    stayed hidden for as long as the remote carried the token inline (git then
-    never asks the helper at all) and surfaced the moment it did not --- an
-    agent's whole tick committed and then failed to push.
-    """
-    return (
-        f"cd ~/slop-salon-{name} && "
-        f"git config user.name {shlex.quote(name)} && "
-        f"git config user.email {shlex.quote(f'{name}@slopsalon.art')} && "
-        "git config credential.helper store && "
-        f"echo 'https://x-access-token:{gh_token}@github.com' > ~/.git-credentials && "
-        "chmod 600 ~/.git-credentials"
-    )
-
-
-def _build_detoken_remote_cmd(name: str, repo: str) -> str:
-    """Point the sprite's `origin` at a token-free URL.
-
-    The clone embeds the token in the remote, so a rotated token has to be
-    written in two places or pushes keep using the stale one. Stripping it
-    leaves `~/.git-credentials` (installed by `_build_git_config_cmd`, and
-    already the configured helper) as the single copy, which is what makes
-    `slop rotate-env` a one-file change.
-    """
-    return f"cd ~/slop-salon-{name} && git remote set-url origin https://github.com/{repo}.git"
-
-
-def _build_write_env_file_cmd(env: dict[str, str]) -> str:
-    """Write resolved secrets to `~/.slop-env` (mode 600) inside the sprite.
-
-    sprites.dev has no API for setting env vars from outside, so secrets
-    have to live as a file inside the sprite. `slop-tick` sources this file
-    at the top of every invocation so `claude` and the tools see the right
-    env. The body is base64-encoded to avoid shell-quoting hazards.
-    """
-    body = "\n".join(f"export {k}={shlex.quote(v)}" for k, v in sorted(env.items()))
-    encoded = base64.b64encode(body.encode()).decode()
-    return f"umask 077 && echo {encoded} | base64 -d > ~/.slop-env && chmod 600 ~/.slop-env"
-
-
-def _build_write_provider_file_cmd(env: dict[str, str]) -> str:
-    """Write the provider block to `~/.slop-provider` (mode 600) in the sprite.
-
-    Separate from `~/.slop-env` so a provider swap rewrites one small file and
-    cannot drop BSKY_PASSWORD or GH_TOKEN on the way past. `slop-tick` sources
-    this file *after* `~/.slop-env`, so it wins on collision.
-
-    The leading `unset` is load-bearing, not hygiene: sprites provisioned before
-    the split still export the old inference vars from `~/.slop-env`, and a
-    subscription provider (which sets no key at all, so claude falls through to
-    the OAuth profile) would otherwise keep using whatever stale token that file
-    still carries.
-    """
-    lines = [f"unset {' '.join(PROVIDER_OWNED_ENV)}"]
-    lines += [f"export {k}={shlex.quote(v)}" for k, v in sorted(env.items())]
-    encoded = base64.b64encode("\n".join(lines).encode()).decode()
-    return (
-        f"umask 077 && echo {encoded} | base64 -d > ~/.slop-provider && chmod 600 ~/.slop-provider"
-    )
-
-
-def _build_install_credentials_cmd(dest: str, content: str) -> str:
-    """Drop an OAuth profile (claude's or codex's) into the sprite, mode 600.
-
-    `dest` is a sprite-side path that may be `~`-relative; it is rewritten to
-    `$HOME/...` so the whole thing can be quoted rather than relying on tilde
-    expansion surviving the quoting.
-    """
-    path = dest.replace("~/", "$HOME/", 1) if dest.startswith("~/") else dest
-    quoted = f'"{path}"' if path.startswith("$HOME/") else shlex.quote(path)
-    encoded = base64.b64encode(content.encode()).decode()
-    return (
-        f'umask 077 && mkdir -p "$(dirname {quoted})" && '
-        f"echo {encoded} | base64 -d > {quoted} && chmod 600 {quoted}"
-    )
-
-
-def _build_install_file_cmd(dest: str, content: str, mode: str) -> str:
-    """Install a non-secret support file into a sprite."""
-    path = dest.replace("~/", "$HOME/", 1) if dest.startswith("~/") else dest
-    quoted = f'"{path}"' if path.startswith("$HOME/") else shlex.quote(path)
-    encoded = base64.b64encode(content.encode()).decode()
-    return (
-        f'mkdir -p "$(dirname {quoted})" && '
-        f"echo {encoded} | base64 -d > {quoted} && chmod {mode} {quoted}"
-    )
-
-
-AMBIENT_HOOK_SCRIPT = """#!/bin/bash
-# Ambient-memory recall hook (PostToolUse).
-#
-# Pipes the most recent tool's input through `slop-recall`, which scans the
-# agent's notes/ for token-overlap matches and prints the top few as short
-# snippets. Whatever it prints is wrapped as `hookSpecificOutput
-# .additionalContext`, which Claude Code surfaces to the model alongside
-# the next turn's tool result. Net effect: prior notebook lines surface
-# without the agent having to grep.
-#
-# Fails open. Any error here (missing jq, missing slop-recall, malformed
-# input) just means no injection --- the tick proceeds unchanged.
-#
-# Pattern: Tim Kellogg, "Ambient Associative Memory" (2026-05-17).
-set -eu
-input=$(cat)
-query=$(printf '%s' "$input" | jq -r '.tool_input | tostring' 2>/dev/null || true)
-[ -z "$query" ] && exit 0
-snippets=$(printf '%s' "$query" | slop-recall 2>/dev/null || true)
-[ -z "$snippets" ] && exit 0
-jq -n --arg ctx "Past notes from your workshop:
-$snippets" '{hookSpecificOutput: {hookEventName: "PostToolUse", additionalContext: $ctx}}'
-"""
-
-# Python script that *merges* our PostToolUse hook into the sprite's
-# existing ~/.claude/settings.json rather than overwriting it. The sprite
-# image ships a settings.json with `defaultMode: bypassPermissions` plus
-# `sprite-env-check.sh` hooks and an MCP-deny rule --- replacing that file
-# (an earlier bug) broke bsky access for the agent. Merging preserves
-# whatever else is there.
-#
-# Idempotent: any prior entry whose command ends in `ambient-recall.sh`
-# is dropped before we re-append, regardless of how the path was written
-# (~/, $HOME/, absolute).
-SETTINGS_MERGE_SCRIPT = """
-import json
-from pathlib import Path
-
-OUR_ENTRY = {
-    "matcher": "Read|Grep|Glob|Bash",
-    "hooks": [{"type": "command", "command": "$HOME/.claude/hooks/ambient-recall.sh"}],
-}
-
-p = Path.home() / ".claude" / "settings.json"
-existing = json.loads(p.read_text()) if p.exists() else {}
-
-hooks = existing.setdefault("hooks", {})
-post = hooks.setdefault("PostToolUse", [])
-post = [
-    e for e in post
-    if not any("ambient-recall.sh" in h.get("command", "") for h in e.get("hooks", []))
+# DNS egress allowlist applied to every agent sprite. `defaults` is the
+# platform's development set (GitHub, npm, PyPI, the major AI APIs, ...); the
+# rest is what the tools and the agents' own making reach for. The model is
+# reached through api.sprites.dev, never OpenRouter directly.
+EGRESS_RULES: list[dict[str, str]] = [
+    {"include": "defaults"},
+    *(
+        {"domain": d, "action": "allow"}
+        for d in (
+            "api.sprites.dev",
+            # Bluesky: auth entry point, the PDS shards, the AppView, blobs, video.
+            "bsky.social",
+            "*.bsky.network",
+            "*.bsky.app",
+            "bsky.app",
+            "plc.directory",
+            # Replicate and where its outputs are served from.
+            "api.replicate.com",
+            "*.replicate.delivery",
+            "replicate.delivery",
+            # Installers and system packages.
+            "astral.sh",
+            "*.astral.sh",
+            "archive.ubuntu.com",
+            "security.ubuntu.com",
+            "ports.ubuntu.com",
+            # Reading the world.
+            "*.wikipedia.org",
+            "*.wikimedia.org",
+            "*.archive.org",
+            "archive.org",
+            "*.gutenberg.org",
+            "slopsalon.art",
+            "*.slopsalon.art",
+        )
+    ),
 ]
-post.append(OUR_ENTRY)
-hooks["PostToolUse"] = post
-
-p.parent.mkdir(parents=True, exist_ok=True)
-p.write_text(json.dumps(existing, indent=2))
-"""
 
 
-def _build_install_ambient_hook_cmd() -> str:
-    """Install the ambient-recall hook and merge its settings entry on the sprite.
-
-    Idempotent: re-running reinstalls the hook script and re-merges its
-    settings entry (without duplicating it) into whatever else is already
-    in ~/.claude/settings.json.
-    """
-    script_b64 = base64.b64encode(AMBIENT_HOOK_SCRIPT.encode()).decode()
-    merge_b64 = base64.b64encode(SETTINGS_MERGE_SCRIPT.encode()).decode()
+def _interpolate(text: str, agent: Agent, config: Config) -> str:
+    siblings = [config.agents[s] for s in agent.siblings]
+    prose = " and ".join(f"{s.name} (`{s.handle}`)" for s in siblings) or "nobody yet"
+    listing = "\n".join(f"- {s.name}: `{s.handle}`" for s in siblings) or "Nobody yet."
     return (
-        "mkdir -p ~/.claude/hooks && "
-        f"echo {script_b64} | base64 -d > ~/.claude/hooks/ambient-recall.sh && "
-        "chmod +x ~/.claude/hooks/ambient-recall.sh && "
-        f"echo {merge_b64} | base64 -d | python3"
+        text.replace("{{name}}", agent.name)
+        .replace("{{handle}}", agent.handle)
+        .replace("{{siblings_prose}}", prose)
+        .replace("{{siblings_list}}", listing)
     )
+
+
+def build_template_files(
+    config: Config,
+    agent: Agent,
+    templates_dir: str | Path = "templates",
+    souls_dir: str | Path = "souls",
+) -> dict[str, str]:
+    """Every file in the agent's initial commit: the templates interpolated for
+    this agent, plus its soul as `SOUL.md`. Paths are relative to the repo root."""
+    if not agent.soul:
+        raise ValueError(f"agent {agent.name!r} has no soul; set `soul` on its block")
+    files = {"SOUL.md": (Path(souls_dir) / f"{agent.soul}.md").read_text()}
+    root = Path(templates_dir)
+    for tmpl in sorted(root.rglob("*")):
+        if tmpl.is_file():
+            files[str(tmpl.relative_to(root))] = _interpolate(tmpl.read_text(), agent, config)
+    return files
 
 
 def write_files(root: Path, files: dict[str, str]) -> None:
-    """Materialise a path → content map under `root`.
-
-    Anything with a shebang is made executable so the mode lands in the commit;
-    otherwise `slop-tick` arrives 644, the sprite's `chmod +x` shows up as a
-    mode change, and the agent's first commit is that instead of its own work.
-    """
+    """Materialise a path -> content map under `root`. Anything with a shebang
+    is made executable so the mode lands in the commit."""
     for rel_path, content in files.items():
         target = root / rel_path
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -397,173 +98,84 @@ def write_files(root: Path, files: dict[str, str]) -> None:
             target.chmod(0o755)
 
 
-def _push_initial_commit(repo: str, files: dict[str, str], token: str) -> None:
-    """Create an initial commit on the GH repo via a temp clone + push.
-
-    `files` is a path-relative-to-repo-root → content map.
-    """
-    import tempfile
-
+def push_initial_commit(repo: str, files: dict[str, str], token: str) -> None:
     with tempfile.TemporaryDirectory() as tmp:
-        tmp_path = Path(tmp) / "repo"
+        clone = Path(tmp) / "repo"
+        env = {**os.environ, "GH_TOKEN": token}
+        subprocess.run(["gh", "repo", "clone", repo, str(clone)], check=True, env=env)
+        write_files(clone, files)
+        subprocess.run(["git", "add", "-A"], cwd=clone, check=True)
         subprocess.run(
-            ["gh", "repo", "clone", repo, str(tmp_path)],
-            check=True,
-            env={**os.environ, "GH_TOKEN": token},
+            ["git", "commit", "-m", "Initial provisioning commit"], cwd=clone, check=True
         )
-        write_files(tmp_path, files)
-        subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
-        subprocess.run(
-            ["git", "commit", "-m", "Initial provisioning commit"],
-            cwd=tmp_path,
-            check=True,
-        )
-        # -u origin HEAD handles both empty repos (sets upstream + creates the
-        # remote default branch) and pre-existing default branches uniformly.
-        subprocess.run(
-            ["git", "push", "-u", "origin", "HEAD"],
-            cwd=tmp_path,
-            check=True,
-            env={**os.environ, "GH_TOKEN": token},
-        )
+        subprocess.run(["git", "push", "-u", "origin", "HEAD"], cwd=clone, check=True, env=env)
 
 
-def _build_template_files(
-    templates_dir: Path,
-    soul_path: Path,
-    name: str,
-    handle: str,
-    siblings: list[tuple[str, str]],
-) -> dict[str, str]:
-    """Read every template file, interpolate placeholders, return a name->content map."""
-    siblings_section = _build_siblings_section(siblings)
-    files: dict[str, str] = {"SOUL.md": Path(soul_path).read_text()}
-    for tmpl in templates_dir.iterdir():
-        if tmpl.is_file():
-            files[tmpl.name] = _interpolate(
-                tmpl.read_text(),
-                name,
-                handle,
-                siblings_section,
-            )
-    return files
+# --- In-sprite commands (pure builders) ---
 
 
-def provider_steps(
-    provider: Provider,
-    environ: dict[str, str] | None = None,
-) -> list[tuple[str, str]]:
-    """(label, bash command) pairs that put `provider` in place on a sprite.
+def _build_clone_cmd(name: str, repo: str) -> str:
+    """Clone the agent repo over plain HTTPS: it is public, and pushes get their
+    token from the tick environment via the credential helper setup.sh sets."""
+    return f"git clone --quiet https://github.com/{repo}.git ~/slop-salon-{shlex.quote(name)}"
 
-    The single definition of "install this provider", shared by `slop new`,
-    `recreate`, and `slop provider set` --- a hot swap and a fresh provision
-    must land byte-identical state, or the swap becomes a second thing to debug.
 
-    Raises if a referenced admin-side secret is unset, so the failure lands on
-    the admin box rather than as a dead tick half an hour later.
-    """
-    missing = missing_provider_secrets(provider, environ)
-    if missing:
-        raise RuntimeError(
-            f"provider {provider.name!r} needs {missing} in the admin env; "
-            f"check ~/.config/mise/config.local.toml"
-        )
+def _build_setup_cmd(name: str) -> str:
+    return f"cd ~/slop-salon-{shlex.quote(name)} && ./setup.sh"
 
-    src = os.environ if environ is None else environ
-    dispatcher_path = Path(
-        src.get("SLOP_AGENT_RUN_SOURCE", str(DEFAULT_AGENT_RUN_SOURCE))
-    ).expanduser()
-    profiles_path = Path(
-        src.get(
-            "SLOP_AGENT_RUN_PROFILES_SOURCE",
-            str(DEFAULT_AGENT_RUN_PROFILES_SOURCE),
-        )
-    ).expanduser()
-    try:
-        dispatcher = dispatcher_path.read_text()
-        profiles = profiles_path.read_text()
-    except OSError as error:
-        raise RuntimeError(
-            "shared agent dispatcher is not installed; run dotfiles update or set "
-            "SLOP_AGENT_RUN_SOURCE and SLOP_AGENT_RUN_PROFILES_SOURCE"
-        ) from error
 
-    steps = [
-        (
-            "install ~/.local/bin/agent-run",
-            _build_install_file_cmd("~/.local/bin/agent-run", dispatcher, "755"),
-        ),
-        (
-            "install ~/.config/agent-run/profiles.toml",
-            _build_install_file_cmd("~/.config/agent-run/profiles.toml", profiles, "644"),
-        ),
-        (
-            "write ~/.slop-provider",
-            _build_write_provider_file_cmd(resolve_provider_env(provider, environ)),
-        ),
-    ]
-    if provider.credentials_dest:
-        credentials_source = src[provider.credentials_source_env]
-        content = Path(credentials_source).expanduser().read_text()
-        steps.append(
-            (
-                f"install {provider.credentials_dest}",
-                _build_install_credentials_cmd(provider.credentials_dest, content),
-            )
-        )
-    if provider.claude_version:
-        steps.append(
-            (
-                f"pin claude {provider.claude_version}",
-                _build_claude_pin_cmd(provider.claude_version),
-            )
-        )
+def _build_claude_pin_cmd(version: str) -> str:
+    """`claude install <version>` repoints the launcher at that native build;
+    `--force` reinstalls over whatever the image shipped."""
+    return f"claude install {shlex.quote(version)} --force"
+
+
+def bootstrap_steps(name: str, repo: str, claude_version: str) -> list[tuple[str, str]]:
+    """(label, bash) pairs that turn an empty sprite into a ticking one."""
+    steps = [("clone repo", _build_clone_cmd(name, repo)), ("run setup.sh", _build_setup_cmd(name))]
+    if claude_version:
+        steps.append((f"pin claude {claude_version}", _build_claude_pin_cmd(claude_version)))
     return steps
 
 
-# --- Orchestrator ---
+def bootstrap_sprite(sprites: SpritesClient, config: Config, agent: Agent) -> None:
+    """Label, fence and populate a freshly created sprite. Shared by `new` and
+    `recreate`, so a rebuilt sprite is byte-for-byte a fresh one."""
+    sprites.set_labels(agent.sprite_id, [AGENT_LABEL, f"salon={agent.salon}"])
+    sprites.set_network_policy(agent.sprite_id, EGRESS_RULES)
+    for label, command in bootstrap_steps(agent.name, agent.github_repo, config.claude_version):
+        typer.echo(f"  -> {label}")
+        result = sprites.exec(agent.sprite_id, ["bash", "-lc", command])
+        if result.exit_code != 0:
+            raise RuntimeError(
+                f"{label} failed (exit={result.exit_code}): {result.stderr or result.stdout}"
+            )
 
 
 def provision_agent(
     name: str,
     config_path: str | Path = "slop_salon.toml",
     templates_dir: str | Path = "templates",
-    soul_path: str | Path = "SOUL.md",
+    souls_dir: str | Path = "souls",
     skip_dns_confirm: bool = False,
 ) -> None:
-    """End-to-end provisioning for one agent."""
+    """End-to-end provisioning for one agent already registered in the config."""
     config = load_config(config_path)
     if name not in config.agents:
         raise typer.BadParameter(f"agent {name!r} not in {config.path}")
     agent = config.agents[name]
+    # Resolve everything that can fail on the admin box before anything is
+    # created: a missing secret should cost nothing, not a half-built sprite.
+    from .tick import tick_env
 
-    provider = config.provider_for(name)
-    # Resolve the provider before anything is created: a missing DEEPSEEK_API_TOKEN
-    # should cost nothing, not a half-built sprite.
-    provider_plan = provider_steps(provider)
+    tick_env(config, agent)
+    gh_token = os.environ["SLOP_GH_TOKEN"]
+    files = build_template_files(config, agent, templates_dir, souls_dir)
 
-    env = resolve_secrets(name, list(config.agents.keys()))
-    gh_token = env.get("GH_TOKEN")
-    if not gh_token:
-        raise RuntimeError(
-            f"GH_TOKEN missing from resolved env for {name!r}; "
-            f"check ~/.config/mise/config.local.toml for SLOP_GH_TOKEN"
-        )
-    # BSKY_HANDLE is public config (lives in slop_salon.toml), not a secret;
-    # inject it here so the sprite-side tools see it alongside the secrets.
-    env["BSKY_HANDLE"] = agent.handle
-
-    siblings = [(s, config.agents[s].handle) for s in agent.siblings if s in config.agents]
-    templates_dir = Path(templates_dir)
-
-    # Repo creation runs as the admin box's own `gh` login, not the slop token:
-    # that token is scoped to push to the agent repos and cannot create one in
-    # the org (`Resource not accessible by personal access token`). Everything
-    # after this --- the template push, the sprite's clone and pushes --- uses
-    # the token, which is why creating the repo here and pushing to it are two
-    # different credentials on purpose.
+    # Repo creation runs as the admin box's own `gh` login: the slop token can
+    # push to the agent repos but cannot create one in the org.
     gh_env = {k: v for k, v in os.environ.items() if k != "GH_TOKEN"}
-    repo_exists = (
+    exists = (
         subprocess.run(
             ["gh", "repo", "view", agent.github_repo, "--json", "name"],
             capture_output=True,
@@ -571,78 +183,27 @@ def provision_agent(
         ).returncode
         == 0
     )
-    if repo_exists:
-        typer.echo(f"[1/13] GH repo {agent.github_repo} already exists, skipping create")
+    if exists:
+        typer.echo(f"[1/5] GH repo {agent.github_repo} already exists, skipping create")
     else:
-        typer.echo(f"[1/13] Creating GH repo {agent.github_repo}")
+        typer.echo(f"[1/5] Creating GH repo {agent.github_repo}")
         subprocess.run(
-            ["gh", "repo", "create", agent.github_repo, "--public"],
-            check=True,
-            env=gh_env,
+            ["gh", "repo", "create", agent.github_repo, "--public"], check=True, env=gh_env
         )
 
-    typer.echo("[2/13] Pushing templates as initial commit")
-    files = _build_template_files(
-        templates_dir,
-        Path(soul_path),
-        agent.name,
-        agent.handle,
-        siblings,
-    )
-    _push_initial_commit(agent.github_repo, files, gh_token)
+    typer.echo("[2/5] Pushing templates as initial commit")
+    push_initial_commit(agent.github_repo, files, gh_token)
 
-    if not skip_dns_confirm:
-        typer.echo(f"[3/13] MANUAL: add Bluesky DNS TXT record at _atproto.{agent.handle}")
+    if skip_dns_confirm:
+        typer.echo("[3/5] Skipping DNS confirm (--yes-dns)")
+    else:
+        typer.echo(f"[3/5] MANUAL: add the Bluesky DNS TXT record at _atproto.{agent.handle}")
         typer.confirm("Have you added the DNS record?", abort=True)
-    else:
-        typer.echo("[3/13] Skipping DNS confirm (--yes-dns set)")
 
-    typer.echo("[4/13] Creating sprite")
+    typer.echo("[4/5] Creating sprite")
     sprites = SpritesClient()
-    sprite_id = sprites.create_sprite(name=name)
+    agent.sprite_id = sprites.create_sprite(name, labels=[AGENT_LABEL, f"salon={agent.salon}"])
+    save_sprite_id(config, name, agent.sprite_id)
+    bootstrap_sprite(sprites, config, agent)
 
-    def _exec(command: str) -> None:
-        result = sprites.exec(sprite_id, ["bash", "-lc", command])
-        if result.exit_code != 0:
-            raise RuntimeError(
-                f"sprite command failed (exit={result.exit_code}): {command}\n"
-                f"stderr: {result.stderr}"
-            )
-
-    typer.echo("[5/13] Writing ~/.slop-env in sprite (secrets + AGENT_NAME)")
-    _exec(_build_write_env_file_cmd({"AGENT_NAME": name, **env}))
-
-    typer.echo("[6/13] Apt install (imagemagick, ffmpeg, sox)")
-    _exec(_build_apt_install_cmd())
-
-    typer.echo(f"[7/13] Installing provider {provider.name!r} (runner: {provider.runner})")
-    for label, command in provider_plan:
-        typer.echo(f"  -> {label}")
-        _exec(command)
-
-    typer.echo("[8/13] uv tool install slop-salon")
-    _exec(_build_uv_and_slop_install_cmd())
-
-    # Claude Code only --- the hook is a PostToolUse entry in ~/.claude/settings.json
-    # and codex has no equivalent, so on the codex runner the agent ticks without
-    # ambient recall. Documented in docs/runbook.md rather than faked.
-    if provider.runner == "claude":
-        typer.echo("[9/13] Installing ambient-recall hook + Claude Code settings")
-        _exec(_build_install_ambient_hook_cmd())
-    else:
-        typer.echo(f"[9/13] Skipping ambient-recall hook (runner {provider.runner!r} has no hooks)")
-
-    typer.echo("[10/13] Cloning agent repo + symlinking slop-tick into ~/.local/bin")
-    repo_url = f"https://{gh_token}@github.com/{agent.github_repo}.git"
-    _exec(_build_clone_and_symlink_cmd(name, repo_url))
-
-    typer.echo("[11/13] pre-commit install")
-    _exec(_build_pre_commit_install_cmd(name))
-
-    typer.echo("[12/13] Configuring git in sprite")
-    _exec(_build_git_config_cmd(name, gh_token))
-
-    typer.echo(f"[13/13] Saving sprite_id to {config.path}")
-    save_sprite_id(config, name, sprite_id)
-
-    typer.echo(f"\nProvisioned {name} → sprite {sprite_id}")
+    typer.echo(f"[5/5] Provisioned {name} -> sprite {agent.sprite_id}")

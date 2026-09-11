@@ -1,1147 +1,139 @@
-"""Tests for the `slop` admin CLI."""
+"""Tests for the `slop` admin CLI (the parts not covered by their own modules)."""
 
 from __future__ import annotations
 
 import json
-import os
 from unittest.mock import MagicMock, patch
 
-import pytest
 from typer.testing import CliRunner
 
-from slop_salon import wake_slots
-from slop_salon.cli import _failure_tail, app
+from slop_salon.cli import _render_transcripts, app
 from slop_salon.sprites import ExecResult
 
 runner = CliRunner()
 
 
-@pytest.fixture
-def fake_config(tmp_path, monkeypatch):
-    cfg = tmp_path / "slop_salon.toml"
-    cfg.write_text(
-        """
-default_provider = "deepseek"
-
-[providers.deepseek]
-runner = "claude"
-env = { ANTHROPIC_MODEL = "deepseek-v4-flash" }
-pricing = { input = 0.14, cache_read = 0.0028, cache_write = 0.14, output = 0.28 }
-
-[providers.selfhosted]
-runner = "claude"
-
-[salons.one]
-
-[agents.lou]
-handle = "lou.slopsalon.art"
-github_repo = "ANUcybernetics/slop-salon-lou"
-sprite_id = "spr_abc"
-salon = "one"
-
-[agents.other]
-handle = "other.slopsalon.art"
-github_repo = "ANUcybernetics/slop-salon-other"
-sprite_id = "spr_xyz"
-salon = "one"
-"""
-    )
-    monkeypatch.chdir(tmp_path)
-    return cfg
-
-
-def test_status_lists_agents(fake_config):
+def test_status_lists_agents(registry):
     with patch("slop_salon.cli.SpritesClient") as mock_class:
         instance = MagicMock()
-        instance.get_status.return_value = "running"
+        instance.get_status.side_effect = lambda sid: {
+            "lou": "warm",
+            "mina": "cold",
+            "gert": "cold",
+        }[sid]
         mock_class.return_value = instance
-
         result = runner.invoke(app, ["status"])
-
-        assert result.exit_code == 0, result.output
-        assert "lou" in result.output
-        assert "other" in result.output
-        assert "running" in result.output
+    assert result.exit_code == 0, result.output
+    assert "lou        lou.slopsalon.art          one         boden    warm" in result.output
+    assert "vita" in result.output and "not provisioned" in result.output
 
 
-def _transcript_stream() -> str:
-    """A delimited two-turn session as `slop logs` streams it back from a sprite."""
-    return "\n".join(
+def test_talk_runs_slop_tick_with_the_tick_env(registry):
+    with patch("slop_salon.cli.SpritesClient") as mock_class:
+        instance = MagicMock()
+        instance.exec.return_value = ExecResult(stdout="done", stderr="", exit_code=0)
+        mock_class.return_value = instance
+        result = runner.invoke(app, ["talk", "lou", "say hi"])
+    assert result.exit_code == 0, result.output
+    sprite_id, command = instance.exec.call_args.args
+    env = instance.exec.call_args.kwargs["env"]
+    assert sprite_id == "lou"
+    assert command == ["bash", "-lc", "slop-tick 'say hi'"]
+    assert env["AGENT_NAME"] == "lou" and env["ANTHROPIC_MODEL"].startswith("z-ai/")
+
+
+def test_wake_only_ticks_the_named_agents_and_stamps(registry, tmp_path):
+    with patch("slop_salon.cli.SpritesClient") as mock_class:
+        instance = MagicMock()
+        instance.exec.return_value = ExecResult(stdout="", stderr="", exit_code=0)
+        mock_class.return_value = instance
+        result = runner.invoke(app, ["wake", "--only", "mina"])
+    assert result.exit_code == 0, result.output
+    assert [c.args[0] for c in instance.exec.call_args_list] == ["mina"]
+    stamp = json.loads((tmp_path / "xdg_state" / "slop" / "last-wake.json").read_text())
+    assert stamp["statuses"] == {"mina": "ok"}
+
+
+def test_wake_is_red_when_any_agent_fails(registry):
+    with patch("slop_salon.cli.SpritesClient") as mock_class:
+        instance = MagicMock()
+        instance.exec.side_effect = lambda sid, cmd, env=None: (
+            ExecResult(stdout="", stderr="fatal: conflict", exit_code=128)
+            if sid == "gert"
+            else ExecResult(stdout="", stderr="", exit_code=0)
+        )
+        mock_class.return_value = instance
+        result = runner.invoke(app, ["wake"])
+    assert result.exit_code == 1
+    assert "gert" in result.output and "fail(128)" in result.output
+
+
+def test_logs_renders_transcript_from_sprite(registry):
+    transcript = "\n".join(
         [
-            "<<<SLOPLOG abcd1234-0000.jsonl 2026-06-02T10:07:10Z>>>",
+            "<<<SLOPLOG abc12345-session.jsonl 2026-06-02T10:02:21Z>>>",
             json.dumps(
                 {
                     "type": "user",
-                    "timestamp": "2026-06-02T10:02:03Z",
-                    "message": {"role": "user", "content": "tick"},
+                    "timestamp": "2026-06-02T10:02:21.478Z",
+                    "message": {"content": "tick"},
                 }
             ),
             json.dumps(
                 {
                     "type": "assistant",
-                    "timestamp": "2026-06-02T10:02:30Z",
+                    "timestamp": "2026-06-02T10:02:25.000Z",
                     "message": {
-                        "role": "assistant",
                         "content": [
-                            {"type": "thinking", "thinking": "Let me follow the tick procedure."},
-                            {"type": "tool_use", "name": "Bash", "input": {"command": "bsky feed"}},
-                            {"type": "text", "text": "posted a piece about eigenvectors"},
-                        ],
-                    },
-                }
-            ),
-            json.dumps(
-                {
-                    "type": "user",
-                    "timestamp": "2026-06-02T10:02:40Z",
-                    "message": {
-                        "role": "user",
-                        "content": [{"type": "tool_result", "content": "3 new notifications"}],
+                            {"type": "tool_use", "name": "Bash", "input": {"command": "ls notes"}},
+                            {"type": "text", "text": "Reading the timeline."},
+                        ]
                     },
                 }
             ),
         ]
     )
-
-
-def test_logs_renders_transcript_from_sprite(fake_config):
     with patch("slop_salon.cli.SpritesClient") as mock_class:
         instance = MagicMock()
-        instance.exec.return_value = MagicMock(stdout=_transcript_stream(), stderr="", exit_code=0)
+        instance.exec.return_value = ExecResult(stdout=transcript, stderr="", exit_code=0)
         mock_class.return_value = instance
-
         result = runner.invoke(app, ["logs", "lou"])
-
-        assert result.exit_code == 0, result.output
-        # Exec'd against the right sprite, reading the real transcript dir
-        instance.exec.assert_called_once()
-        sprite_id, command = instance.exec.call_args[0]
-        assert sprite_id == "spr_abc"
-        remote = " ".join(command)
-        assert ".claude/projects" in remote
-        assert "slop-salon-lou" in remote
-        # Rendered as readable turns, not raw JSON
-        assert "abcd1234" in result.output  # session id in the header
-        assert "tick" in result.output
-        assert "posted a piece about eigenvectors" in result.output
-        assert "Bash" in result.output
-        assert "3 new notifications" in result.output
-        assert "10:02:30" in result.output
-        assert '"type"' not in result.output  # JSON was parsed, not dumped
-
-
-def test_logs_reports_no_transcripts(fake_config):
-    with patch("slop_salon.cli.SpritesClient") as mock_class:
-        instance = MagicMock()
-        instance.exec.return_value = MagicMock(stdout="", stderr="", exit_code=0)
-        mock_class.return_value = instance
-
-        result = runner.invoke(app, ["logs", "lou"])
-
-        assert result.exit_code == 0, result.output
-        assert "no transcripts" in result.output.lower()
-
-
-def test_logs_sessions_option_sets_head_count(fake_config):
-    with patch("slop_salon.cli.SpritesClient") as mock_class:
-        instance = MagicMock()
-        instance.exec.return_value = MagicMock(stdout="", stderr="", exit_code=0)
-        mock_class.return_value = instance
-
-        runner.invoke(app, ["logs", "lou", "-n", "3"])
-
-        remote = " ".join(instance.exec.call_args[0][1])
-        assert "head -3" in remote
+    assert result.exit_code == 0, result.output
+    assert "-- tick abc12345 · 2026-06-02T10:02:21Z --" in result.output
+    assert "10:02:21  user       tick" in result.output
+    assert '-> Bash({"command":"ls notes"})' in result.output
+    assert "assistant  Reading the timeline." in result.output
 
 
 def test_render_transcripts_is_pure():
-    from slop_salon.cli import _render_transcripts
-
-    out = _render_transcripts(_transcript_stream())
-    assert "-- tick abcd1234" in out
-    assert "posted a piece about eigenvectors" in out
-    assert "10:02:30" in out
-    # No delimiter -> no sessions
-    assert _render_transcripts("just some noise\nwithout a header") == ""
+    assert _render_transcripts("") == ""
+    assert _render_transcripts("<<<SLOPLOG a.jsonl>>>\nnot json\n") == "-- tick a --"
 
 
-def test_diff_runs_git_in_sprite(fake_config):
+def test_policy_applies_the_allowlist_to_every_live_sprite(registry):
     with patch("slop_salon.cli.SpritesClient") as mock_class:
         instance = MagicMock()
-        instance.exec.return_value = MagicMock(
-            stdout="diff --git a/x b/x\n+hi", stderr="", exit_code=0
-        )
         mock_class.return_value = instance
-
-        result = runner.invoke(app, ["diff", "lou", "--since", "1.day"])
-
-        assert result.exit_code == 0, result.output
-        assert "+hi" in result.output
-
-
-def test_feed_all_agents(fake_config, httpx_mock):
-    httpx_mock.add_response(
-        json={
-            "feed": [{"post": {"record": {"text": "lou post", "createdAt": "2026-04-30T10:00Z"}}}]
-        }
-    )
-    httpx_mock.add_response(
-        json={
-            "feed": [{"post": {"record": {"text": "other post", "createdAt": "2026-04-30T11:00Z"}}}]
-        }
-    )
-
-    result = runner.invoke(app, ["feed"])
-
+        result = runner.invoke(app, ["policy"])
     assert result.exit_code == 0, result.output
-    assert "lou post" in result.output
-    assert "other post" in result.output
-    assert "2026-04-30T10:00Z" in result.output
-
-    requests = httpx_mock.get_requests()
-    assert len(requests) == 2
-    handles = {r.url.params["actor"] for r in requests}
-    assert handles == {"lou.slopsalon.art", "other.slopsalon.art"}
+    assert [c.args[0] for c in instance.set_network_policy.call_args_list] == [
+        "lou",
+        "mina",
+        "gert",
+    ]
 
 
-def test_feed_single_agent(fake_config, httpx_mock):
-    httpx_mock.add_response(
-        json={
-            "feed": [{"post": {"record": {"text": "lou's post", "createdAt": "2026-04-30T10:00Z"}}}]
-        }
-    )
-
-    result = runner.invoke(app, ["feed", "lou", "--limit", "5"])
-
+def test_new_invokes_provisioning(registry):
+    with patch("slop_salon.cli.provision_agent") as prov:
+        result = runner.invoke(app, ["new", "vita", "--yes-dns"])
     assert result.exit_code == 0, result.output
-    assert "lou's post" in result.output
-
-    requests = httpx_mock.get_requests()
-    assert len(requests) == 1
-    assert requests[0].url.params["actor"] == "lou.slopsalon.art"
-    assert requests[0].url.params["limit"] == "5"
-    assert requests[0].url.params["filter"] == "posts_and_author_threads"
+    prov.assert_called_once_with("vita", config_path="slop_salon.toml", skip_dns_confirm=True)
 
 
-def test_feed_handles_http_error(fake_config, httpx_mock):
-    httpx_mock.add_response(status_code=500, text="server error")
-
-    result = runner.invoke(app, ["feed", "lou"])
-
+def test_drift_reports_clean_and_drift(registry):
+    with patch("slop_salon.cli._fetch_live_files") as fetch:
+        fetch.return_value = {"SOUL.md": "# Boden\n", "CLAUDE.md": "# lou\n\nrewritten by lou\n"}
+        result = runner.invoke(app, ["drift", "lou", "-f", "SOUL.md", "-f", "CLAUDE.md"])
     assert result.exit_code == 0, result.output
-    assert "lou" in result.output
-    assert "error" in result.output.lower()
-
-
-def test_talk_runs_slop_tick_with_prompt(fake_config):
-    with patch("slop_salon.cli.SpritesClient") as mock_class:
-        instance = MagicMock()
-        instance.exec.return_value = MagicMock(stdout="(claude output)", stderr="", exit_code=0)
-        mock_class.return_value = instance
-
-        result = runner.invoke(app, ["talk", "lou", "your last three posts felt similar"])
-
-        assert result.exit_code == 0, result.output
-        assert "(claude output)" in result.output
-
-        cmd = instance.exec.call_args[0][1]
-        # The prompt should appear in the exec command
-        joined = " ".join(cmd)
-        assert "slop-tick" in joined
-        assert "your last three posts felt similar" in joined
-
-
-@pytest.fixture
-def live_config(tmp_path, monkeypatch):
-    cfg = tmp_path / "slop_salon.toml"
-    cfg.write_text(
-        """
-default_provider = "deepseek"
-
-[providers.deepseek]
-runner = "claude"
-env = { ANTHROPIC_MODEL = "deepseek-v4-flash" }
-pricing = { input = 0.14, cache_read = 0.0028, cache_write = 0.14, output = 0.28 }
-
-[providers.selfhosted]
-runner = "claude"
-
-[salons.one]
-
-[agents.lou]
-handle = "lou.slopsalon.art"
-github_repo = "ANUcybernetics/slop-salon-lou"
-sprite_id = "spr_lou"
-salon = "one"
-live = true
-
-[agents.mina]
-handle = "mina.slopsalon.art"
-github_repo = "ANUcybernetics/slop-salon-mina"
-sprite_id = "spr_mina"
-salon = "one"
-live = true
-"""
-    )
-    monkeypatch.chdir(tmp_path)
-    return cfg
-
-
-def _wake_with_outcomes(outcomes):
-    with patch("slop_salon.cli.SpritesClient") as mock_class:
-        instance = MagicMock()
-        instance.exec.side_effect = lambda sprite_id, cmd: outcomes[sprite_id]
-        mock_class.return_value = instance
-        return runner.invoke(app, ["wake"])
-
-
-def test_wake_busy_agent_is_skipped_not_failed(live_config):
-    # mina is mid-tick from an overlapping run: slop-tick exits 75.
-    result = _wake_with_outcomes(
-        {
-            "spr_lou": MagicMock(stdout="", stderr="", exit_code=0),
-            "spr_mina": MagicMock(
-                stdout="",
-                stderr="slop-tick: a tick is already running in this sprite, skipping",
-                exit_code=75,
-            ),
-        }
-    )
-
-    # Busy is a clean skip --- the run stays green and is not a failure.
-    assert result.exit_code == 0, result.output
-    assert "busy" in result.output
-    assert "fail" not in result.output
-
-
-def test_wake_defers_when_no_global_slot_is_free(live_config, monkeypatch, tmp_path):
-    # Another wake run already holds every slot (firings overlap by design). The
-    # cap has to bite here: piling on past it is what killed vLLM on 2026-07-28.
-    monkeypatch.setattr("slop_salon.cli.WAKE_CONCURRENCY", 1)
-    monkeypatch.setenv("SLOP_WAKE_SLOT_WAIT", "0.01")
-    monkeypatch.setattr(wake_slots, "_slots_dir", lambda: tmp_path / "slots")
-    healed = {}
-
-    with wake_slots.acquire(1, slots_dir=tmp_path / "slots") as held:
-        assert held is True
-        with patch(
-            "slop_salon.cli.heal_wedged", side_effect=lambda results, **kw: healed.update(results)
-        ):
-            result = _wake_with_outcomes(
-                {
-                    "spr_lou": MagicMock(stdout="", stderr="", exit_code=0),
-                    "spr_mina": MagicMock(stdout="", stderr="", exit_code=0),
-                }
-            )
-
-    # Deferring is normal operation, not a failure --- the next firing picks them up.
-    assert result.exit_code == 0, result.output
-    assert "deferred" in result.output
-    # And a deferred agent has no tick outcome, so it must never reach the healer:
-    # a synthetic result would corrupt its consecutive-wedge/error counters.
-    assert healed == {}
-
-
-def test_wake_genuine_failure_makes_run_red(live_config):
-    result = _wake_with_outcomes(
-        {
-            "spr_lou": MagicMock(stdout="", stderr="", exit_code=0),
-            "spr_mina": MagicMock(stdout="", stderr="boom", exit_code=1),
-        }
-    )
-
-    assert result.exit_code == 1, result.output
-    assert "fail(1)" in result.output
-
-
-def test_wake_surfaces_claude_error_instead_of_a_false_ok(live_config):
-    # slop-tick exits 0 even though claude 400'd: the tick "succeeded" but did
-    # nothing. It must not read as a healthy `ok` (lelia hid here for ~3.5 days).
-    result = _wake_with_outcomes(
-        {
-            "spr_lou": MagicMock(stdout="", stderr="", exit_code=0),
-            "spr_mina": MagicMock(
-                stdout="API Error: 400 ...",
-                stderr="slop-tick: claude exited 1",
-                exit_code=0,
-            ),
-        }
-    )
-
-    assert "claude-err" in result.output
-    assert "ok" in result.output  # lou still reads as ok
-    # A do-nothing tick reddens the run, the same as a hard failure would.
-    assert result.exit_code == 1, result.output
-
-
-def _wedge_result():
-    """An ExecResult carrying the cold-start exec-proxy wedge signature."""
-    return MagicMock(
-        stdout="",
-        stderr="failed to start sprite command: failed to connect: "
-        "read tcp 10.46.16.55:43744->169.155.48.226:443: i/o timeout",
-        exit_code=1,
-    )
-
-
-def test_exec_tick_with_retry_absorbs_transient_wedge():
-    from slop_salon.cli import _exec_tick_with_retry
-
-    ok = MagicMock(stdout="", stderr="", exit_code=0)
-    sprites = MagicMock()
-    sprites.exec.side_effect = [_wedge_result(), ok]
-
-    result, retried = _exec_tick_with_retry(sprites, "spr_x")
-
-    assert retried is True
-    assert result is ok
-    assert sprites.exec.call_count == 2
-
-
-def test_exec_tick_with_retry_no_retry_when_first_attempt_clean():
-    from slop_salon.cli import _exec_tick_with_retry
-
-    ok = MagicMock(stdout="", stderr="", exit_code=0)
-    sprites = MagicMock()
-    sprites.exec.side_effect = [ok]
-
-    result, retried = _exec_tick_with_retry(sprites, "spr_x")
-
-    assert retried is False
-    assert result is ok
-    assert sprites.exec.call_count == 1
-
-
-def test_exec_tick_with_retry_does_not_retry_busy():
-    """A busy skip (exit 75) is not a wedge --- no retry."""
-    from slop_salon.cli import _exec_tick_with_retry
-
-    busy = MagicMock(stdout="", stderr="a tick is already running", exit_code=75)
-    sprites = MagicMock()
-    sprites.exec.side_effect = [busy]
-
-    _, retried = _exec_tick_with_retry(sprites, "spr_x")
-
-    assert retried is False
-    assert sprites.exec.call_count == 1
-
-
-def test_exec_tick_with_retry_genuine_wedge_stays_wedged():
-    from slop_salon.cli import _exec_tick_with_retry
-    from slop_salon.healing import is_wedge
-
-    sprites = MagicMock()
-    sprites.exec.side_effect = [_wedge_result(), _wedge_result()]
-
-    result, retried = _exec_tick_with_retry(sprites, "spr_x")
-
-    assert retried is True
-    assert sprites.exec.call_count == 2
-    # Second attempt still carries the signature, so the healer still acts.
-    assert is_wedge(result)
-
-
-def test_wake_retries_transient_wedge_and_recovers(live_config):
-    """Wedged once then ok: retried, stays green, flagged as retried."""
-    ok = MagicMock(stdout="", stderr="", exit_code=0)
-    seq = {"spr_lou": [ok], "spr_mina": [_wedge_result(), ok]}
-
-    def _exec(sprite_id, _cmd):
-        return seq[sprite_id].pop(0)
-
-    with (
-        patch("slop_salon.cli.SpritesClient") as mock_class,
-        patch("slop_salon.cli._heal_wedged_agents"),
-    ):
-        instance = MagicMock()
-        instance.exec.side_effect = _exec
-        mock_class.return_value = instance
-
-        result = runner.invoke(app, ["wake"])
-
-    assert result.exit_code == 0, result.output  # mina recovered on retry
-    assert "retried" in result.output
-    assert "fail" not in result.output
-
-
-def test_wake_genuine_wedge_retried_then_red(live_config):
-    """Wedged on both attempts: retried, still fails, reddens the run."""
-    ok = MagicMock(stdout="", stderr="", exit_code=0)
-    seq = {"spr_lou": [ok], "spr_mina": [_wedge_result(), _wedge_result()]}
-
-    def _exec(sprite_id, _cmd):
-        return seq[sprite_id].pop(0)
-
-    with (
-        patch("slop_salon.cli.SpritesClient") as mock_class,
-        patch("slop_salon.cli._heal_wedged_agents"),
-    ):
-        instance = MagicMock()
-        instance.exec.side_effect = _exec
-        mock_class.return_value = instance
-
-        result = runner.invoke(app, ["wake"])
-
-    assert result.exit_code == 1, result.output
-    assert "fail(1)" in result.output
-    assert "retried" in result.output
-
-
-def test_drift_reports_clean_and_drift(fake_config, tmp_path):
-    # Create a templates dir + SOUL.md alongside the config
-    templates = tmp_path / "templates"
-    templates.mkdir()
-    (templates / "CLAUDE.md").write_text("You are {{name}} ({{handle}}).\n")
-    (templates / "slop-tick").write_text("#!/bin/bash\necho tick\n")
-    (tmp_path / "SOUL.md").write_text("immutable constitution\n")
-
-    def fake_fetch(repo: str, files):
-        # lou's CLAUDE.md has drifted (extra line); SOUL.md and slop-tick are clean
-        if "lou" in repo:
-            return {
-                "SOUL.md": "immutable constitution\n",
-                "CLAUDE.md": "You are lou (lou.slopsalon.art).\nself-added line\n",
-                "slop-tick": "#!/bin/bash\necho tick\n",
-            }
-        # other: everything clean
-        return {
-            "SOUL.md": "immutable constitution\n",
-            "CLAUDE.md": "You are other (other.slopsalon.art).\n",
-            "slop-tick": "#!/bin/bash\necho tick\n",
-        }
-
-    with patch("slop_salon.cli._fetch_live_files", side_effect=fake_fetch):
-        result = runner.invoke(app, ["drift", "lou"])
-
-        assert result.exit_code == 0, result.output
-        assert "SOUL.md" in result.output and "clean" in result.output
-        assert "CLAUDE.md" in result.output and "drift" in result.output
-        assert "+self-added line" in result.output
-
-
-def test_drift_scans_all_agents_when_no_name(fake_config, tmp_path):
-    templates = tmp_path / "templates"
-    templates.mkdir()
-    (templates / "CLAUDE.md").write_text("You are {{name}}.\n")
-    (templates / "slop-tick").write_text("tick\n")
-    (tmp_path / "SOUL.md").write_text("soul\n")
-
-    captured_repos = []
-
-    def fake_fetch(repo, files):
-        captured_repos.append(repo)
-        return dict.fromkeys(files)
-
-    with patch("slop_salon.cli._fetch_live_files", side_effect=fake_fetch):
-        result = runner.invoke(app, ["drift"])
-
-        assert result.exit_code == 0, result.output
-        assert "ANUcybernetics/slop-salon-lou" in captured_repos
-        assert "ANUcybernetics/slop-salon-other" in captured_repos
-
-
-def test_drift_handles_missing_repo_gracefully(fake_config, tmp_path):
-    import subprocess as sp
-
-    templates = tmp_path / "templates"
-    templates.mkdir()
-    (templates / "CLAUDE.md").write_text("You are {{name}}.\n")
-    (tmp_path / "SOUL.md").write_text("soul\n")
-
-    def fake_fetch(repo, files):
-        if "lou" in repo:
-            raise sp.CalledProcessError(
-                1,
-                ["gh", "repo", "clone", repo],
-                stderr=b"GraphQL: Could not resolve to a Repository",
-            )
-        return {f: "soul\n" if f == "SOUL.md" else "You are other.\n" for f in files}
-
-    with patch("slop_salon.cli._fetch_live_files", side_effect=fake_fetch):
-        result = runner.invoke(app, ["drift"])
-
-        assert result.exit_code == 0, result.output
-        assert "lou" in result.output
-        assert "could not fetch" in result.output
-        # other should still get processed after lou fails
-        assert "other" in result.output
-        assert "clean" in result.output
-
-
-@pytest.fixture
-def fake_config_live(tmp_path, monkeypatch):
-    cfg = tmp_path / "slop_salon.toml"
-    cfg.write_text(
-        """
-default_provider = "deepseek"
-
-[providers.deepseek]
-runner = "claude"
-env = { ANTHROPIC_MODEL = "deepseek-v4-flash" }
-pricing = { input = 0.14, cache_read = 0.0028, cache_write = 0.14, output = 0.28 }
-
-[providers.selfhosted]
-runner = "claude"
-
-[salons.one]
-
-[agents.lou]
-handle = "lou.slopsalon.art"
-github_repo = "ANUcybernetics/slop-salon-lou"
-sprite_id = "spr_lou"
-salon = "one"
-live = true
-
-[agents.mina]
-handle = "mina.slopsalon.art"
-github_repo = "ANUcybernetics/slop-salon-mina"
-sprite_id = "spr_mina"
-salon = "one"
-live = true
-"""
-    )
-    monkeypatch.chdir(tmp_path)
-    return cfg
-
-
-def _usage_line(agent: str, session: str, mtime: int, **kwargs) -> str:
-    """Build one fake `slop-usage tally` JSONL line for the sprite-exec stub."""
-    base = {
-        "agent": agent,
-        "session": session,
-        "mtime": mtime,
-        "in_new": 50,
-        "cache_create": 90_000,
-        "cache_read": 900_000,
-        "output": 9_000,
-        "turns": 30,
-        # A stale notional figure from a sprite running the pre-pricing package.
-        # `slop usage` must recompute rather than believe this.
-        "cost_usd": 0.78,
-    }
-    base.update(kwargs)
-    return json.dumps(base)
-
-
-def test_usage_aggregates_across_live_agents(fake_config_live):
-    import json as _json
-    import time as _time
-
-    now = int(_time.time())
-    sprite_outputs = {
-        "spr_lou": "\n".join(
-            [
-                _usage_line("lou", "aaaa0001", now - 7200, output=9_000),
-                _usage_line("lou", "aaaa0002", now - 3600, output=18_000),
-                _usage_line("lou", "aaaa0003", now - 600, output=27_000),
-            ]
-        ),
-        "spr_mina": "\n".join(
-            [
-                _usage_line("mina", "bbbb0001", now - 7200, output=9_000),
-                _usage_line("mina", "bbbb0002", now - 600, output=9_000),
-            ]
-        ),
-    }
-
-    def fake_exec(sprite_id, _cmd):
-        return MagicMock(stdout=sprite_outputs[sprite_id], stderr="", exit_code=0)
-
-    with patch("slop_salon.cli.SpritesClient") as mock_class:
-        instance = MagicMock()
-        instance.exec.side_effect = fake_exec
-        mock_class.return_value = instance
-
-        from slop_salon.cli import app as _app  # local import to ensure json import side-effects
-
-        result = runner.invoke(_app, ["usage"])
-
-        assert result.exit_code == 0, result.output
-        # Header + per-agent rows + total
-        assert "agent" in result.output
-        assert "lou" in result.output
-        assert "mina" in result.output
-        # Costs come from token counts at the provider's own rates, NOT from the
-        # sprite's stale notional cost_usd (0.78 a tick, which would have totalled
-        # $3.90 across these five).
-        assert "$3.90" not in result.output
-        # mina: two identical ticks at ~$0.0176 each.
-        assert "$0.035" in result.output
-        assert "total" in result.output
-        assert "$0.096" in result.output
-        _ = _json  # silence unused
-
-
-def test_usage_flags_uneven_transcript_coverage(fake_config_live):
-    """A recreated sprite reads as near-idle; the table must say so.
-
-    gert lost its transcripts around 2026-07-28 and showed 11 ticks against
-    vita's 859, which looked like a broken agent but was only a shorter
-    surviving history. The `from` column and the footnote exist so nobody reads
-    a truncated row as a quiet agent, or the grand total as a bill.
-    """
-    import time as _time
-
-    now = int(_time.time())
-    sprite_outputs = {
-        # lou goes back a fortnight; mina only two hours (a fresh sprite).
-        "spr_lou": "\n".join(
-            [
-                _usage_line("lou", "aaaa0001", now - 14 * 86400),
-                _usage_line("lou", "aaaa0002", now - 600),
-            ]
-        ),
-        "spr_mina": _usage_line("mina", "bbbb0001", now - 7200),
-    }
-
-    def fake_exec(sprite_id, _cmd):
-        return MagicMock(stdout=sprite_outputs[sprite_id], stderr="", exit_code=0)
-
-    with patch("slop_salon.cli.SpritesClient") as mock_class:
-        instance = MagicMock()
-        instance.exec.side_effect = fake_exec
-        mock_class.return_value = instance
-
-        result = runner.invoke(app, ["usage"])
-        assert result.exit_code == 0, result.output
-        assert "from" in result.output
-        assert "uneven coverage" in result.output
-
-        # An explicit window makes the rows comparable, so the warning would be
-        # noise --- and the spans it compares are the window's, not the sprite's.
-        windowed = runner.invoke(app, ["usage", "--since", "1.day"])
-        assert windowed.exit_code == 0, windowed.output
-        assert "uneven coverage" not in windowed.output
-
-
-def test_usage_single_agent(fake_config_live):
-    with patch("slop_salon.cli.SpritesClient") as mock_class:
-        instance = MagicMock()
-        instance.exec.return_value = MagicMock(
-            stdout=_usage_line("lou", "abcd0001", 1_700_000_000),
-            stderr="",
-            exit_code=0,
-        )
-        mock_class.return_value = instance
-
-        result = runner.invoke(app, ["usage", "lou"])
-
-        assert result.exit_code == 0, result.output
-        assert "lou" in result.output
-        assert "mina" not in result.output
-        # Only one sprite-exec call (the named agent)
-        assert instance.exec.call_count == 1
-        assert instance.exec.call_args[0][0] == "spr_lou"
-
-
-def test_usage_since_filters_by_mtime(fake_config_live):
-    import time as _time
-
-    now = int(_time.time())
-    # Three sessions: 3 hours ago, 30 min ago, 5 min ago
-    stdout = "\n".join(
-        [
-            _usage_line("lou", "old00001", now - 10800),
-            _usage_line("lou", "mid00001", now - 1800),
-            _usage_line("lou", "new00001", now - 300),
-        ]
-    )
-
-    with patch("slop_salon.cli.SpritesClient") as mock_class:
-        instance = MagicMock()
-        instance.exec.return_value = MagicMock(stdout=stdout, stderr="", exit_code=0)
-        mock_class.return_value = instance
-
-        result = runner.invoke(app, ["usage", "lou", "--since", "1.hour", "--per-tick"])
-
-        assert result.exit_code == 0, result.output
-        # Old session should be filtered out by --since 1.hour
-        assert "old00001" not in result.output
-        assert "mid00001" in result.output
-        assert "new00001" in result.output
-
-
-def test_usage_per_tick_shows_each_session(fake_config_live):
-    stdout = "\n".join(
-        [
-            _usage_line("lou", "sess0001", 1_700_000_000, turns=10, output=500),
-            _usage_line("lou", "sess0002", 1_700_000_100, turns=20, output=1000),
-        ]
-    )
-
-    with patch("slop_salon.cli.SpritesClient") as mock_class:
-        instance = MagicMock()
-        instance.exec.return_value = MagicMock(stdout=stdout, stderr="", exit_code=0)
-        mock_class.return_value = instance
-
-        result = runner.invoke(app, ["usage", "lou", "--per-tick"])
-
-        assert result.exit_code == 0, result.output
-        assert "sess0001" in result.output
-        assert "sess0002" in result.output
-        # Labelled `calls=`, not `turns=`: a tick's transcript records outnumber
-        # its API calls ~3x, and conflating the two overstated fleet cost by 3.2x.
-        assert "calls=10" in result.output
-        assert "calls=20" in result.output
-
-
-def test_usage_json_output(fake_config_live):
-    stdout = "\n".join(
-        [
-            _usage_line("lou", "sess0001", 1_700_000_000, output=9_000),
-            _usage_line("lou", "sess0002", 1_700_000_100, output=27_000),
-        ]
-    )
-
-    with patch("slop_salon.cli.SpritesClient") as mock_class:
-        instance = MagicMock()
-        instance.exec.return_value = MagicMock(stdout=stdout, stderr="", exit_code=0)
-        mock_class.return_value = instance
-
-        result = runner.invoke(app, ["usage", "lou", "--json"])
-
-        assert result.exit_code == 0, result.output
-        data = json.loads(result.output)
-        assert isinstance(data, list)
-        assert len(data) == 1
-        entry = data[0]
-        assert entry["agent"] == "lou"
-        assert entry["ticks"] == 2
-        assert entry["provider"] == "deepseek"
-        # 2 ticks x (50 new + 90k cache-write + 900k cache-read) + 9k/27k output,
-        # at DeepSeek rates. Worked by hand: $0.017647 + $0.022687.
-        assert entry["total_cost_usd"] == pytest.approx(0.0403, abs=0.0002)
-        assert entry["max_cost_usd"] > entry["median_cost_usd"]
-        # statistics.median of 2 values averages them
-
-
-def test_usage_reports_sprite_errors(fake_config_live):
-    with patch("slop_salon.cli.SpritesClient") as mock_class:
-        instance = MagicMock()
-        instance.exec.return_value = MagicMock(
-            stdout="", stderr="slop-usage: command not found", exit_code=127
-        )
-        mock_class.return_value = instance
-
-        result = runner.invoke(app, ["usage", "lou"])
-
-        assert result.exit_code == 0, result.output
-        assert "ERROR" in result.output
-        assert "command not found" in result.output
-
-
-def test_usage_rejects_unknown_agent(fake_config_live):
-    result = runner.invoke(app, ["usage", "ghost"])
-    assert result.exit_code != 0
-    assert "ghost" in result.output
-
-
-def test_usage_rejects_malformed_since(fake_config_live):
-    with patch("slop_salon.cli.SpritesClient"):
-        result = runner.invoke(app, ["usage", "lou", "--since", "yesterday"])
-        assert result.exit_code != 0
-
-
-def test_new_invokes_provisioning(fake_config):
-    with patch("slop_salon.cli.provision_agent") as mock_provision:
-        result = runner.invoke(app, ["new", "lou", "--yes-dns"])
-
-        assert result.exit_code == 0, result.output
-        mock_provision.assert_called_once()
-        kwargs = mock_provision.call_args.kwargs or {}
-        args = mock_provision.call_args.args
-        # Either positional or keyword
-        if args:
-            assert args[0] == "lou"
-        else:
-            assert kwargs.get("name") == "lou" or kwargs.get("agent_name") == "lou"
-        assert kwargs.get("skip_dns_confirm") is True or "skip_dns_confirm=True" in str(
-            mock_provision.call_args
-        )
-
-
-def test_failure_tail_keeps_claude_error_when_stderr_is_noisy():
-    """A claude-err tick reports on stdout while git chatters on stderr.
-
-    Regression: `stderr or stdout` printed only the git push output, so the
-    reason claude died never reached the log.
-    """
-    result = ExecResult(
-        stdout="API Error: 500 vLLM: too many images in request",
-        stderr=(
-            "To https://github.com/ANUcybernetics/slop-salon-gert.git\n"
-            "   267481a..d99d40b  main -> main"
-        ),
-        exit_code=0,
-    )
-
-    lines = _failure_tail(result)
-
-    assert any("500 vLLM: too many images" in line for line in lines)
-    assert any("main -> main" in line for line in lines)
-
-
-def test_failure_tail_omits_an_empty_stream():
-    result = ExecResult(stdout="", stderr="i/o timeout", exit_code=1)
-
-    assert _failure_tail(result) == ["[err] i/o timeout"]
-
-
-def test_failure_tail_digs_the_error_out_from_under_the_commit_summary():
-    """A tick that dies mid-run still commits, so git's summary is the tail.
-
-    Regression (gert, 2026-07-10): the API Error sat six lines above the end of
-    stdout, so a plain last-5 tail showed only `create mode ...` lines.
-    """
-    result = ExecResult(
-        stdout="\n".join(
-            [
-                "API Error: 500 maximum context length is 131072 tokens",
-                "[main e229e7b] session 2026-07-10T00:53:37+00:00",
-                " create mode 100644 notes/rest-2026-07-10q.md",
-                " create mode 100644 notes/rest-2026-07-10r.md",
-                " create mode 100644 notes/rest-2026-07-10s.md",
-                " create mode 100644 notes/rest-2026-07-10t.md",
-                " create mode 100644 notes/rest-2026-07-10u.md",
-            ]
-        ),
-        stderr="slop-tick: claude exited 1",
-        exit_code=0,
-    )
-
-    lines = _failure_tail(result)
-
-    assert any("maximum context length" in line for line in lines)
-    assert not any("create mode" in line for line in lines)
-
-
-def test_failure_tail_falls_back_to_the_tail_when_nothing_looks_like_an_error():
-    result = ExecResult(stdout="a\nb\nc", stderr="", exit_code=1)
-
-    assert _failure_tail(result, limit=2) == ["[out] b", "[out] c"]
-
-
-def test_usage_shows_dashes_for_an_unmetered_provider(fake_config_live, monkeypatch):
-    """A self-hosted endpoint or a subscription is not billed per token.
-
-    `--` rather than `$0.000`: printing zero would understate as badly as the
-    old notional-Sonnet figure overstated. Both are lies about a real bill.
-    """
-    from unittest.mock import MagicMock, patch
-
-    cfg = fake_config_live
-    cfg.write_text(
-        cfg.read_text().replace('default_provider = "deepseek"', 'default_provider = "selfhosted"')
-    )
-
-    with patch("slop_salon.cli.SpritesClient") as mock_class:
-        instance = MagicMock()
-        instance.exec.return_value = MagicMock(
-            stdout=_usage_line("lou", "abcd0001", 1_700_000_000), stderr="", exit_code=0
-        )
-        mock_class.return_value = instance
-
-        from slop_salon.cli import app as _app
-
-        result = runner.invoke(_app, ["usage", "lou"])
-
-    assert result.exit_code == 0, result.output
-    assert "--" in result.output
-    assert "not billed per token" in result.output
-    # The sprite's stale notional figure must not leak through as a real cost.
-    assert "0.78" not in result.output
-
-
-@pytest.mark.parametrize(
-    ("n", "expected_index"),
-    [(1, 0), (2, 1), (3, 2), (5, 4), (20, 18)],
-)
-def test_p95_never_falls_below_the_median(n, expected_index):
-    """Nearest-rank, not `int(0.95 * (n - 1))`.
-
-    The old formula floored to index 0 for n <= 2, so a short window printed the
-    *cheapest* tick as p95 and the column came out below the median.
-    """
-    costs = sorted(float(i) for i in range(n))
-    p95 = costs[-(-95 * len(costs) // 100) - 1]
-    med = costs[len(costs) // 2]
-    assert p95 == costs[expected_index]
-    assert p95 >= med
-
-
-@pytest.fixture
-def salon_config(tmp_path, monkeypatch):
-    """Two salons on two providers, plus one agent holding an override."""
-    cfg = tmp_path / "slop_salon.toml"
-    cfg.write_text(
-        """
-[providers.new-model]
-runner = "claude"
-profile = "openrouter"
-env = { AGENT_MODEL = "vendor/new" }
-secret_env = { OPENROUTER_API_KEY = "TEST_OR_KEY" }
-
-[providers.old-model]
-runner = "claude"
-profile = "openrouter"
-env = { AGENT_MODEL = "vendor/old" }
-secret_env = { OPENROUTER_API_KEY = "TEST_OR_KEY" }
-
-[salons.alpha]
-provider = "new-model"
-
-[agents.lou]
-handle = "lou.slopsalon.art"
-github_repo = "ANUcybernetics/slop-salon-lou"
-sprite_id = "spr_lou"
-salon = "alpha"
-live = true
-
-[agents.mina]
-# Held back on the old model; sync must respect this, not overwrite it.
-provider = "old-model"
-handle = "mina.slopsalon.art"
-github_repo = "ANUcybernetics/slop-salon-mina"
-sprite_id = "spr_mina"
-salon = "alpha"
-live = true
-"""
-    )
-    dispatcher = tmp_path / "agent-run"
-    dispatcher.write_text("#!/usr/bin/env python3\n")
-    profiles = tmp_path / "profiles.toml"
-    profiles.write_text("version = 1\n")
-    monkeypatch.setenv("SLOP_AGENT_RUN_SOURCE", str(dispatcher))
-    monkeypatch.setenv("SLOP_AGENT_RUN_PROFILES_SOURCE", str(profiles))
-    monkeypatch.setenv("TEST_OR_KEY", "not-a-real-key")
-    monkeypatch.chdir(tmp_path)
-    return cfg
-
-
-def _synced_models(instance) -> dict[str, str]:
-    """{sprite_id: AGENT_MODEL} from the base64 provider-file writes it was given."""
-    import base64
-    import re
-
-    out = {}
-    for call in instance.exec.call_args_list:
-        sprite_id, command = call[0][0], call[0][1][-1]
-        if "~/.slop-provider" not in command:
-            continue
-        blob = re.search(r"echo (\S+) \| base64 -d", command)
-        assert blob, command
-        body = base64.b64decode(blob.group(1)).decode()
-        model = re.search(r"AGENT_MODEL='?([^'\n]+)", body)
-        assert model, body
-        out[sprite_id] = model.group(1)
-    return out
-
-
-def test_provider_sync_pushes_the_resolved_provider_and_records_nothing(salon_config):
-    """A salon moved onto a new model needs one registry edit, not per-agent overrides."""
-    before = salon_config.read_text()
-    with patch("slop_salon.cli.SpritesClient") as mock_class:
-        instance = MagicMock()
-        instance.exec.return_value = ExecResult(stdout="", stderr="", exit_code=0)
-        mock_class.return_value = instance
-
-        result = runner.invoke(app, ["provider", "sync"])
-
-    assert result.exit_code == 0, result.output
-    # lou takes the salon's provider; mina's own override still wins.
-    assert _synced_models(instance) == {"spr_lou": "vendor/new", "spr_mina": "vendor/old"}
-    assert salon_config.read_text() == before
-
-
-def test_provider_sync_takes_one_agent_so_a_swap_can_be_canaried(salon_config):
-    with patch("slop_salon.cli.SpritesClient") as mock_class:
-        instance = MagicMock()
-        instance.exec.return_value = ExecResult(stdout="", stderr="", exit_code=0)
-        mock_class.return_value = instance
-
-        result = runner.invoke(app, ["provider", "sync", "lou"])
-
-    assert result.exit_code == 0, result.output
-    assert _synced_models(instance) == {"spr_lou": "vendor/new"}
-
-
-def test_provider_sync_touches_no_sprite_when_a_secret_is_missing(salon_config, monkeypatch):
-    """Resolve-then-apply: a half-synced salon would be two models, not one."""
-    monkeypatch.delenv("TEST_OR_KEY")
-    with patch("slop_salon.cli.SpritesClient") as mock_class:
-        instance = MagicMock()
-        mock_class.return_value = instance
-
-        result = runner.invoke(app, ["provider", "sync"])
-
-    assert result.exit_code == 1
-    instance.exec.assert_not_called()
-
-
-def _exec_commands(instance) -> list[str]:
-    return [call[0][1][-1] for call in instance.exec.call_args_list]
-
-
-def _decoded_env_file(instance) -> str:
-    """The body written to ~/.slop-env, decoded from the base64 the command carries."""
-    import base64
-    import re
-
-    for command in _exec_commands(instance):
-        if "~/.slop-env" not in command:
-            continue
-        blob = re.search(r"echo (\S+) \| base64 -d", command)
-        assert blob, command
-        return base64.b64decode(blob.group(1)).decode()
-    raise AssertionError("no ~/.slop-env write was issued")
-
-
-def test_rotate_env_rewrites_secrets_and_leaves_the_token_in_one_place(salon_config, monkeypatch):
-    """A rotated admin token has to reach the sprite, which keeps its own copy."""
-    for key in [k for k in os.environ if k.startswith("SLOP_")]:
-        monkeypatch.delenv(key)
-    monkeypatch.setenv("SLOP_GH_TOKEN", "ghp_rotated")
-    before = salon_config.read_text()
-
-    with patch("slop_salon.cli.SpritesClient") as mock_class:
-        instance = MagicMock()
-        instance.exec.return_value = ExecResult(stdout="", stderr="", exit_code=0)
-        mock_class.return_value = instance
-
-        result = runner.invoke(app, ["rotate-env", "lou"])
-
-    assert result.exit_code == 0, result.output
-    body = _decoded_env_file(instance)
-    assert "export GH_TOKEN=ghp_rotated" in body
-    assert "export BSKY_HANDLE=lou.slopsalon.art" in body
-    assert "export AGENT_NAME=lou" in body
-
-    commands = _exec_commands(instance)
-    assert any(
-        "~/.git-credentials" in c and "https://x-access-token:ghp_rotated@github.com" in c
-        for c in commands
-    )
-    # origin loses its inline token, so the next rotation is one file, not two.
-    (remote,) = [c for c in commands if "remote set-url" in c]
-    assert "https://github.com/ANUcybernetics/slop-salon-lou.git" in remote
-    assert "ghp_rotated" not in remote
-
-    # Rotating secrets is not a registry change.
-    assert salon_config.read_text() == before
-
-
-def test_rotate_env_leaves_the_provider_file_alone(salon_config, monkeypatch):
-    """`provider sync` owns ~/.slop-provider; rotating secrets must not fight it."""
-    for key in [k for k in os.environ if k.startswith("SLOP_")]:
-        monkeypatch.delenv(key)
-    monkeypatch.setenv("SLOP_GH_TOKEN", "ghp_rotated")
-
-    with patch("slop_salon.cli.SpritesClient") as mock_class:
-        instance = MagicMock()
-        instance.exec.return_value = ExecResult(stdout="", stderr="", exit_code=0)
-        mock_class.return_value = instance
-
-        result = runner.invoke(app, ["rotate-env"])
-
-    assert result.exit_code == 0, result.output
-    assert not any("~/.slop-provider" in c for c in _exec_commands(instance))
+    assert "SOUL.md         clean" in result.output
+    assert "CLAUDE.md       drift (+1/-" in result.output

@@ -1047,3 +1047,279 @@ def test_timeline_mine_brings_them_back(bsky_env, session_mock, httpx_mock):
     assert result.exit_code == 0, result.output
     rows = [json.loads(line) for line in result.output.strip().splitlines()]
     assert [r["handle"] for r in rows] == [FAKE_HANDLE, "lelia.slopsalon.art"]
+
+
+# --- Provenance and the salon boundary ---
+
+
+@pytest.fixture
+def salon_env(monkeypatch):
+    """lou's salon is {lou, mina}; gert and vita are the collective's outsiders."""
+    monkeypatch.setenv("SLOP_MODEL", "z-ai/glm-5.3-flash")
+    monkeypatch.setenv("SLOP_SALON", "one")
+    monkeypatch.setenv("SLOP_SIBLINGS", "mina.slopsalon.art")
+    monkeypatch.setenv(
+        "SLOP_COLLECTIVE",
+        "lou.slopsalon.art mina.slopsalon.art gert.slopsalon.art vita.slopsalon.art",
+    )
+    from slop_salon.tools import bsky
+
+    bsky._handle_cache.clear()
+
+
+def _profile(httpx_mock, did: str, handle: str) -> None:
+    httpx_mock.add_response(
+        url=f"https://public.api.bsky.app/xrpc/app.bsky.actor.getProfile?actor={did}",
+        json={"did": did, "handle": handle},
+    )
+
+
+def _create_record_body(httpx_mock) -> dict:
+    (req,) = [r for r in httpx_mock.get_requests() if "createRecord" in str(r.url)]
+    return json.loads(req.content)
+
+
+def test_feed_post_is_stamped_with_model_and_salon(
+    bsky_env, salon_env, session_mock, httpx_mock, monkeypatch
+):
+    monkeypatch.setenv("SLOP_POST_DEDUP", "0")
+    httpx_mock.add_response(
+        url=f"{FAKE_PDS}/xrpc/com.atproto.repo.createRecord", json={"uri": "u", "cid": "c"}
+    )
+    from slop_salon.tools.bsky import app
+
+    body = json.dumps(
+        {
+            "repo": FAKE_DID,
+            "collection": "app.bsky.feed.post",
+            "record": {"text": "hello", "createdAt": "now"},
+        }
+    )
+    result = runner.invoke(app, ["post", "com.atproto.repo.createRecord", "--json", body])
+    assert result.exit_code == 0, result.output
+    record = _create_record_body(httpx_mock)["record"]
+    assert record["provenance"] == {"model": "z-ai/glm-5.3-flash", "salon": "one"}
+    assert record["text"] == "hello"
+
+
+def test_feed_post_from_a_file_is_stamped_too(
+    bsky_env, salon_env, session_mock, httpx_mock, monkeypatch, tmp_path
+):
+    monkeypatch.setenv("SLOP_POST_DEDUP", "0")
+    httpx_mock.add_response(
+        url=f"{FAKE_PDS}/xrpc/com.atproto.repo.createRecord", json={"uri": "u", "cid": "c"}
+    )
+    body = tmp_path / "post.json"
+    body.write_text(
+        json.dumps(
+            {
+                "repo": FAKE_DID,
+                "collection": "app.bsky.feed.post",
+                "record": {"text": "from file", "createdAt": "now"},
+            }
+        )
+    )
+    from slop_salon.tools.bsky import app
+
+    result = runner.invoke(app, ["post", "com.atproto.repo.createRecord", "--file", str(body)])
+    assert result.exit_code == 0, result.output
+    assert _create_record_body(httpx_mock)["record"]["provenance"]["model"] == "z-ai/glm-5.3-flash"
+
+
+def test_no_stamp_without_a_model_in_the_env(bsky_env, session_mock, httpx_mock, monkeypatch):
+    monkeypatch.setenv("SLOP_POST_DEDUP", "0")
+    httpx_mock.add_response(
+        url=f"{FAKE_PDS}/xrpc/com.atproto.repo.createRecord", json={"uri": "u", "cid": "c"}
+    )
+    from slop_salon.tools.bsky import app
+
+    body = json.dumps(
+        {
+            "repo": FAKE_DID,
+            "collection": "app.bsky.feed.post",
+            "record": {"text": "x", "createdAt": "now"},
+        }
+    )
+    result = runner.invoke(app, ["post", "com.atproto.repo.createRecord", "--json", body])
+    assert result.exit_code == 0, result.output
+    assert "provenance" not in _create_record_body(httpx_mock)["record"]
+
+
+def test_following_an_artist_in_another_salon_is_refused(bsky_env, salon_env, httpx_mock):
+    _profile(httpx_mock, "did:plc:gert", "gert.slopsalon.art")
+    from slop_salon.tools.bsky import app
+
+    body = json.dumps(
+        {
+            "repo": FAKE_DID,
+            "collection": "app.bsky.graph.follow",
+            "record": {"subject": "did:plc:gert", "createdAt": "now"},
+        }
+    )
+    result = runner.invoke(app, ["post", "com.atproto.repo.createRecord", "--json", body])
+    assert result.exit_code == 1
+    assert "gert.slopsalon.art is an artist in another salon" in result.output
+    assert not any("createRecord" in str(r.url) for r in httpx_mock.get_requests())
+
+
+@pytest.mark.parametrize(
+    ("did", "handle"),
+    [("did:plc:mina", "mina.slopsalon.art"), ("did:plc:human", "someone.bsky.social")],
+)
+def test_following_a_sibling_or_a_stranger_is_allowed(
+    bsky_env, salon_env, session_mock, httpx_mock, did, handle
+):
+    _profile(httpx_mock, did, handle)
+    httpx_mock.add_response(
+        url=f"{FAKE_PDS}/xrpc/com.atproto.repo.createRecord", json={"uri": "u", "cid": "c"}
+    )
+    from slop_salon.tools.bsky import app
+
+    body = json.dumps(
+        {
+            "repo": FAKE_DID,
+            "collection": "app.bsky.graph.follow",
+            "record": {"subject": did, "createdAt": "now"},
+        }
+    )
+    result = runner.invoke(app, ["post", "com.atproto.repo.createRecord", "--json", body])
+    assert result.exit_code == 0, result.output
+
+
+@pytest.mark.parametrize(
+    "record",
+    [
+        {
+            "text": "reply",
+            "reply": {
+                "parent": {"uri": "at://did:plc:vita/app.bsky.feed.post/1", "cid": "c"},
+                "root": {"uri": "at://did:plc:vita/app.bsky.feed.post/1", "cid": "c"},
+            },
+        },
+        {
+            "text": "quote",
+            "embed": {
+                "$type": "app.bsky.embed.record",
+                "record": {"uri": "at://did:plc:vita/app.bsky.feed.post/2", "cid": "c"},
+            },
+        },
+        {
+            "text": "@vita hi",
+            "facets": [
+                {
+                    "index": {"byteStart": 0, "byteEnd": 5},
+                    "features": [
+                        {"$type": "app.bsky.richtext.facet#mention", "did": "did:plc:vita"}
+                    ],
+                }
+            ],
+        },
+    ],
+    ids=["reply", "quote", "mention"],
+)
+def test_reaching_another_salon_by_reply_quote_or_mention_is_refused(
+    bsky_env, salon_env, httpx_mock, record
+):
+    _profile(httpx_mock, "did:plc:vita", "vita.slopsalon.art")
+    from slop_salon.tools.bsky import app
+
+    body = json.dumps(
+        {
+            "repo": FAKE_DID,
+            "collection": "app.bsky.feed.post",
+            "record": {**record, "createdAt": "now"},
+        }
+    )
+    result = runner.invoke(app, ["post", "com.atproto.repo.createRecord", "--json", body])
+    assert result.exit_code == 1
+    assert "vita.slopsalon.art is an artist in another salon" in result.output
+
+
+def test_replying_to_a_sibling_is_allowed(
+    bsky_env, salon_env, session_mock, httpx_mock, monkeypatch
+):
+    monkeypatch.setenv("SLOP_POST_DEDUP", "0")
+    _profile(httpx_mock, "did:plc:mina", "mina.slopsalon.art")
+    httpx_mock.add_response(
+        url=f"{FAKE_PDS}/xrpc/com.atproto.repo.createRecord", json={"uri": "u", "cid": "c"}
+    )
+    from slop_salon.tools.bsky import app
+
+    record = {
+        "text": "yes",
+        "createdAt": "now",
+        "reply": {
+            "parent": {"uri": "at://did:plc:mina/app.bsky.feed.post/1", "cid": "c"},
+            "root": {"uri": "at://did:plc:mina/app.bsky.feed.post/1", "cid": "c"},
+        },
+    }
+    body = json.dumps({"repo": FAKE_DID, "collection": "app.bsky.feed.post", "record": record})
+    result = runner.invoke(app, ["post", "com.atproto.repo.createRecord", "--json", body])
+    assert result.exit_code == 0, result.output
+
+
+def test_timeline_drops_other_salons(bsky_env, salon_env, session_mock, httpx_mock):
+    httpx_mock.add_response(
+        url=f"{FAKE_PDS}/xrpc/app.bsky.feed.getTimeline?limit=20",
+        json={
+            "feed": [
+                {
+                    "post": {
+                        "uri": "at://1",
+                        "author": {"handle": "mina.slopsalon.art"},
+                        "record": {"text": "sibling"},
+                    }
+                },
+                {
+                    "post": {
+                        "uri": "at://2",
+                        "author": {"handle": "gert.slopsalon.art"},
+                        "record": {"text": "other salon"},
+                    }
+                },
+                {
+                    "post": {
+                        "uri": "at://3",
+                        "author": {"handle": "someone.bsky.social"},
+                        "record": {"text": "human"},
+                    }
+                },
+            ]
+        },
+    )
+    from slop_salon.tools.bsky import app
+
+    timeline = runner.invoke(app, ["timeline"])
+    assert timeline.exit_code == 0, timeline.output
+    assert [json.loads(line)["handle"] for line in timeline.output.strip().splitlines()] == [
+        "mina.slopsalon.art",
+        "someone.bsky.social",
+    ]
+
+
+def test_notifications_drop_other_salons(bsky_env, salon_env, session_mock, httpx_mock):
+    httpx_mock.add_response(
+        url=f"{FAKE_PDS}/xrpc/app.bsky.notification.listNotifications?limit=20",
+        json={
+            "notifications": [
+                {
+                    "uri": "at://4",
+                    "reason": "reply",
+                    "author": {"handle": "vita.slopsalon.art"},
+                    "record": {"text": "x"},
+                },
+                {
+                    "uri": "at://5",
+                    "reason": "reply",
+                    "author": {"handle": "mina.slopsalon.art"},
+                    "record": {"text": "y"},
+                },
+            ]
+        },
+    )
+    from slop_salon.tools.bsky import app
+
+    notes = runner.invoke(app, ["notifications"])
+    assert notes.exit_code == 0, notes.output
+    handles = [json.loads(line)["handle"] for line in notes.output.strip().splitlines()]
+    assert handles == ["mina.slopsalon.art"]

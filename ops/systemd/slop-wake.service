@@ -1,30 +1,20 @@
 [Unit]
-Description=Dispatch a Slop Salon wake (one tick per live agent)
+Description=Slop Salon wake (one tick per live agent)
 Documentation=file:///home/ben/projects/slop-salon/CLAUDE.md
-# No `After=network-online.target` here: that is a system target, so in the
-# user manager it silently resolves to nothing and orders nothing. The real
-# guard is the ExecStartPre below. (2026-07-27)
+# The dotfiles oncall pattern: a non-zero exit files a deduped `nb` todo with
+# this unit's journal tail, and a later success clears it.
+OnFailure=unit-oncall@%n.service
+OnSuccess=unit-oncall-clear@%n.service
 
 [Service]
 Type=oneshot
+# `After=network-online.target` is a system target and orders nothing in the
+# user manager, so gate on the real check.
 ExecStartPre=/home/ben/.dotfiles/bin/wait-for-network
-# A full wake is gated by its slowest tick: most are 2-8 min, but one agent
-# intermittently hits the 30-min tick cap and pushes the whole wake to ~30 min
-# --- at or over the timer's interval. If this service ran `slop wake` inline,
-# that overlapping firing would hit "Unit slop-wake.service is already active"
-# and be dropped, stalling *every* agent behind the slowest one. Instead we
-# spawn the fan-out as a transient unit and return immediately, so successive
-# firings overlap. The in-sprite slop-tick flock makes a still-busy agent a
-# clean no-op (it exits 75 -> rendered as `busy`), so each firing ticks only
-# the idle agents.
-#
-# Inspect runs with: journalctl --user -t slop-wake-run
-# RuntimeMaxSec is the backstop for a hung run (a wedged `sprite exec` has no
-# timeout of its own); a healthy wake finishes well inside it.
-ExecStart=/usr/bin/systemd-run --user --collect \
-    --description="Slop Salon wake run" \
-    --property=SyslogIdentifier=slop-wake-run \
-    --property=WorkingDirectory=/home/ben/projects/slop-salon \
-    --property=Environment=PATH=/home/ben/.local/bin:/usr/local/bin:/usr/bin:/bin \
-    --property=RuntimeMaxSec=8h \
-    /home/ben/.local/bin/mise exec -- uv run slop wake
+WorkingDirectory=/home/ben/projects/slop-salon
+Environment=PATH=/home/ben/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/home/ben/.local/bin/mise exec -- uv run slop wake
+# Runs inline: firings cannot overlap at a 6h cadence with a 2h tick cap, and
+# it must fail *as this unit* for OnFailure= to see it. The cap backstops a
+# hung `sprite exec`, which has no timeout of its own.
+TimeoutStartSec=3h

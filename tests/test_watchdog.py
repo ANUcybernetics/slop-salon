@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import datetime as dt
 
-from slop_salon import watchdog
+from slop_salon import wake, watchdog
 
 NOW = dt.datetime(2026, 7, 28, 14, 0, tzinfo=dt.UTC)
 MAX_AGE = 90 * 60
 GRACE = 30 * 60
-OK = watchdog.Probe(ok=True, detail="200")
 
 
 def _stamp(*, minutes_ago: float, statuses: dict[str, str] | None = None) -> dict:
@@ -31,7 +30,6 @@ def _problems(
     max_age: float = MAX_AGE,
     timer_stopped_for: float | None = None,
     timer_grace: float = GRACE,
-    inference: watchdog.Probe | None = OK,
     timer_name: str = "slop-wake.timer",
 ) -> list[str]:
     """`watchdog.problems` with a healthy baseline, so each test names only its defect.
@@ -46,7 +44,6 @@ def _problems(
         max_age=max_age,
         timer_stopped_for=timer_stopped_for,
         timer_grace=timer_grace,
-        inference=inference,
         timer_name=timer_name,
     )
 
@@ -117,18 +114,9 @@ def test_naive_timestamp_is_treated_as_utc():
     assert _problems(stamp={"finished_at": naive, "statuses": {"lou": "ok"}}) == []
 
 
-def test_dead_engine_is_caught_even_when_wakes_are_fresh():
-    # The 13:14 outage: wakes ran and completed on schedule for hours while every
-    # tick failed, so freshness alone stays silent. This is why the inference
-    # probe is a first-class check.
-    found = _problems(inference=watchdog.Probe(ok=False, detail="/health 503 --- engine dead"))
-    assert len(found) == 1
-    assert "inference endpoint unhealthy" in found[0]
-
-
-def test_all_agents_failing_is_caught_without_any_probe():
-    # Defence in depth: even with the endpoint answering and the stamp fresh, a
-    # wake where nothing worked is a problem.
+def test_all_agents_failing_is_caught():
+    # Wakes can run and complete on schedule for hours while every tick fails,
+    # so freshness alone stays silent.
     found = _problems(
         stamp=_stamp(minutes_ago=5, statuses={"lou": "claude-err", "mina": "fail(1)"})
     )
@@ -141,27 +129,20 @@ def test_a_single_surviving_agent_is_not_flagged_as_all_failed():
     assert _problems(stamp=_stamp(minutes_ago=5, statuses=statuses)) == []
 
 
-def test_deferred_counts_as_serviced():
-    # Deferral is the slot cap working as designed, not a failure.
-    statuses = {"lou": "deferred", "mina": "deferred"}
-    assert _problems(stamp=_stamp(minutes_ago=5, statuses=statuses)) == []
-
-
 def test_problems_accumulate():
     found = _problems(
         stamp=_stamp(minutes_ago=300),
         timer_stopped_for=4 * 3600,
-        inference=watchdog.Probe(ok=False, detail="unreachable"),
     )
-    assert len(found) == 3
+    assert len(found) == 2
 
 
 def test_stamp_roundtrips(tmp_path):
     path = tmp_path / "last-wake.json"
-    watchdog.write_stamp({"lou": "ok", "mina": "busy"}, now=NOW, path=path)
+    wake.write_stamp({"lou": "ok", "mina": "claude-err"}, now=NOW, path=path)
     stamp = watchdog.read_stamp(path)
     assert stamp is not None
-    assert stamp["statuses"] == {"lou": "ok", "mina": "busy"}
+    assert stamp["statuses"] == {"lou": "ok", "mina": "claude-err"}
     assert (
         watchdog.problems(
             stamp=stamp,
@@ -169,7 +150,6 @@ def test_stamp_roundtrips(tmp_path):
             max_age=MAX_AGE,
             timer_stopped_for=None,
             timer_grace=GRACE,
-            inference=OK,
         )
         == []
     )

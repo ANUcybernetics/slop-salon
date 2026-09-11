@@ -77,7 +77,7 @@ def seeded_remote(tmp_path: Path) -> tuple[str, str]:
     (work / "notes" / "2026-06-01-piece.md").write_text("made a thing\n")
     _git(["add", "-A"], cwd=work)
     _git(["commit", "--quiet", "-m", "session"], cwd=work)
-    (work / "SIBLINGS.md").write_text("## mina\n\nlots of notes\n")
+    (work / "MEMORY.md").write_text("## mina\n\nlots of notes\n")
     _git(["add", "-A"], cwd=work)
     _git(["commit", "--quiet", "-m", "session 2"], cwd=work)
     _git(["push", "--quiet", "-u", "origin", "main"], cwd=work)
@@ -97,10 +97,11 @@ def test_push_season_reset_tags_old_head_and_leaves_one_orphan_commit(
         remote,
         {
             "CLAUDE.md": "# lou\n",
-            "SIBLINGS.md": "# Siblings\n",
-            "notes/.keep": "",
+            "MEMORY.md": "# lou\n",
+            "notes/now.md": "# now\n",
             "slop-tick": "#!/bin/bash\n",
         },
+        tag="season-1",
     )
     assert branch == "main"
 
@@ -110,8 +111,8 @@ def test_push_season_reset_tags_old_head_and_leaves_one_orphan_commit(
     assert _git(["rev-list", "--count", "HEAD"], cwd=check) == "1"
     assert sorted(_git(["ls-files"], cwd=check).splitlines()) == [
         "CLAUDE.md",
-        "SIBLINGS.md",
-        "notes/.keep",
+        "MEMORY.md",
+        "notes/now.md",
         "slop-tick",
     ]
     assert (check / "CLAUDE.md").read_text() == "# lou\n"
@@ -123,7 +124,7 @@ def test_push_season_reset_tags_old_head_and_leaves_one_orphan_commit(
 
     # Re-running (a retry after a failure part-way) must not move the tag onto
     # the reset commit and must still leave a single commit on the branch.
-    push_season_reset(remote, {"CLAUDE.md": "# lou again\n"})
+    push_season_reset(remote, {"CLAUDE.md": "# lou again\n"}, tag="season-1")
     check2 = tmp_path / "check2"
     _git(["clone", "--quiet", remote, str(check2)], cwd=tmp_path)
     assert _git(["rev-parse", "season-1^{commit}"], cwd=check2) == old_head
@@ -161,6 +162,10 @@ def test_reset_bluesky_unfollows_every_page_and_rewrites_profile(httpx_mock):
         url=f"{PDS}/xrpc/app.bsky.feed.getAuthorFeed?actor=did%3Aplc%3Alou&limit=30&filter=posts_no_replies",
         json={"feed": [{"post": {"uri": "at://old", "cid": "x", "record": {"text": "old piece"}}}]},
     )
+    # The sibling follow, then the marker.
+    httpx_mock.add_response(
+        url=f"{PDS}/xrpc/com.atproto.repo.createRecord", json={"uri": "at://follow", "cid": "f"}
+    )
     httpx_mock.add_response(
         url=f"{PDS}/xrpc/com.atproto.repo.createRecord", json={"uri": "at://marker", "cid": "mk"}
     )
@@ -182,9 +187,14 @@ def test_reset_bluesky_unfollows_every_page_and_rewrites_profile(httpx_mock):
     )
     httpx_mock.add_response(url=f"{PDS}/xrpc/app.bsky.notification.updateSeen", status_code=200)
 
-    summary = reset_bluesky(_session())
+    httpx_mock.add_response(
+        url=f"{PDS}/xrpc/com.atproto.identity.resolveHandle?handle=mina.slopsalon.art",
+        json={"did": "did:plc:mina"},
+    )
+    summary = reset_bluesky(_session(), ["mina.slopsalon.art"])
 
     assert summary["unfollowed"] == 3
+    assert summary["followed"] == ["mina.slopsalon.art"]
     deletes = _requests_to(httpx_mock, "deleteRecord")
     assert [json.loads(r.content)["rkey"] for r in deletes] == ["aaa", "bbb", "ccc"]
     assert all(r.headers["authorization"] == "Bearer jwt" for r in deletes)
@@ -201,8 +211,12 @@ def test_reset_bluesky_unfollows_every_page_and_rewrites_profile(httpx_mock):
     }
     assert summary["profile"] == body["record"]
 
-    # The marker is posted under the agent's name, then pinned above.
-    (create,) = _requests_to(httpx_mock, "createRecord")
+    # The sibling follow lands after the unfollows, then the marker is posted
+    # under the agent's name and pinned above.
+    follow_req, create = _requests_to(httpx_mock, "createRecord")
+    follow = json.loads(follow_req.content)
+    assert follow["collection"] == "app.bsky.graph.follow"
+    assert follow["record"]["subject"] == "did:plc:mina"
     marker = json.loads(create.content)
     assert marker["collection"] == "app.bsky.feed.post"
     assert marker["record"]["text"] == MARKER_TEXT
@@ -239,7 +253,7 @@ def test_reset_bluesky_writes_profile_even_when_none_exists(httpx_mock):
     httpx_mock.add_response(url=f"{PDS}/xrpc/com.atproto.repo.putRecord", json={})
     httpx_mock.add_response(url=f"{PDS}/xrpc/app.bsky.notification.updateSeen", status_code=200)
 
-    summary = reset_bluesky(_session())
+    summary = reset_bluesky(_session(), [])
 
     assert summary["unfollowed"] == 0
     assert summary["profile"] == {
@@ -250,59 +264,17 @@ def test_reset_bluesky_writes_profile_even_when_none_exists(httpx_mock):
     assert not _requests_to(httpx_mock, "createRecord")
 
 
-@pytest.fixture
-def reset_config(tmp_path, monkeypatch):
-    (tmp_path / "templates").mkdir()
-    (tmp_path / "templates" / "CLAUDE.md").write_text("# {{name}} ({{handle}})")
-    (tmp_path / "templates" / "SIBLINGS.md").write_text("# Siblings\n\n{{siblings_section}}")
-    (tmp_path / "SOUL.md").write_text("# Soul")
-    cfg = tmp_path / "slop_salon.toml"
-    cfg.write_text(
-        """
-[providers.season2]
-runner = "claude"
-env = { AGENT_MODEL = "x" }
-secret_env = { OPENROUTER_API_KEY = "TEST_OPENROUTER_KEY" }
-
-[salons.one]
-provider = "season2"
-
-[agents.lou]
-handle = "lou.slopsalon.art"
-github_repo = "ANUcybernetics/slop-salon-lou"
-sprite_id = "lou"
-salon = "one"
-live = true
-
-[agents.mina]
-handle = "mina.slopsalon.art"
-github_repo = "ANUcybernetics/slop-salon-mina"
-sprite_id = "mina"
-salon = "one"
-live = true
-"""
-    )
-    monkeypatch.setenv("TEST_OPENROUTER_KEY", "not-a-key")
-    monkeypatch.chdir(tmp_path)
-    return cfg
-
-
-def test_reset_runs_steps_in_order_with_fresh_siblings(reset_config):
+def test_reset_runs_steps_in_order_with_fresh_siblings(registry):
     order: list[str] = []
     session = _session()
 
     with (
-        patch.object(
-            reset_mod,
-            "resolve_secrets",
-            return_value={"GH_TOKEN": "ghp_x", "BSKY_PASSWORD": "pw"},
-        ),
         patch.object(reset_mod, "SpritesClient") as sprites_class,
         patch.object(
             reset_mod, "create_session", side_effect=lambda *a: order.append("session") or session
         ) as create,
         patch.object(
-            reset_mod, "_preflight_sprite", side_effect=lambda *a: order.append("preflight")
+            reset_mod, "preflight_sprite", side_effect=lambda *a, **k: order.append("preflight")
         ) as preflight,
         patch.object(
             reset_mod,
@@ -317,7 +289,12 @@ def test_reset_runs_steps_in_order_with_fresh_siblings(reset_config):
             "reset_bluesky",
             side_effect=lambda *a, **k: (
                 order.append("bluesky")
-                or {"unfollowed": 5, "profile": {}, "seen_at": "2026-09-10T00:00:00.000Z"}
+                or {
+                    "unfollowed": 5,
+                    "followed": ["mina.slopsalon.art"],
+                    "profile": {},
+                    "seen_at": "x",
+                }
             ),
         ) as bluesky,
     ):
@@ -329,30 +306,27 @@ def test_reset_runs_steps_in_order_with_fresh_siblings(reset_config):
     # rebuilt only after the branch it clones has been replaced; the timeline
     # is cleaned last.
     assert order == ["session", "preflight", "push", "recreate", "bluesky"]
-    create.assert_called_once_with("lou.slopsalon.art", "pw")
-    preflight.assert_called_once_with(sprites, "lou", "~/slop-salon-lou")
+    create.assert_called_once_with("lou.slopsalon.art", "lou-pw")
+    preflight.assert_called_once_with(sprites, "lou", "~/slop-salon-lou", strict=True)
     recreate.assert_called_once_with("lou", config_path="slop_salon.toml", sprites=sprites)
-    bluesky.assert_called_once_with(session, marker=True)
+    # The home feed is the salon: the siblings are followed as part of the reset.
+    bluesky.assert_called_once_with(session, ["mina.slopsalon.art"], marker=True)
 
     remote, files = push.call_args.args
-    assert remote == "https://ghp_x@github.com/ANUcybernetics/slop-salon-lou.git"
-    assert push.call_args.kwargs == {"tag": "season-1"}
-    # Freshly interpolated templates: a stub sibling entry, not carried notes.
-    assert files["CLAUDE.md"] == "# lou (lou.slopsalon.art)"
-    assert "## mina" in files["SIBLINGS.md"]
-    assert "No observations yet" in files["SIBLINGS.md"]
-    assert files["SOUL.md"] == "# Soul"
+    assert remote == "https://ghp_test@github.com/ANUcybernetics/slop-salon-lou.git"
+    assert push.call_args.kwargs == {"tag": "season-2"}
+    # Freshly interpolated templates and the agent's soul, not carried notes.
+    assert files["CLAUDE.md"].startswith("# lou\n")
+    assert "mina" in files["MEMORY.md"]
+    assert files["SOUL.md"] == "# Boden\n"
+    assert "notes/now.md" in files
 
 
-def test_reset_discard_unpushed_still_refuses_a_running_tick(reset_config):
+def test_reset_discard_unpushed_still_refuses_a_running_tick(registry):
     """The relaxed pre-flight drops the unpushed check, never the running-tick one."""
     with (
-        patch.object(
-            reset_mod, "resolve_secrets", return_value={"GH_TOKEN": "ghp_x", "BSKY_PASSWORD": "pw"}
-        ),
         patch.object(reset_mod, "SpritesClient") as sprites_class,
         patch.object(reset_mod, "create_session", return_value=_session()),
-        patch.object(reset_mod, "_preflight_sprite") as strict,
         patch.object(reset_mod, "push_season_reset") as push,
         pytest.raises(SystemExit, match="tick is running"),
     ):
@@ -360,17 +334,11 @@ def test_reset_discard_unpushed_still_refuses_a_running_tick(reset_config):
         sprites.exec.return_value = MagicMock(stdout="4242\n", stderr="", exit_code=0)
         sprites_class.return_value = sprites
         reset("lou", discard_unpushed=True)
-    strict.assert_not_called()
     push.assert_not_called()
 
 
-def test_reset_fails_before_any_write_when_bluesky_login_fails(reset_config):
+def test_reset_fails_before_any_write_when_bluesky_login_fails(registry):
     with (
-        patch.object(
-            reset_mod,
-            "resolve_secrets",
-            return_value={"GH_TOKEN": "ghp_x", "BSKY_PASSWORD": "wrong"},
-        ),
         patch.object(reset_mod, "SpritesClient"),
         patch.object(reset_mod, "create_session", side_effect=SystemExit(1)),
         patch.object(reset_mod, "push_season_reset") as push,
@@ -382,12 +350,11 @@ def test_reset_fails_before_any_write_when_bluesky_login_fails(reset_config):
     recreate.assert_not_called()
 
 
-def test_reset_skips_are_honoured(reset_config):
+def test_reset_skips_are_honoured(registry):
     with (
-        patch.object(reset_mod, "resolve_secrets", return_value={"GH_TOKEN": "ghp_x"}),
         patch.object(reset_mod, "SpritesClient"),
         patch.object(reset_mod, "create_session") as create,
-        patch.object(reset_mod, "_preflight_sprite") as preflight,
+        patch.object(reset_mod, "preflight_sprite") as preflight,
         patch.object(reset_mod, "push_season_reset", return_value="main") as push,
         patch.object(reset_mod, "recreate") as recreate,
         patch.object(reset_mod, "reset_bluesky") as bluesky,
@@ -400,26 +367,23 @@ def test_reset_skips_are_honoured(reset_config):
     assert push.call_args.kwargs == {"tag": "season-3"}
 
 
-def test_reset_retry_after_bluesky_failure_touches_only_bluesky(reset_config):
+def test_reset_retry_after_bluesky_failure_touches_only_bluesky(registry):
     """The retry the docstring promises: --skip-repo --skip-sprite redoes step 5 alone."""
     session = _session()
     with (
-        patch.object(
-            reset_mod, "resolve_secrets", return_value={"GH_TOKEN": "ghp_x", "BSKY_PASSWORD": "pw"}
-        ),
         patch.object(reset_mod, "SpritesClient"),
         patch.object(reset_mod, "create_session", return_value=session),
-        patch.object(reset_mod, "_preflight_sprite") as preflight,
+        patch.object(reset_mod, "preflight_sprite") as preflight,
         patch.object(reset_mod, "push_season_reset") as push,
         patch.object(reset_mod, "recreate") as recreate,
         patch.object(
             reset_mod,
             "reset_bluesky",
-            return_value={"unfollowed": 6, "profile": {}, "seen_at": "2026-09-10T00:00:00.000Z"},
+            return_value={"unfollowed": 6, "followed": [], "profile": {}, "seen_at": "x"},
         ) as bluesky,
     ):
         reset("lou", skip_repo=True, skip_sprite=True, marker=False)
     preflight.assert_not_called()
     push.assert_not_called()
     recreate.assert_not_called()
-    bluesky.assert_called_once_with(session, marker=False)
+    bluesky.assert_called_once_with(session, ["mina.slopsalon.art"], marker=False)

@@ -1,26 +1,11 @@
-"""Push a re-rendered template file from this admin repo into one live agent's GH repo.
+"""Push one re-rendered template file into a live agent's GitHub repo.
 
-Use when an admin-side template (`templates/CLAUDE.md`, `templates/SIBLINGS.md`,
-`templates/slop-tick`, or `SOUL.md`) has been edited and you want the change
-to flow to a live agent without re-provisioning.
+For a fix to `slop-tick`, `setup.sh` or `.gitignore` that has to reach a
+running agent without a season reset. The next tick's `git pull --rebase`
+picks it up. It overwrites the file: run `slop drift -f <file>` first, since
+an agent that has edited `CLAUDE.md` or `setup.sh` would lose its edits.
 
-`_build_template_files` re-renders all templates with the agent's
-name/handle/siblings substituted; this script writes one of them to the
-agent's GH repo, commits, and pushes. The next tick's `git pull --rebase`
-inside the sprite picks it up.
-
-WARNING: this overwrites the file in the agent's repo. Run `slop drift -f
-<file>` first --- if the agent has drifted from the template, this will lose
-their edits. See `.claude/commands/rollout.md` for the full workflow.
-
-Run from the project root:
-
-    mise exec -- uv run python ops/push-template.py <agent-name> <filename>
-
-Examples:
-
-    mise exec -- uv run python ops/push-template.py lou CLAUDE.md
-    mise exec -- uv run python ops/push-template.py lou slop-tick
+    mise exec -- uv run python ops/push-template.py <agent> <file>
 """
 
 from __future__ import annotations
@@ -33,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from slop_salon.config import load_config
 from slop_salon.github_push import put_file
-from slop_salon.provision import _build_template_files, resolve_secrets
+from slop_salon.provision import build_template_files
 
 
 def push_template(name: str, filename: str, config_path: str = "slop_salon.toml") -> None:
@@ -41,42 +26,23 @@ def push_template(name: str, filename: str, config_path: str = "slop_salon.toml"
     if name not in config.agents:
         raise SystemExit(f"agent {name!r} missing from {config_path}")
     agent = config.agents[name]
-
-    env = resolve_secrets(name, list(config.agents.keys()))
-    gh_token = env.get("GH_TOKEN")
-    if not gh_token:
-        raise SystemExit(
-            "GH_TOKEN missing from resolved env; "
-            "check ~/.config/mise/config.local.toml for SLOP_GH_TOKEN"
-        )
-    push_env = {**os.environ, "GH_TOKEN": gh_token}
-
-    siblings = [(s, config.agents[s].handle) for s in agent.siblings if s in config.agents]
-    files = _build_template_files(
-        Path("templates"),
-        Path("SOUL.md"),
-        agent.name,
-        agent.handle,
-        siblings,
-    )
+    token = os.environ.get("SLOP_GH_TOKEN")
+    if not token:
+        raise SystemExit("SLOP_GH_TOKEN is not set (~/.config/mise/config.local.toml)")
+    files = build_template_files(config, agent)
     if filename not in files:
         raise SystemExit(f"no template renders to {filename!r}; have {sorted(files)}")
-    rendered = files[filename]
-
     outcome = put_file(
         agent.github_repo,
         filename,
-        rendered,
+        files[filename],
         f"Sync {filename} from admin templates",
-        push_env,
+        {**os.environ, "GH_TOKEN": token},
     )
-    if outcome == "unchanged":
-        print(f"{name}: {filename} already matches template, skipping")
-    else:
-        print(f"{name}: {outcome} {filename}")
+    print(f"{name}: {outcome} {filename}")
 
 
 if __name__ == "__main__":
     if len(sys.argv) != 3:
-        raise SystemExit(f"usage: {sys.argv[0]} <agent-name> <filename>")
+        raise SystemExit(f"usage: {sys.argv[0]} <agent> <file>")
     push_template(sys.argv[1], sys.argv[2])

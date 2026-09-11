@@ -1,191 +1,112 @@
-"""Tests for slop_salon.config."""
+"""Tests for the registry loader, plus sanity checks on the real registry."""
 
 from __future__ import annotations
 
+from collections import Counter
+from pathlib import Path
+
 import pytest
 
-from slop_salon.config import Agent, load_config
+from slop_salon.config import load_config, save_sprite_id
+
+REAL_REGISTRY = Path(__file__).resolve().parent.parent / "slop_salon.toml"
 
 
-def test_load_config_returns_agents_by_name(tmp_path):
-    cfg = tmp_path / "slop_salon.toml"
-    cfg.write_text(
-        """
-[salons.one]
+def test_siblings_are_the_rest_of_the_salon_in_registry_order(registry):
+    config = load_config(registry)
+    assert config.agents["lou"].siblings == ["mina"]
+    assert config.agents["gert"].siblings == ["vita"]
 
-[agents.lou]
-handle = "lou.slopsalon.art"
-github_repo = "ANUcybernetics/slop-salon-lou"
-sprite_id = "spr_abc123"
-salon = "one"
 
-[agents.other]
-handle = "other.slopsalon.art"
-github_repo = "ANUcybernetics/slop-salon-other"
-sprite_id = ""
-salon = "one"
-"""
+def test_provider_precedence_is_agent_then_salon_then_default(registry):
+    text = registry.read_text().replace(
+        '[agents.gert]\nhandle = "gert.slopsalon.art"',
+        '[agents.gert]\nprovider = "gw"\nhandle = "gert.slopsalon.art"',
     )
-
-    config = load_config(cfg)
-
-    assert "lou" in config.agents
-    lou = config.agents["lou"]
-    assert isinstance(lou, Agent)
-    assert lou.name == "lou"
-    assert lou.handle == "lou.slopsalon.art"
-    assert lou.github_repo == "ANUcybernetics/slop-salon-lou"
-    assert lou.sprite_id == "spr_abc123"
-    assert lou.siblings == ["other"]
+    registry.write_text(text)
+    config = load_config(registry)
+    assert config.provider_for("gert").name == "gw"  # agent override
+    assert config.provider_for("vita").name == "direct"  # salon
+    assert config.default_provider == "gw"
+    assert config.claude_version == "2.1.263"
 
 
-SALONS = """
-default_provider = "fallback"
-
-[providers.fallback]
-runner = "claude"
-
-[providers.a-model]
-runner = "claude"
-
-[providers.b-model]
-runner = "claude"
-
-[salons.a]
-label = "Model A"
-provider = "a-model"
-
-[salons.b]
-provider = "b-model"
-
-[agents.lou]
-handle = "lou.slopsalon.art"
-github_repo = "o/lou"
-salon = "a"
-
-[agents.mina]
-handle = "mina.slopsalon.art"
-github_repo = "o/mina"
-salon = "b"
-
-[agents.gert]
-handle = "gert.slopsalon.art"
-github_repo = "o/gert"
-salon = "a"
-
-[agents.vita]
-handle = "vita.slopsalon.art"
-github_repo = "o/vita"
-salon = "a"
-provider = "fallback"
-
-[agents.solo]
-handle = "solo.slopsalon.art"
-github_repo = "o/solo"
-"""
+def test_model_id_drops_the_preset_suffix(registry):
+    config = load_config(registry)
+    assert config.provider_for("lou").model_id == "z-ai/glm-5.3-flash"
+    assert config.provider_for("gert").model_id == "meta/muse-spark-1.3-contributor"
+    assert config.providers["direct"].base_url == "https://openrouter.ai/api"
 
 
-def _salons_config(tmp_path, text=SALONS):
+@pytest.mark.parametrize(
+    ("snippet", "expected"),
+    [
+        ('[providers.x]\nmodel = "m"\n', "`base_url` is required"),
+        ('[providers.x]\nbase_url = "u"\nmodel = "m"\nauth = "magic"\n', "unknown auth"),
+        ('[providers.x]\nbase_url = "u"\nmodel = "m"\nauth = "secret_env"\n', "secret_env"),
+        ('[providers.x]\nbase_url = "u"\nmodel = "m"\nsecret_env = "K"\n', "secret_env"),
+        ('[salons.s]\nprovider = "nope"\n', "no \\[providers.\\*\\] block"),
+        (
+            '[agents.a]\nhandle = "h"\ngithub_repo = "r"\nsalon = "nope"\n',
+            "no \\[salons.\\*\\] block",
+        ),
+        (
+            '[agents.a]\nhandle = "h"\ngithub_repo = "r"\nsoul = "nope"\n',
+            "no \\[souls.\\*\\] block",
+        ),
+        ('[agents.a]\nhandle = "h"\ngithub_repo = "r"\nsiblings = ["b"]\n', "derived from `salon`"),
+        ('default_provider = "nope"\n', "no \\[providers.\\*\\] block"),
+    ],
+)
+def test_registry_errors_are_caught_at_load(tmp_path, snippet, expected):
     cfg = tmp_path / "slop_salon.toml"
-    cfg.write_text(text)
-    return load_config(cfg)
+    cfg.write_text(snippet)
+    with pytest.raises(ValueError, match=expected):
+        load_config(cfg)
 
 
-def test_siblings_are_the_rest_of_the_salon_in_registry_order(tmp_path):
-    config = _salons_config(tmp_path)
-
-    assert config.agents["lou"].siblings == ["gert", "vita"]
-    assert config.agents["gert"].siblings == ["lou", "vita"]
-    assert config.agents["mina"].siblings == []
-    assert config.agents["solo"].siblings == []
-    assert config.members("a") == ["lou", "gert", "vita"]
-    assert config.salons["a"].label == "Model A"
-    assert config.salons["b"].label == "b"
+def test_an_agent_resolving_to_no_provider_says_so(tmp_path):
+    cfg = tmp_path / "slop_salon.toml"
+    cfg.write_text('[agents.a]\nhandle = "h"\ngithub_repo = "r"\n')
+    with pytest.raises(ValueError, match="resolves to no provider"):
+        load_config(cfg).provider_for("a")
 
 
-def test_provider_precedence_is_agent_then_salon_then_default(tmp_path):
-    config = _salons_config(tmp_path)
-
-    assert config.provider_for("lou").name == "a-model"
-    assert config.provider_for("vita").name == "fallback"
-    assert config.provider_for("solo").name == "fallback"
+def test_live_agents_need_a_sprite(registry):
+    assert [a.name for a in load_config(registry).live_agents()] == ["lou", "mina", "gert"]
 
 
-def test_explicit_siblings_list_is_rejected(tmp_path):
-    with pytest.raises(ValueError, match="derived from `salon`"):
-        _salons_config(tmp_path, SALONS + 'siblings = ["lou"]\n')
+def test_save_sprite_id_updates_file_in_place(registry):
+    config = load_config(registry)
+    save_sprite_id(config, "vita", "vita")
+    assert load_config(registry).agents["vita"].sprite_id == "vita"
+    save_sprite_id(config, "lou", "lou-2")
+    assert load_config(registry).agents["lou"].sprite_id == "lou-2"
 
 
-def test_undeclared_salon_is_rejected(tmp_path):
-    with pytest.raises(ValueError, match="salon 'nope'"):
-        _salons_config(tmp_path, SALONS + 'salon = "nope"\n')
+# --- The real registry ---
 
 
-def test_salon_provider_must_exist(tmp_path):
-    with pytest.raises(ValueError, match="salon 'c'"):
-        _salons_config(tmp_path, SALONS + '\n[salons.c]\nprovider = "nope"\n')
-
-
-def test_registry_salons_are_closed():
-    """Every agent in the real registry sits in a salon, and the sibling graph
-    never leaves it: an agent's siblings are exactly the rest of its salon, so
-    the relation is symmetric and no name crosses a salon boundary. Season 2
-    (task-17) rests on this --- one leaked name in one SIBLINGS.md and the
-    salons stop being independent."""
-    config = load_config("slop_salon.toml")
-
-    assert config.salons, "no [salons.*] blocks in the registry"
+def test_real_registry_salons_are_closed_and_crossed_with_every_soul():
+    """Three salons of three, each carrying one of each soul, so soul and model
+    vary independently; and no sibling edge leaves a salon."""
+    config = load_config(REAL_REGISTRY)
     for agent in config.agents.values():
         assert agent.salon, f"{agent.name} is in no salon"
-        expected = [m for m in config.members(agent.salon) if m != agent.name]
-        assert agent.siblings == expected, agent.name
+        assert agent.soul, f"{agent.name} has no soul"
         for sibling in agent.siblings:
-            assert agent.name in config.agents[sibling].siblings, (agent.name, sibling)
-    for salon in config.salons.values():
-        assert salon.provider, f"salon {salon.name} names no provider"
-        assert len(config.members(salon.name)) >= 2, f"salon {salon.name} is not a salon"
+            assert config.agents[sibling].salon == agent.salon
+    for salon in config.salons:
+        souls = Counter(a.soul for a in config.agents.values() if a.salon == salon)
+        assert souls == Counter(config.souls.keys()), f"salon {salon} souls: {dict(souls)}"
 
 
-def test_load_config_missing_file_raises(tmp_path):
-    with pytest.raises(FileNotFoundError):
-        load_config(tmp_path / "nope.toml")
-
-
-def test_save_sprite_id_updates_file_in_place(tmp_path):
-    from slop_salon.config import save_sprite_id
-
-    cfg = tmp_path / "slop_salon.toml"
-    cfg.write_text(
-        """
-[agents.lou]
-handle = "lou.slopsalon.art"
-github_repo = "ANUcybernetics/slop-salon-lou"
-sprite_id = ""
-"""
-    )
-
-    config = load_config(cfg)
-    save_sprite_id(config, "lou", "spr_xyz")
-
-    reloaded = load_config(cfg)
-    assert reloaded.agents["lou"].sprite_id == "spr_xyz"
-
-
-def test_save_sprite_id_appends_when_field_missing(tmp_path):
-    """If the agent block lacks a sprite_id line, save_sprite_id should add it."""
-    from slop_salon.config import save_sprite_id
-
-    cfg = tmp_path / "slop_salon.toml"
-    cfg.write_text(
-        """
-[agents.lou]
-handle = "lou.slopsalon.art"
-github_repo = "ANUcybernetics/slop-salon-lou"
-"""
-    )
-
-    config = load_config(cfg)
-    save_sprite_id(config, "lou", "spr_new")
-
-    reloaded = load_config(cfg)
-    assert reloaded.agents["lou"].sprite_id == "spr_new"
+def test_real_registry_souls_and_providers_exist():
+    config = load_config(REAL_REGISTRY)
+    for soul in config.souls:
+        assert (REAL_REGISTRY.parent / "souls" / f"{soul}.md").is_file()
+    for name in config.agents:
+        provider = config.provider_for(name)
+        assert provider.auth == "connector"
+        assert provider.base_url.startswith("https://api.sprites.dev/v1/gateway/")
+    assert config.claude_version

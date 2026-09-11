@@ -1,11 +1,9 @@
-"""Tests for slop_salon.sprites.
-
-Create/get_status hit the REST API (mocked via pytest-httpx). Exec shells
-out to the `sprite` CLI, so it's tested by mocking subprocess.run.
-"""
+"""Tests for slop_salon.sprites: REST calls are mocked with pytest-httpx, exec
+shells out to the `sprite` CLI so subprocess.run is mocked."""
 
 from __future__ import annotations
 
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -20,48 +18,49 @@ def client(monkeypatch):
     return SpritesClient()
 
 
-def test_create_sprite_returns_name(client, httpx_mock: HTTPXMock):
+def test_create_sprite_sends_labels_and_returns_name(client, httpx_mock: HTTPXMock):
+    httpx_mock.add_response(method="POST", json={"name": "lou", "status": "cold"})
+    assert client.create_sprite("lou", labels=["slop", "salon=one"]) == "lou"
+    body = json.loads(httpx_mock.get_requests()[0].content)
+    assert body == {"name": "lou", "labels": ["slop", "salon=one"]}
+
+
+def test_set_labels_and_policy_hit_their_endpoints(client, httpx_mock: HTTPXMock):
+    httpx_mock.add_response(method="PUT", url="https://api.sprites.dev/v1/sprites/lou", json={})
     httpx_mock.add_response(
-        method="POST",
-        json={
-            "id": "sprite-e7567610-d83d-459c-bb82-a19b0978ea2e",
-            "name": "lou",
-            "status": "cold",
-        },
+        method="POST", url="https://api.sprites.dev/v1/sprites/lou/policy/network", json={}
     )
+    client.set_labels("lou", ["slop"])
+    client.set_network_policy("lou", [{"include": "defaults"}])
+    put, post = httpx_mock.get_requests()
+    assert json.loads(put.content) == {"labels": ["slop"]}
+    assert json.loads(post.content) == {"rules": [{"include": "defaults"}]}
 
-    name = client.create_sprite(name="lou")
-    assert name == "lou"
+
+def test_destroy_tolerates_an_already_missing_sprite(client, httpx_mock: HTTPXMock):
+    httpx_mock.add_response(method="DELETE", status_code=404)
+    client.destroy_sprite("lou")
 
 
-def test_exec_shells_out_to_sprite_cli(client):
+def test_exec_passes_env_through_the_cli_flag(client):
     with patch("slop_salon.sprites.subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(stdout="hello", stderr="", returncode=0)
-
-        result = client.exec("lou", ["echo", "hello"])
-
-    assert result.stdout == "hello"
-    assert result.exit_code == 0
+        result = client.exec("lou", ["echo", "hello"], env={"A": "1", "B": "x=y"})
+    assert result.stdout == "hello" and result.exit_code == 0
     args = mock_run.call_args[0][0]
-    assert args[:4] == ["sprite", "exec", "-s", "lou"]
-    assert args[-2:] == ["echo", "hello"]
+    assert args == ["sprite", "exec", "-s", "lou", "--env", "A=1,B=x=y", "--", "echo", "hello"]
+
+
+def test_exec_refuses_a_value_with_a_comma(client):
+    with pytest.raises(ValueError, match="comma"):
+        client.exec("lou", ["true"], env={"A": "x,y"})
 
 
 def test_exec_propagates_nonzero_exit(client):
     with patch("slop_salon.sprites.subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(stdout="", stderr="boom", returncode=2)
-
         result = client.exec("lou", ["false"])
-
-    assert result.exit_code == 2
-    assert result.stderr == "boom"
-
-
-def test_get_status(client, httpx_mock: HTTPXMock):
-    httpx_mock.add_response(method="GET", json={"name": "lou", "status": "running"})
-
-    status = client.get_status("lou")
-    assert status == "running"
+    assert result.exit_code == 2 and result.stderr == "boom"
 
 
 def test_requires_api_token(monkeypatch):
