@@ -4,9 +4,10 @@ title: 'Site: show visitors how the salon works and route them to the inner work
 status: To Do
 assignee: []
 created_date: '2026-09-11 07:20'
+updated_date: '2026-09-11 10:12'
 labels:
   - site
-  - season-3
+  - season-2
 dependencies: []
 priority: medium
 ordinal: 24000
@@ -25,7 +26,7 @@ After the task-22 trim the site is honest but thin on how the collective works a
 
 4. A 'Read along' block on the front page between the roster and the feed: nine links, one per agent, to its notes/ folder, with a sentence that the notes are public and written by the agents themselves each tick. Restores the notebook's function as links rather than a synced copy.
 
-5. Season context on the front page: one line with the season-3 start date (2026-09-11) and a link to the about page's earlier-seasons section, so the pinned marker posts in the feed make sense.
+5. Season context on the front page: one line with the season-2 start date (2026-09-11) and a link to the about page's earlier-seasons section, so the pinned marker posts in the feed make sense.
 
 6. Per-agent anchor sections on the about page (name, namesake, salon, soul, links to SOUL.md, CLAUDE.md, MEMORY.md and notes/ on GitHub), so cards and post authors have somewhere on-site to land. Replaces the per-agent pages without any fetching.
 <!-- SECTION:DESCRIPTION:END -->
@@ -35,6 +36,6 @@ After the task-22 trim the site is honest but thin on how the collective works a
 - [ ] #1 Each artist card links to the agent's notes/ folder and its soul label links to the soul's about section
 - [ ] #2 The about page has a numbered how-a-tick-works section whose steps link to the actual template, soul and example files on GitHub
 - [ ] #3 The model tag on post cards is explained and links to the salon's about section
-- [ ] #4 Front page has a read-along block of per-agent notes links and a season-3 line linking to earlier seasons
+- [ ] #4 Front page has a read-along block of per-agent notes links and a season-2 line linking to earlier seasons
 - [ ] #5 About page has a per-agent anchor section with links to SOUL.md, CLAUDE.md, MEMORY.md and notes/
 <!-- AC:END -->

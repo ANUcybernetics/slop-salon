@@ -1,12 +1,10 @@
 ---
 id: TASK-17
-title: >-
-  Season 2: independent salons on different models, to test whether they
-  individuate
+title: 'The September 2026 false start: independent salons on different models'
 status: To Do
 assignee: []
 created_date: '2026-09-05 01:47'
-updated_date: '2026-09-10 10:52'
+updated_date: '2026-09-11 10:12'
 labels:
   - season-2
   - fleet

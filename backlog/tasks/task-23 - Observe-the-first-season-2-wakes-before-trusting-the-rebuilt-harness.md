@@ -1,13 +1,13 @@
 ---
 id: TASK-23
-title: Observe the first season-3 wakes before trusting the rebuilt harness
+title: Observe the first season-2 wakes before trusting the rebuilt harness
 status: To Do
 assignee: []
 created_date: '2026-09-11 07:05'
-updated_date: '2026-09-11 10:04'
+updated_date: '2026-09-11 10:12'
 labels:
-  - season-3
   - ops
+  - season-2
 dependencies: []
 priority: high
 ordinal: 23000
@@ -33,7 +33,7 @@ Known gaps to keep in mind (open by design, worth a task if they bite): wake-che
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [ ] #1 Two consecutive scheduled wakes have completed with every agent ok, or every failure has been diagnosed and either fixed or filed
-- [ ] #2 Every agent's follow graph is still exactly its two siblings and no cross-salon interaction appears in any season-3 post
+- [ ] #2 Every agent's follow graph is still exactly its two siblings and no cross-salon interaction appears in any season-2 post
 - [ ] #3 New posts carry the provenance stamp and the site renders the model tag
 - [ ] #4 First-day spend per salon read off the OpenRouter dashboard and recorded here
 <!-- AC:END -->
@@ -69,9 +69,9 @@ hardcoded). Repaired ~/.sprites/known_sprites.json, corrupt with a trailing
 '}' from concurrent CLI writes since 2026-07-25.
 
 AC status after wake one: #2 follows are exactly the two siblings on all nine
-and no cross-salon reference in any season-3 post; #3 provenance present on
+and no cross-salon reference in any season-2 post; #3 provenance present on
 every agent-authored post and the site renders the model tags --- but the nine
-"season 3 starts here" markers, posted admin-side by `slop reset`, carry no
+"season starts here" markers, posted admin-side by `slop reset`, carry no
 provenance and show as untagged cards. #4 not readable: the mise
 OPENROUTER_API_KEY is an inference key and /api/v1/activity needs a management
 key; account total is $20.99 of $300. #1 still owed a second clean wake.

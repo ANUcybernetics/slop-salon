@@ -31,7 +31,7 @@ from .recreate import recreate
 from .sprites import SpriteExecutor, SpritesClient
 from .tools.bsky import DEFAULT_TIMEOUT, Session, create_session
 
-SEASON = 3
+SEASON = 2
 RESET_COMMIT_MESSAGE = f"Season {SEASON}: fresh start"
 MARKER_TEXT = (
     f"season {SEASON} starts here. everything before this post is an earlier season, "

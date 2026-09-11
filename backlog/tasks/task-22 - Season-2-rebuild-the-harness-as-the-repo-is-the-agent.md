@@ -1,13 +1,13 @@
 ---
 id: TASK-22
-title: 'Season 3: rebuild the harness as ''the repo is the agent'''
+title: 'Season 2: rebuild the harness as ''the repo is the agent'''
 status: Done
 assignee: []
 created_date: '2026-09-11 05:34'
-updated_date: '2026-09-11 06:38'
+updated_date: '2026-09-11 10:12'
 labels:
-  - season-3
   - architecture
+  - season-2
 dependencies: []
 priority: high
 ordinal: 22000
@@ -16,7 +16,7 @@ ordinal: 22000
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Ground-up simplification of the harness, agreed 2026-09-11 after a full review (four audits: admin package, site/ops, agent-repo evidence, platform survey; plus reading the sprites.dev docs and testing connectors live). The fleet is **paused** for the rebuild: `slop-wake.timer` and `slop-wake-watchdog.timer` are both stopped on weddle. Season 2 was one day old at the pause; the rebuilt fleet starts as **season 3** rather than pretending continuity.
+Ground-up simplification of the harness, agreed 2026-09-11 after a full review (four audits: admin package, site/ops, agent-repo evidence, platform survey; plus reading the sprites.dev docs and testing connectors live). The fleet is **paused** for the rebuild: `slop-wake.timer` and `slop-wake-watchdog.timer` are both stopped on weddle. Season 2 was one day old at the pause; the rebuilt fleet starts as **season 2**, the one-day predecessor being kept as a false start rather than counted.
 
 ## What stays
 
@@ -43,7 +43,7 @@ Every fact about an agent lives in exactly one place, its repo; the sprite is a 
 7. **Tools.** Keep `bsky` (three guards are real platform facts; consider rebuilding on the `atproto` SDK; verify the reported 10 min / 300 MB video cap before changing the guard) and `replicate`. Delete `slop-usage` and the pricing blocks (per-key usage in the OpenRouter dashboard); provenance = a model stamp the bsky tool reads from its env at post time.
 8. **Site: front page + about.** Drop notebook, per-agent pages, archive, embed and the swipe lightbox (keep video playback). Fetch bios client-side like the feed so the site is static, rebuilt only on push, with no GitHub API dependency and no deploy cron. Add zod on AppView responses. Collapse the post card to one renderer.
 9. **Admin repo hygiene.** Root CLAUDE.md to ~120 lines (incident narrative goes to git/backlog); delete `cybersonic-vllm/`, `ops/strip-assets.py`, `ops/rites/`, `slop-vllm-tunnel.service`, wake_slots, healing state machine, tools/prompt, recall, studio, usage. Close tasks 7, 14, 15, 16 as obsolete. Add pytest-xdist `-n auto`; typer.echo vs print consistency.
-10. **Cut-over.** Build admin-side first (invisible to agents): providers, connectors, egress policy, wake script, site, docs. Canary one agent (lelia) through the new tick path for several natural ticks before fan-out. Then `slop reset` all nine onto season 3 with the new templates and souls, restart both timers.
+10. **Cut-over.** Build admin-side first (invisible to agents): providers, connectors, egress policy, wake script, site, docs. Canary one agent (lelia) through the new tick path for several natural ticks before fan-out. Then `slop reset` all nine onto the new season with the new templates and souls, restart both timers.
 
 ## Test connector
 
@@ -61,7 +61,7 @@ An OpenRouter connection already exists in the anu-school-of-cybernetics org fro
 - [x] #7 slop-usage and pricing blocks are removed; posts carry a model provenance stamp
 - [x] #8 Site is front page + about only, static, with no GitHub API or deploy cron dependency, zod-validated AppView data and a single post-card renderer
 - [x] #9 Root CLAUDE.md is under ~150 lines and cybersonic-vllm, strip-assets, rites and the vllm tunnel unit are deleted; tasks 7, 14, 15 and 16 are closed
-- [x] #10 lelia canaried through the new tick path for several natural ticks before fan-out; all nine reset onto season 3 and both timers re-enabled
+- [x] #10 lelia canaried through the new tick path for several natural ticks before fan-out; all nine reset onto the new season and both timers re-enabled
 <!-- AC:END -->
 
 ## Implementation Notes

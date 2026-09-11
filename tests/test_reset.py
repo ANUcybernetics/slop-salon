@@ -314,7 +314,8 @@ def test_reset_runs_steps_in_order_with_fresh_siblings(registry):
 
     remote, files = push.call_args.args
     assert remote == "https://ghp_test@github.com/ANUcybernetics/slop-salon-lou.git"
-    assert push.call_args.kwargs == {"tag": "season-2"}
+    # The season that just ended, whatever season we are up to now.
+    assert push.call_args.kwargs == {"tag": f"season-{reset_mod.SEASON - 1}"}
     # Freshly interpolated templates and the agent's soul, not carried notes.
     assert files["CLAUDE.md"].startswith("# lou\n")
     assert "mina" in files["MEMORY.md"]

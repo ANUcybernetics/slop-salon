@@ -80,5 +80,5 @@ outage.
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Closed as obsolete by the season-3 rebuild (task-22): the self-hosted vLLM and the subscription-runner options were deleted with it.
+Closed as obsolete by the season-2 rebuild (task-22): the self-hosted vLLM and the subscription-runner options were deleted with it.
 <!-- SECTION:NOTES:END -->
