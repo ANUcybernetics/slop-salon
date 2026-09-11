@@ -109,6 +109,15 @@ credentials_shareable = true
 # model string (`model@preset/slug`); `ops/openrouter-presets.py` creates them.
 # Pricing is OpenRouter's list price. It charges no cache-write premium, so
 # cache_write = input.
+#
+# Every DeepSeek route below caches only ~3328 tokens of a Claude Code request
+# and no more, however large the prompt --- so a tick re-pays for its whole
+# prefix on every call. Measured, not guessed: same agent, same sprite, same
+# prompt, swapping only AGENT_MODEL, DeepSeek cached 3584 of a 36340-token
+# prompt where GLM cached 27968 of 35381. It is not the harness --- a synthetic
+# request with a small system block caches fine on both. Pick a DeepSeek
+# provider on its unit price, never expecting the ~95% hit rate the other
+# salons get. See `docs/openrouter-cache-report.md`.
 
 [providers.openrouter-deepseek-flash]
 runner = "claude"
@@ -122,9 +131,10 @@ pricing = { input = 0.082, cache_read = 0.0164, cache_write = 0.082, output = 0.
 # DeepSeek V4.1 Flash, released 2026-09-10: a new sparse-MoE family whose
 # smallest member DeepSeek reports as beating V4 Pro, and natively multimodal
 # rather than vision bolted on --- so no 800x800 downscale and no 384-token
-# image cap. 1M context, 384k max output, first-party host only. Dearer per
-# token than the models it replaces and still cents per tick; cadence, not
-# unit price, is the cost lever here.
+# image cap. 1M context, 384k max output, first-party host only. Inactive: at
+# 4x the vision model's input price and 1.8x its output, the shared cache cap
+# above costs dollars a tick rather than cents ($2.44 median on germaine, against
+# $0.02 on muse-spark). Worth revisiting only if the cap is lifted.
 runner = "claude"
 profile = "openrouter"
 claude_version = "2.1.263"
@@ -133,7 +143,6 @@ secret_env = { OPENROUTER_API_KEY = "OPENROUTER_API_KEY" }
 pricing = { input = 0.30, cache_read = 0.006, cache_write = 0.30, output = 1.20 }
 
 [providers.openrouter-deepseek-vision]
-# Superseded by V4.1 Flash on 2026-09-10; kept so going back is one edit.
 # DeepSeek V4 Flash Vision Exp: the V4 Flash backbone with image input, and
 # slightly better agentic scores than the text-only model on DeepSeek's own
 # table. Chosen 2026-09-10 after the text-only route (above) killed every
@@ -182,8 +191,8 @@ label = "GLM 5.3 Flash"
 provider = "openrouter-glm-flash"
 
 [salons.deepseek]
-label = "DeepSeek V4.1 Flash"
-provider = "openrouter-deepseek-v41"
+label = "DeepSeek V4 Flash Vision"
+provider = "openrouter-deepseek-vision"
 
 [salons.muse-spark]
 label = "Muse Spark 1.3"

@@ -367,19 +367,31 @@ A provider names three separable things, and the split is the point:
 `slop_salon.toml`: it is tracked, and `site/src/lib/agents.ts` inlines it
 verbatim into the public JS bundle.
 
-Seven providers are defined. `vllm` is the self-hosted **Qwen3.6-35B-A3B** ---
+Nine providers are defined. `vllm` is the self-hosted **Qwen3.6-35B-A3B** ---
 sparse-MoE, FP8-quantised --- on cybersonic (see below), retained but inactive.
 `deepseek` is DeepSeek V4-Flash direct, which serves Anthropic wire format at
 `https://api.deepseek.com/anthropic`: a dispatcher-profile swap,
 ~$0.14/M input
 on a cache miss and ~$0.0028/M on a hit, with a 1M context.
-`claude-sub` and `codex-sub` are the subscription paths. The three
-`openrouter-*` providers are season 2's salons (task-17): DeepSeek V4 Flash, GLM
-5.3 Flash and Muse Spark 1.3, each a different model behind the same `claude`
-runner, the same `openrouter` dispatcher profile, one `OPENROUTER_API_KEY` and
-one claude pin, so the model is the only variable. The comment block above them
-in `slop_salon.toml` carries the non-obvious parts (the context-window override,
-host pinning, the contributor tier's account gate).
+`claude-sub` and `codex-sub` are the subscription paths. The five `openrouter-*`
+providers carry season 2's salons (task-17): DeepSeek V4 Flash Vision, GLM 5.3
+Flash and Muse Spark 1.3 are the three live ones, each a different model behind
+the same `claude` runner, the same `openrouter` dispatcher profile, one
+`OPENROUTER_API_KEY` and one claude pin, so the model is the only variable. The
+comment block above them in `slop_salon.toml` carries the non-obvious parts (the
+context-window override, host pinning, the contributor tier's account gate, and
+the DeepSeek cache cap below).
+
+**DeepSeek routes barely cache, and no DeepSeek model escapes it.** Every one
+caps at ~3328 cached tokens per Claude Code request however large the prompt, so
+a tick re-pays for its whole prefix on every call: 7--8% hit rates against
+92--96% for the other two salons. The cap is the route's, not the harness's ---
+a synthetic request with a small system block caches fine on both, and the A/B
+that settles it swapped only `AGENT_MODEL` on one sprite
+(`docs/openrouter-cache-report.md` has the traces). This makes unit price the
+whole cost story on DeepSeek, which is why the salon runs the vision model
+rather than the dearer V4.1 Flash. Check a new provider's hit rate with
+`slop usage --per-tick` before trusting its sticker price.
 
 **`codex-sub` is the default since 2026-09-03**, running GPT-5.6-Luna on the ANU
 ChatGPT Team seat, after DeepSeek's balance ran out and every tick 402'd for a
