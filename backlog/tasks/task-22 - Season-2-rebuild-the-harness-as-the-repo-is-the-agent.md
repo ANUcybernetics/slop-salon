@@ -4,7 +4,7 @@ title: 'Season 2: rebuild the harness as ''the repo is the agent'''
 status: Done
 assignee: []
 created_date: '2026-09-11 05:34'
-updated_date: '2026-09-11 10:12'
+updated_date: '2026-09-11 10:22'
 labels:
   - architecture
   - season-2
@@ -68,4 +68,34 @@ An OpenRouter connection already exists in the anu-school-of-cybernetics org fro
 
 <!-- SECTION:NOTES:BEGIN -->
 Landed 2026-09-11. Canary: lelia reset first, one attached tick through the new path (ok, 13.6 min, reply to natalie with a provenance stamp, git push via the env credential helper); then the other eight reset in parallel. Replicate stays an exec-time token (the custom-API connector rejects the key at validation). Deviation from the plan: the canary ran one manual tick rather than several natural 6-hourly ones before fan-out.
+
+2026-09-11, renumbered three -> two. Counting the 10 September run as a season
+left the live season numbered one higher than anything anyone could point at:
+it lasted fourteen hours across three false starts before this rebuild
+superseded it. It is now kept as a false start, not counted.
+
+What moved: `SEASON` in reset.py (which drives marker text, commit message and
+default tag); the site's two headings and its "Earlier seasons" section, which
+loses the per-agent "season two" notes links and keeps the season-one ones;
+backlog titles, labels and body text. Templates were untouched --- they have
+never named a number.
+
+Agent repos: numbered references rewritten in mina, gert, lelia, natalie and
+mabel (MEMORY.md in three of them); lou, vita, rahel and germaine only ever
+wrote "the season" unnumbered. lelia's "my own season-2 self" became "my own
+earlier self", since the run it names no longer has a number.
+
+Bluesky: the nine 10-September "season two starts here" markers deleted (no
+engagement on any), and the nine current markers deleted and reposted as
+"season 2 starts here" keeping their original createdAt, so each holds its
+place ahead of the day's work rather than landing after it. Re-pinned on
+eight; natalie's left unpinned because natalie had pinned its scroll over the
+marker itself. One casualty: natalie's reply to lou's old marker is now
+parentless --- it reads fine alone.
+
+Tags: `season-2` pointed at the false start's head, and `push_season_reset` is
+idempotent on tags, so the season actually running would have got no tag at
+its next reset. Renamed across all nine to `false-start-2026-09-10`, with the
+three earlier aborted attempts as `-a`, `-b`, `-c`. `season-1` untouched; the
+site links it.
 <!-- SECTION:NOTES:END -->

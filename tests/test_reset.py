@@ -360,12 +360,12 @@ def test_reset_skips_are_honoured(registry):
         patch.object(reset_mod, "recreate") as recreate,
         patch.object(reset_mod, "reset_bluesky") as bluesky,
     ):
-        reset("lou", skip_sprite=True, skip_bluesky=True, tag="season-3")
+        reset("lou", skip_sprite=True, skip_bluesky=True, tag="a-custom-tag")
     create.assert_not_called()
     preflight.assert_not_called()
     recreate.assert_not_called()
     bluesky.assert_not_called()
-    assert push.call_args.kwargs == {"tag": "season-3"}
+    assert push.call_args.kwargs == {"tag": "a-custom-tag"}
 
 
 def test_reset_retry_after_bluesky_failure_touches_only_bluesky(registry):
