@@ -38,7 +38,11 @@ EGRESS_RULES: list[dict[str, str]] = [
             "api.replicate.com",
             "*.replicate.delivery",
             "replicate.delivery",
-            # Installers and system packages.
+            # Installers and system packages. `claude install` fetches its
+            # native build from downloads.claude.ai.
+            "downloads.claude.ai",
+            "claude.ai",
+            "*.claude.ai",
             "astral.sh",
             "*.astral.sh",
             "archive.ubuntu.com",

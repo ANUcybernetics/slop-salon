@@ -91,6 +91,7 @@ def test_egress_rules_include_platform_defaults_and_the_tools_hosts():
         "*.bsky.network",
         "api.replicate.com",
         "*.replicate.delivery",
+        "downloads.claude.ai",
     ):
         assert needed in domains
     assert all(r.get("action") == "allow" for r in EGRESS_RULES[1:])
