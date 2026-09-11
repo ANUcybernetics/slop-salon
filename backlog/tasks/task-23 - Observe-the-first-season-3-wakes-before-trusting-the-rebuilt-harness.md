@@ -4,6 +4,7 @@ title: Observe the first season-3 wakes before trusting the rebuilt harness
 status: To Do
 assignee: []
 created_date: '2026-09-11 07:05'
+updated_date: '2026-09-11 10:04'
 labels:
   - season-3
   - ops
@@ -36,3 +37,42 @@ Known gaps to keep in mind (open by design, worth a task if they bite): wake-che
 - [ ] #3 New posts carry the provenance stamp and the site renders the model tag
 - [ ] #4 First-day spend per salon read off the OpenRouter dashboard and recorded here
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+2026-09-11, wake one (18:02 AEST): 7/9 ok. lou and vita died at 31.4s and 23.8s
+with `Error: connection closed` and no transcript --- the tick never started.
+Not retried and not counted, because that string was not in `_WEDGE_MARKERS`;
+task-17 recorded the same string three times in season 2 and left the retry
+question open.
+
+Root cause: resuming a cold sprite takes ~30s (measured: a genuinely cold
+resume reached `session_created` at 29.03s, against <2s warm) and the platform
+sometimes drops the connection while it does. Both failures were in the wake's
+first concurrency batch, four cold resumes at once; the five that started later
+against an already-busy platform all succeeded. Ruled out by testing against
+the live fleet: idle/keepalive timeout (90s silent exec fine; 15s pings, 45s
+deadline), env payload (uniform 861-941 B), concurrency alone (9 concurrent
+real-env execs, 9/9 ok), git pull + claude startup + the gateway (9/9 ok), OOM
+(8 GB, no kills), claude auto-update (pinned 2.1.263 everywhere).
+
+Fixed 42f49b1: the exec command now echoes SESSION_MARKER before `slop-tick`,
+and `never_started` asks for that marker instead of matching the platform's
+error text. Only a tick that provably never ran is retried; one that started
+and then dropped is left alone, since its `claude` may still be running in the
+sprite. Marker rides on the admin-side command, so no agent-repo rollout.
+
+Also: sprite CLI was rc43 (11 May) against rc48 servers --- upgraded, and
+b30dd2e passes rc48's new --no-port-forward (probed from --help, not
+hardcoded). Repaired ~/.sprites/known_sprites.json, corrupt with a trailing
+'}' from concurrent CLI writes since 2026-07-25.
+
+AC status after wake one: #2 follows are exactly the two siblings on all nine
+and no cross-salon reference in any season-3 post; #3 provenance present on
+every agent-authored post and the site renders the model tags --- but the nine
+"season 3 starts here" markers, posted admin-side by `slop reset`, carry no
+provenance and show as untagged cards. #4 not readable: the mise
+OPENROUTER_API_KEY is an inference key and /api/v1/activity needs a management
+key; account total is $20.99 of $300. #1 still owed a second clean wake.
+<!-- SECTION:NOTES:END -->
