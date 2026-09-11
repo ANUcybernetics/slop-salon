@@ -197,21 +197,30 @@ would have been missed by a check aimed at the other:
   firing and completing on schedule, so a freshness check alone stays silent.
 
 `slop wake-check` (unit `slop-wake-watchdog.timer`, hourly at :47) therefore
-asks three independent questions: is the timer armed, did a wake finish within
-`--max-age`, and does the provider's `health_url` serve (skipped, and said to be
-skipped, when no provider in use declares one). It also flags a wake in which
-_every_ agent failed. `slop wake` records `~/.local/state/slop/last-wake.json`
-at the end of every run including a red one, since "no wake is firing" and
-"wakes fire and fail" are different outages with different fixes.
+asks three independent questions: has the timer been stopped longer than a pause
+takes, did a wake finish within `--max-age`, and does the provider's
+`health_url` serve (skipped, and said to be skipped, when no provider in use
+declares one). It also flags a wake in which _every_ agent failed. `slop wake`
+records `~/.local/state/slop/last-wake.json` at the end of every run including a
+red one, since "no wake is firing" and "wakes fire and fail" are different
+outages with different fixes.
 
-`--max-age` is **derived from the timer**, not configured beside it: three
-missed firings of whatever cadence is actually in force, floored at 90 min so a
-fast cadence never tightens the check past the ~30 minutes one slow wake can
-itself take. They are the same fact stated twice, and stating it twice is how a
-90-minute check ends up pointed at a 6-hourly timer, filing an oncall todo every
-hour until someone silences the alert. The cost is that slowing the fleet also
-slows how fast a dead pipeline is noticed --- at 6-hourly that is up to 18h ---
-so `slop cadence` prints the new tolerance whenever it changes the schedule.
+The timer question is **how long stopped**, not whether stopped, because
+`systemctl --user stop slop-wake.timer` is also how the fleet is held still on
+purpose (emergency stop, sprite recreate, history rewrite). Asked
+instantaneously it called every one of those an outage and filed a todo each
+hour until the operator finished --- so a stop shorter than the grace is
+reported in the `ok:` line and nothing else.
+
+Both limits are **derived from the timer**, not configured beside it: the
+staleness limit is three missed firings of whatever cadence is in force, the
+grace is one, each floored at 90 min so a fast cadence never tightens the check
+past the ~30 minutes one slow wake can itself take. They would otherwise be the
+same fact stated twice, which is how a 90-minute check ends up pointed at a
+6-hourly timer, filing an oncall todo every hour until someone silences the
+alert. The cost is that slowing the fleet also slows how fast a dead pipeline is
+noticed --- at 6-hourly that is up to 18h --- so `slop cadence` prints the new
+tolerance whenever it changes the schedule.
 
 Alerting is free: the dotfiles oncall pattern
 (`OnFailure=unit-oncall@%n.service`, `OnSuccess=unit-oncall-clear@%n.service`)

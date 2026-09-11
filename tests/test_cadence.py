@@ -7,7 +7,9 @@ import datetime as dt
 import pytest
 
 from slop_salon.cadence import (
+    GRACE_FIRINGS,
     MIN_MAX_AGE,
+    MISSED_FIRINGS,
     longest_gap,
     max_age_for,
     parse_elapses,
@@ -83,6 +85,24 @@ def test_max_age_tracks_cadence_but_never_tightens_past_the_floor():
     assert max_age_for(6 * 3600) == 18 * 3600  # three missed firings
     assert max_age_for(30 * 60) == MIN_MAX_AGE  # floored, not 45min
     assert max_age_for(None) == MIN_MAX_AGE
+
+
+def test_the_stopped_timer_grace_is_tighter_than_the_staleness_limit():
+    """A stopped timer is the sharper signal, so it must still fire sooner.
+
+    The grace exists so a deliberate pause --- emergency stop, sprite recreate,
+    history rewrite --- stops filing an hourly oncall todo while it is under
+    way. If it ever grew past the staleness limit it would stop catching the
+    outage it was written for.
+    """
+    assert GRACE_FIRINGS < MISSED_FIRINGS
+    gap = 6 * 3600
+    assert max_age_for(gap, firings=GRACE_FIRINGS) == gap
+    assert max_age_for(gap, firings=GRACE_FIRINGS) < max_age_for(gap)
+    # Floored like the staleness limit, so a fast cadence cannot shrink a pause
+    # to less time than one wake takes.
+    assert max_age_for(30 * 60, firings=GRACE_FIRINGS) == MIN_MAX_AGE
+    assert max_age_for(None, firings=GRACE_FIRINGS) == MIN_MAX_AGE
 
 
 def test_dropin_clears_the_inherited_schedule_first():

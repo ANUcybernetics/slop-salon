@@ -7,8 +7,9 @@ costs about 60% of one that makes and posts a piece. You cannot make ticks much
 cheaper, only rarer. That makes this a knob worth turning often, which is why it
 lives behind a command instead of a unit file you have to remember to reinstall.
 
-The staleness limit in `slop wake-check` is **derived** from the timer rather
-than configured beside it. The two are the same fact stated twice, and a
+Both of `slop wake-check`'s time limits --- how stale a wake stamp may get, and
+how long the timer may sit stopped --- are **derived** from the timer rather
+than configured beside it. Each is otherwise the same fact stated twice, and a
 90-minute dead-man check against a 6-hourly timer would file an oncall todo
 every hour forever --- the kind of mismatch that gets a real alert silenced.
 """
@@ -45,6 +46,15 @@ _UTC_LINE = re.compile(r"\(in UTC\):\s+\w+ (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})
 # take.
 MISSED_FIRINGS = 3
 MIN_MAX_AGE = 90 * 60.0
+
+# How long the wake timer may sit stopped before that counts as an outage rather
+# than a pause. Stopping the timer is the documented way to hold the fleet
+# still --- the runbook's emergency stop, a sprite recreate, a history rewrite
+# --- and an instantaneous is-it-armed check calls every one of those a failure,
+# filing an oncall todo each hour until the operator finishes. One missed
+# firing, against the staleness check's three: a stopped timer is still the
+# sharper signal and should fire sooner, just not during the pause itself.
+GRACE_FIRINGS = 1
 
 
 def spec_to_oncalendar(spec: str) -> str:
@@ -88,11 +98,15 @@ def longest_gap(elapses: list[dt.datetime]) -> float | None:
     return max((b - a).total_seconds() for a, b in itertools.pairwise(elapses))
 
 
-def max_age_for(gap_seconds: float | None) -> float:
-    """Staleness limit for `wake-check`, given the timer's widest gap."""
+def max_age_for(gap_seconds: float | None, *, firings: int = MISSED_FIRINGS) -> float:
+    """Tolerance for `wake-check`, given the timer's widest gap.
+
+    `firings` is how many the caller is willing to miss: three for the staleness
+    limit, one for the stopped-timer grace.
+    """
     if not gap_seconds:
         return MIN_MAX_AGE
-    return max(MIN_MAX_AGE, gap_seconds * MISSED_FIRINGS)
+    return max(MIN_MAX_AGE, gap_seconds * firings)
 
 
 def render_dropin(oncalendar: str) -> str:
@@ -131,12 +145,21 @@ def active_oncalendar(timer: str = "slop-wake.timer") -> str | None:
     return found[-1].strip() if found else None
 
 
-def current_max_age(timer: str = "slop-wake.timer") -> float:
-    """Staleness limit derived from whatever the timer is currently set to."""
+def _derived(timer: str, firings: int) -> float:
     oncalendar = active_oncalendar(timer)
     if not oncalendar:
         return MIN_MAX_AGE
     try:
-        return max_age_for(longest_gap(parse_elapses(analyse(oncalendar))))
+        return max_age_for(longest_gap(parse_elapses(analyse(oncalendar))), firings=firings)
     except ValueError, OSError:
         return MIN_MAX_AGE
+
+
+def current_max_age(timer: str = "slop-wake.timer") -> float:
+    """Staleness limit derived from whatever the timer is currently set to."""
+    return _derived(timer, MISSED_FIRINGS)
+
+
+def current_grace(timer: str = "slop-wake.timer") -> float:
+    """How long a stopped timer reads as a pause, not an outage."""
+    return _derived(timer, GRACE_FIRINGS)

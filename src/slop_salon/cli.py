@@ -530,13 +530,40 @@ def _format_duration(seconds: float) -> str:
     return f"{seconds / 60:.0f}min" if seconds < 3600 else f"{seconds / 3600:.1f}h"
 
 
-def _timer_is_active(timer: str) -> bool:
+def _timer_stopped_for(timer: str) -> float | None:
+    """Seconds the timer has been inactive, or None while it is armed.
+
+    A duration rather than a boolean because stopping the wake timer is the
+    documented way to pause the fleet, so `wake-check` has to tell a pause in
+    progress from one nobody ever undid. Read off systemd's monotonic clock,
+    which is the same CLOCK_MONOTONIC `time.monotonic()` reads, so there is no
+    locale or timezone in the formatted timestamp to parse. A timer that has not
+    run at all this boot reports 0 and so reads as stopped for the whole uptime,
+    which it has been.
+    """
     completed = subprocess.run(
-        ["systemctl", "--user", "is-active", "--quiet", timer],
+        [
+            "systemctl",
+            "--user",
+            "show",
+            timer,
+            "-p",
+            "ActiveState",
+            "-p",
+            "InactiveEnterTimestampMonotonic",
+        ],
         check=False,
         capture_output=True,
+        text=True,
     )
-    return completed.returncode == 0
+    shown = dict(line.split("=", 1) for line in completed.stdout.splitlines() if "=" in line)
+    if shown.get("ActiveState") == "active":
+        return None
+    try:
+        since_boot = int(shown.get("InactiveEnterTimestampMonotonic", 0)) / 1_000_000
+    except ValueError:
+        since_boot = 0.0
+    return max(0.0, time.monotonic() - since_boot)
 
 
 @app.command(name="wake-check")
@@ -561,8 +588,9 @@ def wake_check(
     needs no alerting of its own.
 
     Checks three independent things, because each of the two July outages was
-    invisible to at least one of them: the timer is armed, a wake finished
-    recently, and the model is reachable. See `slop_salon.watchdog`.
+    invisible to at least one of them: the timer has not been stopped longer
+    than a pause takes, a wake finished recently, and the model is reachable.
+    See `slop_salon.watchdog`.
     """
     # Probe only what the providers in use actually expose. A self-hosted vLLM
     # has /health; a hosted API has nothing to probe, and inventing a green
@@ -598,19 +626,35 @@ def wake_check(
     # files an oncall todo every hour, and an alert that always fires is an
     # alert that gets silenced.
     limit = _parse_duration(max_age) if max_age else cadence_mod.current_max_age(timer)
+    # Only the staleness limit is overridable; the grace stays tied to the
+    # cadence, since --max-age exists for probing this check by hand and a hand
+    # run should not also redefine what counts as a pause.
+    grace = cadence_mod.current_grace(timer)
+    stopped_for = _timer_stopped_for(timer)
 
     found = watchdog.problems(
         stamp=watchdog.read_stamp(),
         now=dt.datetime.now(dt.UTC),
         max_age=limit,
-        timer_active=_timer_is_active(timer),
+        timer_stopped_for=stopped_for,
+        timer_grace=grace,
         inference=inference,
         timer_name=timer,
     )
 
     if not found:
         served = inference.detail if inference else "no health endpoint to probe (hosted provider)"
-        typer.echo(f"ok: {timer} armed, wake stamp fresh (<{_format_duration(limit)}), {served}")
+        # Say so when the timer is down but inside its grace: a deliberate pause
+        # should be visible in the journal, just not worth a todo.
+        armed = (
+            f"{timer} armed"
+            if stopped_for is None
+            else (
+                f"{timer} stopped {_format_duration(stopped_for)} ago, inside the "
+                f"{_format_duration(grace)} a pause is given"
+            )
+        )
+        typer.echo(f"ok: {armed}, wake stamp fresh (<{_format_duration(limit)}), {served}")
         return
 
     for problem in found:
@@ -943,7 +987,7 @@ def cadence(
         # stopped timer must not start it: the fleet is deliberately paused at
         # times, and a config command that quietly resumes ticking is the kind
         # of surprise you find out about from the Bluesky feed.
-        if _timer_is_active(timer):
+        if _timer_stopped_for(timer) is None:
             subprocess.run(["systemctl", "--user", "restart", timer], check=True)
         else:
             typer.echo(

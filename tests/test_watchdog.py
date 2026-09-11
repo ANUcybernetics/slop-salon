@@ -8,6 +8,7 @@ from slop_salon import watchdog
 
 NOW = dt.datetime(2026, 7, 28, 14, 0, tzinfo=dt.UTC)
 MAX_AGE = 90 * 60
+GRACE = 30 * 60
 OK = watchdog.Probe(ok=True, detail="200")
 
 
@@ -28,7 +29,8 @@ def _problems(
     stamp: dict | None = _HEALTHY_STAMP,
     now: dt.datetime = NOW,
     max_age: float = MAX_AGE,
-    timer_active: bool = True,
+    timer_stopped_for: float | None = None,
+    timer_grace: float = GRACE,
     inference: watchdog.Probe | None = OK,
     timer_name: str = "slop-wake.timer",
 ) -> list[str]:
@@ -42,7 +44,8 @@ def _problems(
         stamp=stamp,
         now=now,
         max_age=max_age,
-        timer_active=timer_active,
+        timer_stopped_for=timer_stopped_for,
+        timer_grace=timer_grace,
         inference=inference,
         timer_name=timer_name,
     )
@@ -52,18 +55,35 @@ def test_healthy_pipeline_reports_nothing():
     assert _problems() == []
 
 
-def test_stopped_timer_is_caught():
+def test_timer_left_stopped_is_caught():
     # The 10:02 outage: timer stopped during apt maintenance, never restarted.
     # No OnFailure= can catch this --- a unit that never runs never fails.
-    found = _problems(timer_active=False)
+    found = _problems(timer_stopped_for=4 * 3600)
     assert len(found) == 1
-    assert "NOT active" in found[0]
+    assert "has been stopped" in found[0]
     assert "slop-wake.timer" in found[0]
+
+
+def test_a_pause_in_progress_is_not_an_outage():
+    """Stopping the timer is the documented way to hold the fleet still.
+
+    An emergency stop, a sprite recreate and a history rewrite all do it, and an
+    instantaneous is-it-armed check filed an oncall todo every hour the operator
+    was still working.
+    """
+    assert _problems(timer_stopped_for=25 * 60) == []
+
+
+def test_a_pause_that_outlasts_its_grace_is_caught():
+    # The boundary is what separates the two cases above, so pin it: the grace
+    # is a tolerance, not a mute.
+    assert _problems(timer_stopped_for=GRACE) == []
+    assert len(_problems(timer_stopped_for=GRACE + 1)) == 1
 
 
 def test_the_message_names_the_timer_it_actually_checked():
     # A watchdog that names the wrong unit sends you to the wrong place.
-    found = _problems(timer_active=False, timer_name="other-wake.timer")
+    found = _problems(timer_stopped_for=4 * 3600, timer_name="other-wake.timer")
     assert "other-wake.timer" in found[0]
     assert "slop-wake.timer" not in found[0]
 
@@ -130,7 +150,7 @@ def test_deferred_counts_as_serviced():
 def test_problems_accumulate():
     found = _problems(
         stamp=_stamp(minutes_ago=300),
-        timer_active=False,
+        timer_stopped_for=4 * 3600,
         inference=watchdog.Probe(ok=False, detail="unreachable"),
     )
     assert len(found) == 3
@@ -143,7 +163,14 @@ def test_stamp_roundtrips(tmp_path):
     assert stamp is not None
     assert stamp["statuses"] == {"lou": "ok", "mina": "busy"}
     assert (
-        watchdog.problems(stamp=stamp, now=NOW, max_age=MAX_AGE, timer_active=True, inference=OK)
+        watchdog.problems(
+            stamp=stamp,
+            now=NOW,
+            max_age=MAX_AGE,
+            timer_stopped_for=None,
+            timer_grace=GRACE,
+            inference=OK,
+        )
         == []
     )
 

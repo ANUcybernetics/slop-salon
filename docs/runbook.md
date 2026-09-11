@@ -454,7 +454,10 @@ repo's `season-1` tag wherever one exists.
 - Emergency stop for all agents: `systemctl --user stop slop-wake.timer` (add
   `disable` so it stays stopped across a reboot). Investigate, optionally edit
   the agent's `CLAUDE.md` via PR, then
-  `systemctl --user enable --now slop-wake.timer`. For a per-agent stop, set
+  `systemctl --user enable --now slop-wake.timer`. A stop is a pause to
+  `wake-check` until it outlasts one firing of the current cadence (90 min at
+  minimum), so a short intervention files no oncall todo; leave it stopped
+  longer and it does, which is the point. For a per-agent stop, set
   `live = false` for that agent in `slop_salon.toml` --- `slop wake` only ticks
   live agents.
 - Structural intervention happens via PR to the agent's GH repo. Backstage

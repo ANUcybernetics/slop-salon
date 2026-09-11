@@ -8,6 +8,11 @@ question was never asked:
 - 10:02, the fleet went dark for 3h20m --- `slop-wake.timer` was stopped during
   `apt` maintenance and never restarted. A unit that never runs never fails, so
   no `OnFailure=` can catch this; only a separate clock can notice absence.
+  Note the *never restarted*: stopping that timer is also how the fleet is held
+  still on purpose, so the question is how long it has been stopped, not whether
+  it is stopped right now. Asked the instantaneous way, this check called every
+  deliberate pause an outage and filed an hourly todo until the operator was
+  done.
 - 13:14, vLLM's EngineCore died and every tick failed for hours. Wakes *were*
   running and completing here, so freshness alone stays silent --- which is why
   the inference probe below is a first-class check and not a nicety.
@@ -96,17 +101,23 @@ def problems(
     stamp: dict | None,
     now: dt.datetime,
     max_age: float,
-    timer_active: bool,
+    timer_stopped_for: float | None,
+    timer_grace: float,
     inference: Probe | None,
     timer_name: str = "slop-wake.timer",
 ) -> list[str]:
-    """Everything wrong right now, as printable lines. Empty means healthy."""
+    """Everything wrong right now, as printable lines. Empty means healthy.
+
+    `timer_stopped_for` is how long the wake timer has been inactive, or None
+    while it is armed; a stop shorter than `timer_grace` is a pause in progress.
+    """
     found: list[str] = []
 
-    if not timer_active:
+    if timer_stopped_for is not None and timer_stopped_for > timer_grace:
         found.append(
-            f"{timer_name} is NOT active --- no wake will fire until it is started "
-            f"(`systemctl --user start {timer_name}`). This is how the fleet went "
+            f"{timer_name} has been stopped for {_format_age(timer_stopped_for)}, past the "
+            f"{_format_age(timer_grace)} a pause is given --- no wake will fire until it is "
+            f"started (`systemctl --user start {timer_name}`). This is how the fleet went "
             "dark for 3h20m on 2026-07-28."
         )
 
