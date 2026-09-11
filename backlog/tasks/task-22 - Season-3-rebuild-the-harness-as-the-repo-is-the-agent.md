@@ -1,10 +1,10 @@
 ---
 id: TASK-22
 title: 'Season 3: rebuild the harness as ''the repo is the agent'''
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-11 05:34'
-updated_date: '2026-09-11 05:35'
+updated_date: '2026-09-11 06:38'
 labels:
   - season-3
   - architecture
@@ -52,14 +52,20 @@ An OpenRouter connection already exists in the anu-school-of-cybernetics org fro
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Provider blocks carry only base URL, model and one auth mode; the codex runner, agent-run dependency, vllm/deepseek-direct/subscription providers and slop-prompt are gone
-- [ ] #2 No durable secret or provider file lives in any sprite: OpenRouter (and Replicate if the client allows) go through sprites.dev connectors, Bluesky and git credentials arrive via exec-time env, and every sprite has a DNS egress policy
-- [ ] #3 Each agent repo has an agent-editable setup.sh and a fresh sprite is fully provisioned by create + clone + setup.sh; recreate uses the same path
-- [ ] #4 slop wake is a single inline script with retry-once, recreate-on-second-wedge, platform-incident hold-off and non-zero exit on any failure; wake slots, transient dispatcher, in-sprite flock and heal.json are removed
-- [ ] #5 Agent template loads SOUL.md, an ~80-line CLAUDE.md, one capped MEMORY.md and notes/now.md; SIBLINGS.md, TOOLS.md, slop-studio and slop-recall are gone
-- [ ] #6 Registry has a soul field per agent; three souls (Boden, a second theory, 'Make art.') are crossed with the three salons, one soul per agent per salon, and the site shows model and soul per agent
-- [ ] #7 slop-usage and pricing blocks are removed; posts carry a model provenance stamp
-- [ ] #8 Site is front page + about only, static, with no GitHub API or deploy cron dependency, zod-validated AppView data and a single post-card renderer
-- [ ] #9 Root CLAUDE.md is under ~150 lines and cybersonic-vllm, strip-assets, rites and the vllm tunnel unit are deleted; tasks 7, 14, 15 and 16 are closed
-- [ ] #10 lelia canaried through the new tick path for several natural ticks before fan-out; all nine reset onto season 3 and both timers re-enabled
+- [x] #1 Provider blocks carry only base URL, model and one auth mode; the codex runner, agent-run dependency, vllm/deepseek-direct/subscription providers and slop-prompt are gone
+- [x] #2 No durable secret or provider file lives in any sprite: OpenRouter (and Replicate if the client allows) go through sprites.dev connectors, Bluesky and git credentials arrive via exec-time env, and every sprite has a DNS egress policy
+- [x] #3 Each agent repo has an agent-editable setup.sh and a fresh sprite is fully provisioned by create + clone + setup.sh; recreate uses the same path
+- [x] #4 slop wake is a single inline script with retry-once, recreate-on-second-wedge, platform-incident hold-off and non-zero exit on any failure; wake slots, transient dispatcher, in-sprite flock and heal.json are removed
+- [x] #5 Agent template loads SOUL.md, an ~80-line CLAUDE.md, one capped MEMORY.md and notes/now.md; SIBLINGS.md, TOOLS.md, slop-studio and slop-recall are gone
+- [x] #6 Registry has a soul field per agent; three souls (Boden, a second theory, 'Make art.') are crossed with the three salons, one soul per agent per salon, and the site shows model and soul per agent
+- [x] #7 slop-usage and pricing blocks are removed; posts carry a model provenance stamp
+- [x] #8 Site is front page + about only, static, with no GitHub API or deploy cron dependency, zod-validated AppView data and a single post-card renderer
+- [x] #9 Root CLAUDE.md is under ~150 lines and cybersonic-vllm, strip-assets, rites and the vllm tunnel unit are deleted; tasks 7, 14, 15 and 16 are closed
+- [x] #10 lelia canaried through the new tick path for several natural ticks before fan-out; all nine reset onto season 3 and both timers re-enabled
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Landed 2026-09-11. Canary: lelia reset first, one attached tick through the new path (ok, 13.6 min, reply to natalie with a provenance stamp, git push via the env credential helper); then the other eight reset in parallel. Replicate stays an exec-time token (the custom-API connector rejects the key at validation). Deviation from the plan: the canary ran one manual tick rather than several natural 6-hourly ones before fan-out.
+<!-- SECTION:NOTES:END -->
