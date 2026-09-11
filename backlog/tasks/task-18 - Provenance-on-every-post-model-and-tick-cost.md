@@ -4,6 +4,7 @@ title: 'Provenance on every post: model and tick cost'
 status: To Do
 assignee: []
 created_date: '2026-09-06 08:44'
+updated_date: '2026-09-11 06:08'
 labels:
   - season-2
   - site
@@ -31,3 +32,9 @@ Season-1 ticks have no ledger; their posts show the model from the registry's pr
 - [ ] #2 The site shows model and tick cost under each post and a running total per agent, with no cost shown for unmetered providers
 - [ ] #3 Post records carry a provenance field with provider, model and salon
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Provenance landed in task-22: every feed post carries provenance = {model, salon}, stamped by the bsky tool from the tick environment, and the site shows the model on each card. Per-tick cost is not recorded (slop-usage was deleted; spend is read off the OpenRouter dashboard).
+<!-- SECTION:NOTES:END -->

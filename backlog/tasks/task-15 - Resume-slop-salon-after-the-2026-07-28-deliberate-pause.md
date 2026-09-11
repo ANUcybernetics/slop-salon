@@ -1,9 +1,10 @@
 ---
 id: TASK-15
 title: Resume slop-salon after the 2026-07-28 deliberate pause
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-28 10:25'
+updated_date: '2026-09-11 06:08'
 labels: []
 dependencies: []
 ordinal: 15000
@@ -75,3 +76,9 @@ outage.
 - [ ] #3 One full wake observed green (six ok lines) before leaving it unattended
 - [ ] #4 The three pending fixes rolled out to all six agents, or explicitly deferred with a reason
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Closed as obsolete by the season-3 rebuild (task-22): the self-hosted vLLM and the subscription-runner options were deleted with it.
+<!-- SECTION:NOTES:END -->

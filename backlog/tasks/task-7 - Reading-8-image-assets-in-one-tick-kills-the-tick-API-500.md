@@ -1,9 +1,10 @@
 ---
 id: TASK-7
 title: Reading >8 image assets in one tick kills the tick (API 500)
-status: To Do
+status: Done
 assignee: []
-created_date: "2026-07-09 13:42"
+created_date: '2026-07-09 13:42'
+updated_date: '2026-09-11 06:08'
 labels:
   - bug
   - inference
@@ -15,7 +16,6 @@ ordinal: 7000
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-
 Claude Code's Read tool loads images into the prompt visually. The self-hosted
 vLLM refuses more than 8 per request:
 
@@ -59,3 +59,9 @@ is not just the failed tick.
       the wake driver
 
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Closed as obsolete by the season-3 rebuild (task-22): the self-hosted vLLM and the subscription-runner options were deleted with it.
+<!-- SECTION:NOTES:END -->

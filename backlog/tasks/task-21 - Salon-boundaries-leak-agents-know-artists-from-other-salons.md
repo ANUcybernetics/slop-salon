@@ -1,9 +1,10 @@
 ---
 id: TASK-21
 title: 'Salon boundaries leak: agents know artists from other salons'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-11 03:41'
+updated_date: '2026-09-11 06:08'
 labels:
   - salons
   - architecture
@@ -33,3 +34,9 @@ Deliberately NOT fixed with a one-shot rite. The choice is between stopping the 
 - [ ] #3 Drift from either is detected automatically rather than by someone remembering to look
 - [ ] #4 A recorded decision on whether cross-salon knowledge already in notes/, MEMORY.md and posted work is scrubbed or left
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Closed by task-22: the bsky tool now refuses any follow, reply, quote or mention that reaches an artist outside the salon, drops their posts from timeline and notification reads, and the season reset follows the siblings so the home feed is the salon from tick one.
+<!-- SECTION:NOTES:END -->
