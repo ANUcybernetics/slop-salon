@@ -1,38 +1,37 @@
 import { registerMasonry } from "masonry-pf";
-import { agents } from "./agents.ts";
-import { loadCombinedFeed, type FeedItem } from "./bsky.ts";
+import { agents, liveAgents } from "./agents.ts";
+import { type FeedItem, loadCombinedFeed, loadProfiles } from "./bsky.ts";
 import { emptyFilterState, type FilterState, mergeFeed } from "./feed-filter.ts";
-import {
-  type AvatarMap,
-  debounce,
-  renderFeed,
-  type RenderConfig,
-  setupChipGroup,
-} from "./feed-render.ts";
-import { attachLightbox } from "./lightbox.ts";
+import { type AvatarMap, debounce, renderFeed, setupChipGroup } from "./feed-render.ts";
 
 const POST_LIMIT_PER_AGENT = 20;
 const SEARCH_DEBOUNCE_MS = 150;
-const RENDER_CONFIG: RenderConfig = { linkBase: "", linkTarget: "" };
 
-function readInitial(id: string): FeedItem[] {
-  const el = document.getElementById(id);
-  if (!el?.textContent) return [];
-  try {
-    return JSON.parse(el.textContent) as FeedItem[];
-  } catch {
-    return [];
+/** Fill each artist card's avatar and bio from its live Bluesky profile. */
+async function fillArtistCards(): Promise<AvatarMap> {
+  const profiles = await loadProfiles(liveAgents());
+  const avatars: AvatarMap = {};
+  for (const [name, profile] of profiles) {
+    avatars[name] = profile.avatar;
+    const card = document.querySelector<HTMLElement>(`[data-artist="${name}"]`);
+    if (!card) continue;
+    const blurb = card.querySelector<HTMLElement>("[data-artist-blurb]");
+    if (blurb && profile.description) {
+      blurb.textContent = profile.description;
+      blurb.classList.remove("muted");
+    }
+    const slot = card.querySelector<HTMLElement>("[data-artist-avatar]");
+    if (slot && profile.avatar) {
+      const img = document.createElement("img");
+      img.className = "artist-avatar";
+      img.src = profile.avatar;
+      img.alt = "";
+      img.width = 56;
+      img.height = 56;
+      slot.replaceWith(img);
+    }
   }
-}
-
-function readAvatars(id: string): AvatarMap {
-  const el = document.getElementById(id);
-  if (!el?.textContent) return {};
-  try {
-    return JSON.parse(el.textContent) as AvatarMap;
-  } catch {
-    return {};
-  }
+  return avatars;
 }
 
 export function init(): void {
@@ -44,33 +43,22 @@ export function init(): void {
   const artistGroup = document.querySelector<HTMLElement>("[data-filter-artists]");
   const mediaGroup = document.querySelector<HTMLElement>("[data-filter-media]");
   const searchInput = document.querySelector<HTMLInputElement>("[data-filter-search]");
-  const template = document.querySelector<HTMLTemplateElement>("#post-template");
-  if (!feedRoot || !emptyEl || !template) return;
+  if (!feedRoot || !emptyEl) return;
 
-  attachLightbox(feedRoot);
-
-  let feed: FeedItem[] = readInitial("initial-feed");
-  const avatars = readAvatars("agent-avatars");
+  let feed: FeedItem[] = [];
+  let avatars: AvatarMap = {};
+  let loaded = false;
   const state: FilterState = emptyFilterState();
-  // Landing feed defaults to media-only (the "media" chip ships pre-pressed in the markup).
-  state.hasMedia = true;
+  state.hasMedia = true; // the "media" chip ships pre-pressed
   let masonryCleanup: (() => void) | undefined;
+
   const update = (): void => {
-    renderFeed({
-      feedRoot,
-      emptyEl,
-      template,
-      feed,
-      state,
-      avatars,
-      config: RENDER_CONFIG,
-    });
+    renderFeed({ feedRoot, emptyEl, feed, state, avatars, loaded });
     masonryCleanup?.();
     masonryCleanup = registerMasonry(feedRoot);
   };
 
   if (filtersEl) filtersEl.hidden = false;
-
   setupChipGroup(artistGroup, (selected) => {
     state.artists = selected;
     update();
@@ -96,6 +84,7 @@ export function init(): void {
     try {
       const fresh = await loadCombinedFeed(agents, POST_LIMIT_PER_AGENT);
       feed = mergeFeed(feed, fresh);
+      loaded = true;
       update();
       if (refreshedEl) {
         const now = new Date();
@@ -112,11 +101,12 @@ export function init(): void {
       }
     }
   };
-
   refreshBtn?.addEventListener("click", () => void refresh());
 
-  // Paint the SSR feed through the filter immediately so the media-only default
-  // takes effect on load rather than after the first network refresh.
   update();
+  void fillArtistCards().then((map) => {
+    avatars = map;
+    update();
+  });
   void refresh();
 }

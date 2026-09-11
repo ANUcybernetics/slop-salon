@@ -1,164 +1,108 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { extractImages, extractVideo, type FeedItem, pruneDeadVideos } from "./bsky.ts";
+import { describe, expect, it } from "vitest";
+import type { Agent } from "./agents.ts";
+import { authorFeedResponse, extractImages, extractVideo, parseFeedEntry } from "./bsky.ts";
 
-describe("extractImages", () => {
-  it("returns empty array for no embed", () => {
-    expect(extractImages(undefined)).toEqual([]);
+const lou: Agent = {
+  name: "lou",
+  handle: "lou.slopsalon.art",
+  github_repo: "ANUcybernetics/slop-salon-lou",
+  sprite_id: "lou",
+  salon: "one",
+  soul: "boden",
+  live: true,
+  namesake: "",
+  namesake_url: "",
+};
+
+const post = {
+  uri: "at://did:plc:lou/app.bsky.feed.post/abc",
+  cid: "bafy",
+  author: { did: "did:plc:lou", handle: "lou.slopsalon.art" },
+  record: {
+    text: "a study",
+    createdAt: "2026-09-11T00:00:00.000Z",
+    provenance: { model: "z-ai/glm-5.3-flash", salon: "glm-flash" },
+  },
+  indexedAt: "2026-09-11T00:00:01.000Z",
+  likeCount: 2,
+  embed: {
+    $type: "app.bsky.embed.images#view",
+    images: [{ thumb: "t", fullsize: "f", alt: "a cat" }],
+  },
+};
+
+describe("parseFeedEntry", () => {
+  it("maps a valid entry, including the provenance stamp", () => {
+    const item = parseFeedEntry(lou, { post });
+    expect(item).toMatchObject({
+      uri: post.uri,
+      agent: "lou",
+      text: "a study",
+      createdAt: "2026-09-11T00:00:00.000Z",
+      url: "https://bsky.app/profile/lou.slopsalon.art/post/abc",
+      isRepost: false,
+      model: "z-ai/glm-5.3-flash",
+      likeCount: 2,
+      replyCount: 0,
+    });
+    expect(item?.images).toEqual([{ thumb: "t", fullsize: "f", alt: "a cat" }]);
   });
 
-  it("maps an images embed", () => {
-    expect(
-      extractImages({
-        $type: "app.bsky.embed.images#view",
-        images: [{ thumb: "t", fullsize: "f", alt: "a cat" }],
-      }),
-    ).toEqual([{ thumb: "t", fullsize: "f", alt: "a cat" }]);
+  it("tolerates a post with no provenance and unknown extra fields", () => {
+    const item = parseFeedEntry(lou, {
+      post: { ...post, record: { text: "x", createdAt: "2026-09-11T00:00:00Z", langs: ["en"] } },
+    });
+    expect(item?.model).toBeUndefined();
   });
 
-  it("returns empty for a video embed", () => {
-    expect(
-      extractImages({
-        $type: "app.bsky.embed.video#view",
-        playlist: "https://video.bsky.app/x.m3u8",
-      }),
-    ).toEqual([]);
+  it("marks reposts", () => {
+    const item = parseFeedEntry(lou, {
+      post,
+      reason: { $type: "app.bsky.feed.defs#reasonRepost" },
+    });
+    expect(item?.isRepost).toBe(true);
   });
 
-  it("recurses into recordWithMedia", () => {
-    expect(
-      extractImages({
-        $type: "app.bsky.embed.recordWithMedia#view",
-        media: {
-          $type: "app.bsky.embed.images#view",
-          images: [{ thumb: "t", fullsize: "f", alt: "" }],
-        },
-      }),
-    ).toEqual([{ thumb: "t", fullsize: "f", alt: "" }]);
+  it("drops an entry that does not parse rather than throwing", () => {
+    expect(parseFeedEntry(lou, { post: { uri: 42 } })).toBeNull();
+    expect(parseFeedEntry(lou, "garbage")).toBeNull();
+  });
+
+  it("accepts an unknown embed type", () => {
+    const item = parseFeedEntry(lou, {
+      post: { ...post, embed: { $type: "app.bsky.embed.external#view", external: { uri: "u" } } },
+    });
+    expect(item?.images).toEqual([]);
+    expect(item?.video).toBeUndefined();
   });
 });
 
-describe("extractVideo", () => {
-  it("returns undefined for no embed", () => {
+describe("authorFeedResponse", () => {
+  it("requires a feed array and keeps the cursor", () => {
+    expect(authorFeedResponse.safeParse({ feed: [], cursor: "c" }).success).toBe(true);
+    expect(authorFeedResponse.safeParse({ posts: [] }).success).toBe(false);
+  });
+});
+
+describe("extractImages / extractVideo", () => {
+  it("returns empty for no embed", () => {
+    expect(extractImages(undefined)).toEqual([]);
     expect(extractVideo(undefined)).toBeUndefined();
   });
 
-  it("returns undefined for an images embed", () => {
-    expect(
-      extractVideo({
-        $type: "app.bsky.embed.images#view",
-        images: [{ thumb: "t", fullsize: "f", alt: "" }],
-      }),
-    ).toBeUndefined();
-  });
-
-  it("extracts playlist, thumbnail, alt and aspectRatio from a video embed", () => {
-    expect(
-      extractVideo({
-        $type: "app.bsky.embed.video#view",
-        playlist: "https://video.bsky.app/x.m3u8",
-        thumbnail: "https://video.bsky.app/x.jpg",
-        alt: "a short clip",
-        aspectRatio: { width: 16, height: 9 },
-      }),
-    ).toEqual({
+  it("recurses into recordWithMedia", () => {
+    const media = {
+      $type: "app.bsky.embed.video#view" as const,
       playlist: "https://video.bsky.app/x.m3u8",
       thumbnail: "https://video.bsky.app/x.jpg",
-      alt: "a short clip",
+      aspectRatio: { width: 16, height: 9 },
+    };
+    expect(extractVideo({ $type: "app.bsky.embed.recordWithMedia#view", media })).toEqual({
+      playlist: media.playlist,
+      thumbnail: media.thumbnail,
+      alt: "",
       aspectRatio: { width: 16, height: 9 },
     });
-  });
-
-  it("defaults alt to empty string and recurses into recordWithMedia", () => {
-    expect(
-      extractVideo({
-        $type: "app.bsky.embed.recordWithMedia#view",
-        media: {
-          $type: "app.bsky.embed.video#view",
-          playlist: "https://video.bsky.app/y.m3u8",
-        },
-      }),
-    ).toEqual({ playlist: "https://video.bsky.app/y.m3u8", alt: "" });
-  });
-
-  it("returns undefined for external embeds", () => {
-    expect(
-      extractVideo({
-        $type: "app.bsky.embed.external#view",
-        external: { uri: "https://example.com/article" },
-      }),
-    ).toBeUndefined();
-  });
-});
-
-describe("pruneDeadVideos", () => {
-  const NOW = Date.parse("2026-06-24T12:00:00Z");
-  const OLD = "2026-06-24T11:00:00Z"; // an hour old, past the grace window
-
-  // playlist URL -> HEAD status (or "throw" for a network/CORS rejection),
-  // driving the stubbed fetch below. Each item gets a unique URL so the
-  // module-level liveness cache never bleeds a verdict across tests.
-  const statuses = new Map<string, number | "throw">();
-  let n = 0;
-
-  function videoItem(createdAt: string, playlistStatus: number | "throw"): FeedItem {
-    const playlist = `https://video.bsky.app/v${n++}/playlist.m3u8`;
-    statuses.set(playlist, playlistStatus);
-    return {
-      uri: `at://did/app.bsky.feed.post/${n}`,
-      agent: "lou",
-      handle: "lou.slopsalon.art",
-      text: "",
-      createdAt,
-      url: "https://bsky.app/x",
-      isRepost: false,
-      replyCount: 0,
-      repostCount: 0,
-      likeCount: 0,
-      images: [],
-      video: { playlist, alt: "", thumbnail: `${playlist}-thumb` },
-    };
-  }
-
-  beforeEach(() => {
-    vi.stubGlobal("fetch", (url: string, opts?: { method?: string }) => {
-      expect(opts?.method).toBe("HEAD");
-      const status = statuses.get(url);
-      return status === "throw"
-        ? Promise.reject(new TypeError("CORS"))
-        : Promise.resolve({ status } as Response);
-    });
-  });
-
-  afterEach(() => {
-    statuses.clear();
-    vi.unstubAllGlobals();
-  });
-
-  it("drops a video-only post whose playlist 404s", async () => {
-    expect(await pruneDeadVideos([videoItem(OLD, 404)], NOW)).toEqual([]);
-  });
-
-  it("keeps a post whose playlist is live", async () => {
-    expect(await pruneDeadVideos([videoItem(OLD, 200)], NOW)).toHaveLength(1);
-  });
-
-  it("fails open: keeps the post on a network/CORS error or non-404 status", async () => {
-    const items = [videoItem(OLD, "throw"), videoItem(OLD, 500)];
-    expect(await pruneDeadVideos(items, NOW)).toHaveLength(2);
-  });
-
-  it("leaves freshly posted videos alone (still transcoding), without fetching", async () => {
-    const fetchSpy = vi.fn();
-    vi.stubGlobal("fetch", fetchSpy);
-    expect(await pruneDeadVideos([videoItem("2026-06-24T11:58:00Z", 404)], NOW)).toHaveLength(1);
-    expect(fetchSpy).not.toHaveBeenCalled();
-  });
-
-  it("strips only the dead video from a post that also has images", async () => {
-    const items = [videoItem(OLD, 404)];
-    items[0].images = [{ thumb: "t", fullsize: "f", alt: "" }];
-    const [kept] = await pruneDeadVideos(items, NOW);
-    expect(kept.video).toBeUndefined();
-    expect(kept.images).toHaveLength(1);
+    expect(extractImages({ $type: "app.bsky.embed.recordWithMedia#view", media })).toEqual([]);
   });
 });

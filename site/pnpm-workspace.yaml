@@ -9,3 +9,4 @@ allowBuilds:
 # is actually blocked.
 minimumReleaseAgeExclude:
   - "@astrojs/yaml2ts@0.2.4"
+  - zod@4.6.2

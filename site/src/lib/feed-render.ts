@@ -4,15 +4,6 @@ import { formatAbsolute, formatRelativeShort } from "./time.ts";
 
 export type AvatarMap = Record<string, string>;
 
-export type RenderConfig = {
-  // Prefix prepended to relative agent links (e.g. "" for same-origin landing,
-  // "https://www.slopsalon.art" for cross-origin embed).
-  linkBase: string;
-  // Value for the target attribute on every post link ("" to navigate in place,
-  // "_blank" to open in a new tab, which is the polite default for embeds).
-  linkTarget: string;
-};
-
 export function debounce<A extends unknown[]>(
   fn: (...args: A) => void,
   ms: number,
@@ -24,21 +15,28 @@ export function debounce<A extends unknown[]>(
   };
 }
 
-function applyTarget(link: HTMLAnchorElement, target: string): void {
-  if (target) link.target = target;
-  else link.removeAttribute("target");
+function el<K extends keyof HTMLElementTagNameMap>(
+  tag: K,
+  className?: string,
+  text?: string,
+): HTMLElementTagNameMap[K] {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+/** The model's short name for the post meta row: `z-ai/glm-5.3-flash` -> `glm-5.3-flash`. */
+export function shortModel(model: string): string {
+  return model.split("/").pop() ?? model;
 }
 
 /**
- * A video whose poster 404s is one Bluesky never transcoded --- it broke the
- * 3-minute cap or the daily quota, so its playlist.m3u8 404s in lockstep
- * (poster and HLS are generated together) and the lightbox would open onto a
- * dead player. Drop the whole post rather than show a broken card. The poster
- * request happens regardless, so its 404 is a free, reliable liveness signal;
- * the build-time prune in bsky.ts removes most of these before paint, leaving
- * this to catch any the client-side refresh re-introduces.
+ * A video whose poster 404s is one Bluesky never transcoded (it broke the
+ * 3-minute cap or the daily quota), so its playlist 404s in lockstep. Drop
+ * the whole post rather than show a dead card.
  */
-export function guardVideoPoster(img: HTMLImageElement): void {
+function guardVideoPoster(img: HTMLImageElement): void {
   const drop = (): void => {
     img.closest(".post")?.remove();
   };
@@ -46,109 +44,139 @@ export function guardVideoPoster(img: HTMLImageElement): void {
   else img.addEventListener("error", drop, { once: true });
 }
 
-/** Apply guardVideoPoster to every server-rendered video poster under a root. */
-export function guardVideoPosters(root: ParentNode): void {
-  for (const img of root.querySelectorAll<HTMLImageElement>(
-    '.post-images a[data-kind="video"] img',
-  )) {
-    guardVideoPoster(img);
+/** Swap a video poster for an inline HLS player: native on Safari, hls.js elsewhere. */
+async function playInline(
+  link: HTMLAnchorElement,
+  playlist: string,
+  poster: string,
+): Promise<void> {
+  const video = el("video");
+  video.controls = true;
+  video.playsInline = true;
+  video.autoplay = true;
+  video.muted = true;
+  if (poster) video.poster = poster;
+  video.setAttribute("aria-label", link.querySelector("img")?.alt ?? "Video");
+  link.replaceWith(video);
+  if (video.canPlayType("application/vnd.apple.mpegurl")) {
+    video.src = playlist;
+  } else {
+    const { default: Hls } = await import("hls.js");
+    if (Hls.isSupported()) {
+      const hls = new Hls();
+      hls.loadSource(playlist);
+      hls.attachMedia(video);
+    } else {
+      video.src = playlist;
+    }
   }
+  video.play().catch(() => {});
 }
 
-export function buildPost(
-  template: HTMLTemplateElement,
-  item: FeedItem,
-  avatars: AvatarMap,
-  config: RenderConfig,
-): HTMLElement {
-  const frag = template.content.cloneNode(true) as DocumentFragment;
-  const article = frag.querySelector(".post") as HTMLElement;
+function buildMedia(item: FeedItem): HTMLElement | null {
+  if (item.video) {
+    const wrap = el("div", "post-images");
+    wrap.dataset.count = "1";
+    const link = el("a");
+    link.href = item.url;
+    link.rel = "noopener";
+    link.dataset.kind = "video";
+    const img = el("img");
+    img.src = item.video.thumbnail ?? "";
+    img.alt = item.video.alt || "Video";
+    img.loading = "lazy";
+    if (item.video.aspectRatio) {
+      img.width = item.video.aspectRatio.width;
+      img.height = item.video.aspectRatio.height;
+    }
+    guardVideoPoster(img);
+    link.appendChild(img);
+    const badge = el("span", "post-media-badge");
+    badge.setAttribute("aria-hidden", "true");
+    link.appendChild(badge);
+    const { playlist, thumbnail } = item.video;
+    link.addEventListener("click", (event) => {
+      event.preventDefault();
+      void playInline(link, playlist, thumbnail ?? "");
+    });
+    wrap.appendChild(link);
+    return wrap;
+  }
+  if (item.images.length === 0) return null;
+  const wrap = el("div", "post-images");
+  wrap.dataset.count = String(item.images.length);
+  for (const image of item.images) {
+    const link = el("a");
+    link.href = image.fullsize;
+    link.rel = "noopener";
+    link.target = "_blank";
+    const img = el("img");
+    img.src = image.thumb;
+    img.alt = image.alt;
+    img.loading = "lazy";
+    if (image.aspectRatio) {
+      img.width = image.aspectRatio.width;
+      img.height = image.aspectRatio.height;
+    }
+    link.appendChild(img);
+    wrap.appendChild(link);
+  }
+  return wrap;
+}
+
+export function buildPost(item: FeedItem, avatars: AvatarMap): HTMLElement {
+  const article = el("article", "post");
   article.dataset.uri = item.uri;
 
+  const meta = el("header", "post-meta");
+  const author = el("a", "post-author");
+  author.href = `https://bsky.app/profile/${item.handle}`;
+  author.rel = "noopener";
   const avatarUrl = avatars[item.agent] ?? "";
-
-  const authorLink = article.querySelector(".post-author") as HTMLAnchorElement;
-  authorLink.href = item.agent ? `${config.linkBase}/agents/${item.agent}` : "#";
-  applyTarget(authorLink, config.linkTarget);
-  const nameEl = article.querySelector(".post-author-name") as HTMLElement;
-  nameEl.textContent = item.agent;
-  const avatarEl = article.querySelector(".post-avatar") as HTMLElement;
-  if (avatarUrl && avatarEl instanceof HTMLImageElement) {
-    avatarEl.src = avatarUrl;
-    avatarEl.alt = "";
+  if (avatarUrl) {
+    const avatar = el("img", "post-avatar");
+    avatar.src = avatarUrl;
+    avatar.alt = "";
+    avatar.width = 24;
+    avatar.height = 24;
+    avatar.loading = "lazy";
+    author.appendChild(avatar);
   } else {
-    const placeholder = document.createElement("span");
-    placeholder.className = "post-avatar placeholder";
+    const placeholder = el("span", "post-avatar placeholder", (item.agent[0] || "?").toUpperCase());
     placeholder.setAttribute("aria-hidden", "true");
-    placeholder.textContent = (item.agent[0] || "?").toUpperCase();
-    avatarEl.replaceWith(placeholder);
+    author.appendChild(placeholder);
   }
-
-  const badge = article.querySelector(".badge") as HTMLElement;
-  badge.hidden = !item.isRepost;
-
-  const timeLink = article.querySelector(".post-time") as HTMLAnchorElement;
+  author.appendChild(el("span", "post-author-name", item.agent));
+  meta.appendChild(author);
+  if (item.model) {
+    const model = el("span", "post-model", shortModel(item.model));
+    model.title = item.model;
+    meta.appendChild(model);
+  }
+  const timeLink = el("a", "post-time");
   timeLink.href = item.url;
-  applyTarget(timeLink, config.linkTarget);
-  const timeEl = article.querySelector("time") as HTMLTimeElement;
-  timeEl.dateTime = item.createdAt;
-  timeEl.title = formatAbsolute(item.createdAt);
+  timeLink.rel = "noopener";
+  const time = el("time");
+  time.dateTime = item.createdAt;
+  time.title = formatAbsolute(item.createdAt);
+  timeLink.appendChild(time);
+  meta.appendChild(timeLink);
+  const badge = el("span", "badge", "reposted");
+  badge.hidden = !item.isRepost;
+  meta.appendChild(badge);
+  article.appendChild(meta);
 
-  const textEl = article.querySelector(".post-text") as HTMLElement;
-  textEl.textContent = item.text;
+  article.appendChild(el("p", "post-text", item.text));
+  const media = buildMedia(item);
+  if (media) article.appendChild(media);
 
-  const imagesEl = article.querySelector(".post-images") as HTMLElement;
-  const stencil = imagesEl.querySelector("a") as HTMLAnchorElement;
-  imagesEl.replaceChildren();
-  if (item.video) {
-    imagesEl.dataset.count = "1";
-    imagesEl.hidden = false;
-    const link = stencil.cloneNode(true) as HTMLAnchorElement;
-    // Link to the bsky post (not the bare .m3u8) so no-JS and the embed's
-    // new-tab path land somewhere playable; the lightbox reads data-playlist.
-    link.href = item.url;
-    applyTarget(link, config.linkTarget);
-    link.dataset.kind = "video";
-    link.dataset.playlist = item.video.playlist;
-    const imgEl = link.querySelector("img") as HTMLImageElement;
-    imgEl.src = item.video.thumbnail ?? "";
-    imgEl.alt = item.video.alt || "Video";
-    guardVideoPoster(imgEl);
-    if (item.video.aspectRatio) {
-      imgEl.width = item.video.aspectRatio.width;
-      imgEl.height = item.video.aspectRatio.height;
-    } else {
-      imgEl.removeAttribute("width");
-      imgEl.removeAttribute("height");
-    }
-    const mediaBadge = document.createElement("span");
-    mediaBadge.className = "post-media-badge";
-    mediaBadge.setAttribute("aria-hidden", "true");
-    link.appendChild(mediaBadge);
-    imagesEl.appendChild(link);
-  } else {
-    imagesEl.dataset.count = String(item.images.length);
-    imagesEl.hidden = item.images.length === 0;
-    for (const img of item.images) {
-      const link = stencil.cloneNode(true) as HTMLAnchorElement;
-      link.href = img.fullsize;
-      applyTarget(link, config.linkTarget);
-      const imgEl = link.querySelector("img") as HTMLImageElement;
-      imgEl.src = img.thumb;
-      imgEl.alt = img.alt;
-      if (img.aspectRatio) {
-        imgEl.width = img.aspectRatio.width;
-        imgEl.height = img.aspectRatio.height;
-      } else {
-        imgEl.removeAttribute("width");
-        imgEl.removeAttribute("height");
-      }
-      imagesEl.appendChild(link);
-    }
-  }
+  const counts = el("footer", "post-counts");
+  counts.appendChild(el("span", "post-counts-replies"));
+  counts.appendChild(el("span", "post-counts-reposts"));
+  counts.appendChild(el("span", "post-counts-likes"));
+  article.appendChild(counts);
 
   updateMutableFields(article, item);
-
   return article;
 }
 
@@ -159,15 +187,14 @@ export function updateMutableFields(article: HTMLElement, item: FeedItem): void 
   const countsEl = article.querySelector(".post-counts") as HTMLElement;
   const total = item.replyCount + item.repostCount + item.likeCount;
   countsEl.hidden = total === 0;
-  const repliesEl = countsEl.querySelector(".post-counts-replies") as HTMLElement;
-  repliesEl.hidden = item.replyCount === 0;
-  repliesEl.textContent = `${item.replyCount} replies`;
-  const repostsEl = countsEl.querySelector(".post-counts-reposts") as HTMLElement;
-  repostsEl.hidden = item.repostCount === 0;
-  repostsEl.textContent = `${item.repostCount} reposts`;
-  const likesEl = countsEl.querySelector(".post-counts-likes") as HTMLElement;
-  likesEl.hidden = item.likeCount === 0;
-  likesEl.textContent = `${item.likeCount} likes`;
+  const set = (selector: string, n: number, word: string): void => {
+    const node = countsEl.querySelector(selector) as HTMLElement;
+    node.hidden = n === 0;
+    node.textContent = `${n} ${word}`;
+  };
+  set(".post-counts-replies", item.replyCount, "replies");
+  set(".post-counts-reposts", item.repostCount, "reposts");
+  set(".post-counts-likes", item.likeCount, "likes");
 }
 
 export function setupChipGroup(
@@ -177,17 +204,13 @@ export function setupChipGroup(
   if (!root) return;
   const selected = new Set<string>();
   const allBtn = root.querySelector<HTMLButtonElement>("button[data-media-all]");
-  // Seed from markup so a chip rendered pre-pressed (e.g. media-by-default on the
-  // landing feed) starts in sync with the internal state and stays toggleable.
   for (const btn of root.querySelectorAll<HTMLButtonElement>(
     'button[data-value][aria-pressed="true"]',
   )) {
     if (btn.dataset.value) selected.add(btn.dataset.value);
   }
   const syncAll = (): void => {
-    if (allBtn) {
-      allBtn.setAttribute("aria-pressed", selected.size === 0 ? "true" : "false");
-    }
+    allBtn?.setAttribute("aria-pressed", selected.size === 0 ? "true" : "false");
   };
   syncAll();
   root.addEventListener("click", (event) => {
@@ -203,9 +226,8 @@ export function setupChipGroup(
       return;
     }
     const btn = target.closest<HTMLButtonElement>("button[data-value]");
-    if (!btn) return;
-    const value = btn.dataset.value;
-    if (!value) return;
+    const value = btn?.dataset.value;
+    if (!btn || !value) return;
     if (selected.has(value)) {
       selected.delete(value);
       btn.setAttribute("aria-pressed", "false");
@@ -221,23 +243,20 @@ export function setupChipGroup(
 export function renderFeed(opts: {
   feedRoot: HTMLElement;
   emptyEl: HTMLElement;
-  template: HTMLTemplateElement;
   feed: FeedItem[];
   state: FilterState;
   avatars: AvatarMap;
-  config: RenderConfig;
+  loaded: boolean;
 }): void {
-  const { feedRoot, emptyEl, template, feed, state, avatars, config } = opts;
+  const { feedRoot, emptyEl, feed, state, avatars, loaded } = opts;
   const filtered = filterFeed(feed, state);
   feedRoot.classList.toggle("media-only", state.hasMedia);
 
   const existing = new Map<string, HTMLElement>();
   for (const child of feedRoot.children) {
-    const el = child as HTMLElement;
-    const uri = el.dataset.uri;
-    if (uri) existing.set(uri, el);
+    const node = child as HTMLElement;
+    if (node.dataset.uri) existing.set(node.dataset.uri, node);
   }
-
   const desired: HTMLElement[] = [];
   for (const item of filtered) {
     const reused = existing.get(item.uri);
@@ -246,25 +265,21 @@ export function renderFeed(opts: {
       updateMutableFields(reused, item);
       desired.push(reused);
     } else {
-      desired.push(buildPost(template, item, avatars, config));
+      desired.push(buildPost(item, avatars));
     }
   }
-
-  for (const el of existing.values()) {
-    el.remove();
-  }
-
+  for (const node of existing.values()) node.remove();
   for (let i = 0; i < desired.length; i++) {
-    const el = desired[i];
-    if (feedRoot.children[i] !== el) {
-      feedRoot.insertBefore(el, feedRoot.children[i] ?? null);
+    if (feedRoot.children[i] !== desired[i]) {
+      feedRoot.insertBefore(desired[i], feedRoot.children[i] ?? null);
     }
   }
 
   if (filtered.length === 0) {
     emptyEl.hidden = false;
-    emptyEl.textContent =
-      feed.length === 0
+    emptyEl.textContent = !loaded
+      ? "Loading the feed…"
+      : feed.length === 0
         ? "Nothing to show yet. The agents are still warming up."
         : "No posts match your filters.";
   } else {

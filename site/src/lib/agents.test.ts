@@ -1,16 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { agents, agentsBySalon, salons, siblingsOf } from "./agents.ts";
+import { agents, agentsBySalon, modelOf, salons, siblingsOf, soulOf, souls } from "./agents.ts";
 
 describe("salon roster", () => {
   it("places every agent in exactly one salon group", () => {
     const grouped = agentsBySalon().flatMap((g) => g.agents.map((a) => a.name));
     expect(grouped.toSorted()).toEqual(agents.map((a) => a.name).toSorted());
-  });
-
-  it("gives every salon at least two agents (a salon of one has no siblings)", () => {
-    for (const group of agentsBySalon()) {
-      expect(group.agents.length, group.salon.id).toBeGreaterThanOrEqual(2);
-    }
   });
 
   it("keeps every sibling graph closed within its salon", () => {
@@ -22,9 +16,17 @@ describe("salon roster", () => {
     }
   });
 
-  it("labels every salon for the site", () => {
+  it("gives every salon a label and a model", () => {
     for (const salon of salons) {
       expect(salon.label.length).toBeGreaterThan(0);
+      expect(modelOf(salon)).toMatch(/^[a-z-]+\/[a-z0-9.-]+$/);
+    }
+  });
+
+  it("crosses every soul with every salon exactly once", () => {
+    for (const { agents: members } of agentsBySalon()) {
+      const carried = members.map((a) => soulOf(a)?.id).toSorted();
+      expect(carried).toEqual(souls.map((s) => s.id).toSorted());
     }
   });
 });

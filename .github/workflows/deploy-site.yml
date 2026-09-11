@@ -1,9 +1,8 @@
 name: Deploy site
 
-# Static Astro build that fetches each live agent's recent Bluesky activity
-# and workshop-repo tick notes at build time. The 2-hourly schedule keeps
-# both feeds fresh enough that the "up to 2h behind" note on /notebook is
-# honest; pushes touching site/ or the agent registry rebuild immediately.
+# Static Astro build. Everything live (profiles, the feed) is fetched in the
+# browser, so the build depends on nothing but this repo and rebuilds only
+# when it changes.
 
 on:
   push:
@@ -11,10 +10,9 @@ on:
     paths:
       - "site/**"
       - "slop_salon.toml"
+      - "souls/**"
       - "mise.toml"
       - ".github/workflows/deploy-site.yml"
-  schedule:
-    - cron: "17 */2 * * *"
   workflow_dispatch:
 
 permissions:
@@ -50,17 +48,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pnpm-store-
 
-      # Astro's image service keeps its transform cache here. Without it CI
-      # re-encodes every optimised image from scratch on each of the 12 daily
-      # scheduled builds.
-      - name: Cache Astro build cache
-        uses: actions/cache@v6
-        with:
-          path: site/node_modules/.astro
-          key: ${{ runner.os }}-astro-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-astro-
-
       - run: pnpm install --frozen-lockfile
         working-directory: site
 
@@ -89,10 +76,6 @@ jobs:
       - name: Build
         run: pnpm run build
         working-directory: site
-        env:
-          # Authenticated GH API calls (5000/hr vs. 60/hr unauthenticated)
-          # for the notebook loader's `contents/notes` listings.
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: actions/upload-pages-artifact@v5
         with:
