@@ -9,6 +9,7 @@ addressed by name (`lou`), which is what `slop_salon.toml` stores as
 
 from __future__ import annotations
 
+import functools
 import os
 import subprocess
 from dataclasses import dataclass
@@ -21,6 +22,25 @@ SPRITES_BASE_URL = "https://api.sprites.dev/v1"
 # Every agent sprite carries this label; the connectors' access policies are
 # gated on it, so a sprite without it cannot reach the model.
 AGENT_LABEL = "slop"
+
+
+@functools.cache
+def _exec_flags() -> list[str]:
+    """Extra `sprite exec` flags this CLI understands.
+
+    `--no-port-forward` arrived in rc48: without it the CLI forwards any port
+    the remote command opens back to the admin box, which an unattended wake of
+    nine concurrent ticks has no use for. Asked of `--help` rather than
+    hardcoded, so an older CLI still runs rather than failing every tick on an
+    unknown flag.
+    """
+    try:
+        help_text = subprocess.run(
+            ["sprite", "exec", "--help"], capture_output=True, text=True, timeout=30
+        ).stdout
+    except OSError, subprocess.SubprocessError:
+        return []
+    return ["--no-port-forward"] if "--no-port-forward" in help_text else []
 
 
 @dataclass
@@ -84,7 +104,7 @@ class SpritesClient:
         The CLI takes env as `KEY=value,KEY2=value2`, so no value may contain a
         comma; `tick.tick_env` guarantees that for the values it builds.
         """
-        args = ["sprite", "exec", "-s", sprite_id]
+        args = ["sprite", "exec", "-s", sprite_id, *_exec_flags()]
         if env:
             for key, value in env.items():
                 if "," in value:

@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from pytest_httpx import HTTPXMock
 
+from slop_salon import sprites
 from slop_salon.sprites import SpritesClient
 
 
@@ -43,12 +44,30 @@ def test_destroy_tolerates_an_already_missing_sprite(client, httpx_mock: HTTPXMo
 
 
 def test_exec_passes_env_through_the_cli_flag(client):
-    with patch("slop_salon.sprites.subprocess.run") as mock_run:
+    with (
+        patch("slop_salon.sprites._exec_flags", return_value=[]),
+        patch("slop_salon.sprites.subprocess.run") as mock_run,
+    ):
         mock_run.return_value = MagicMock(stdout="hello", stderr="", returncode=0)
         result = client.exec("lou", ["echo", "hello"], env={"A": "1", "B": "x=y"})
     assert result.stdout == "hello" and result.exit_code == 0
     args = mock_run.call_args[0][0]
     assert args == ["sprite", "exec", "-s", "lou", "--env", "A=1,B=x=y", "--", "echo", "hello"]
+
+
+def test_exec_drops_port_forwarding_when_the_cli_offers_the_flag():
+    """Probed from `--help`, so an older CLI is not handed an unknown flag."""
+    sprites._exec_flags.cache_clear()
+    with patch("slop_salon.sprites.subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(
+            stdout="  --no-port-forward   Disable", stderr="", returncode=0
+        )
+        assert sprites._exec_flags() == ["--no-port-forward"]
+    sprites._exec_flags.cache_clear()
+    with patch("slop_salon.sprites.subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(stdout="  --env <vars>", stderr="", returncode=0)
+        assert sprites._exec_flags() == []
+    sprites._exec_flags.cache_clear()
 
 
 def test_exec_refuses_a_value_with_a_comma(client):
