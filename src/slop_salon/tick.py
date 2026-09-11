@@ -8,6 +8,7 @@ assembled here from the registry and the admin box's env, and handed to
 from __future__ import annotations
 
 import os
+import shlex
 import tomllib
 from collections.abc import Mapping
 from pathlib import Path
@@ -20,6 +21,29 @@ API_TIMEOUT_MS = "600000"
 # Any non-empty value: Claude Code refuses to start without a credential, and
 # the gateway replaces whatever is sent.
 CONNECTOR_PLACEHOLDER_TOKEN = "sprite"
+
+# The remote shell echoes this before `slop-tick`, so finding it in a result's
+# stdout is proof the sprite accepted the session. A failed exec without it
+# never reached the tick --- the sprite was unreachable, or still resuming from
+# cold --- and can be run again; a failed exec with it did reach the tick,
+# whose `claude` may still be running in the sprite after the client gives up,
+# so running it again would tick the agent twice.
+SESSION_MARKER = "slop-exec: session up"
+
+
+def tick_command(prompt: str) -> list[str]:
+    """The shell one tick runs in the sprite: report for duty, then tick."""
+    return [
+        "bash",
+        "-lc",
+        f"echo {shlex.quote(SESSION_MARKER)}; slop-tick {shlex.quote(prompt)}",
+    ]
+
+
+def tick_output(stdout: str) -> str:
+    """`stdout` without the session marker, for anything a human reads."""
+    kept = [line for line in stdout.splitlines() if line.strip() != SESSION_MARKER]
+    return "\n".join(kept)
 
 
 def bsky_password(name: str, secrets_path: str | Path = "secrets.toml") -> str:

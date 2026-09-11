@@ -77,14 +77,22 @@ sticker price.
 
 A systemd user timer on weddle (`ops/systemd/`), 6-hourly; sprites cannot wake
 themselves. `slop-wake.service` runs `slop wake` inline: a bounded thread pool
-ticks the live agents, a connection i/o-timeout (the platform's idle-wedge
-signature) is retried once, an agent wedged two wakes running is recreated
-unless three or more wedge together, and the run exits non-zero if any tick
-failed; the unit's `OnFailure=unit-oncall@` files the todo. A tick that runs
-`claude` to an error still exits 0 so it can commit partial work, which the
-driver classifies as `claude-err` from `slop-tick`'s stderr marker. State is one
-file of consecutive-wedge counts plus the last-wake stamp, under
+ticks the live agents, a tick whose sprite never started is retried once, an
+agent whose sprite failed to start two wakes running is recreated unless three
+or more fail together, and the run exits non-zero if any tick failed; the
+unit's `OnFailure=unit-oncall@` files the todo. A tick that runs `claude` to an
+error still exits 0 so it can commit partial work, which the driver classifies
+as `claude-err` from `slop-tick`'s stderr marker. State is one file of
+consecutive-wedge counts plus the last-wake stamp, under
 `~/.local/state/slop/`.
+
+Whether a failed tick started is asked of `tick_command`'s `SESSION_MARKER`,
+echoed by the remote shell before `slop-tick`, not of the platform's error text
+(which has said "failed to connect", "i/o timeout" and "connection closed" for
+the same condition). Only a tick that provably never ran is retried: resuming a
+cold sprite takes ~30s and the connection sometimes drops while it does, but a
+tick that started may still be running in the sprite after the client gives up,
+and running a second one would tick the agent twice.
 
 Change cadence with `slop cadence 6h`, not by editing the unit. Cadence is the
 only real cost lever: a tick's price is dominated by its fixed prompt floor.

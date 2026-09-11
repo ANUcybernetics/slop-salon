@@ -3,7 +3,9 @@
 Driven by `slop-wake.timer` on the admin box. Firings never overlap (a 2h tick
 cap against a 6h cadence), so there is no global slot bookkeeping and no
 in-sprite lock; the only state carried between wakes is a per-agent count of
-consecutive wedges, kept so a second wedge in a row triggers a recreate.
+consecutive wedges, kept so a second wedge in a row triggers a recreate. A
+wedge is a tick whose sprite never reported for duty, twice running --- see
+`never_started`.
 """
 
 from __future__ import annotations
@@ -20,7 +22,7 @@ from pathlib import Path
 
 from .config import Agent, Config
 from .sprites import ExecResult, SpriteExecutor
-from .tick import tick_env
+from .tick import SESSION_MARKER, tick_command, tick_env, tick_output
 
 WAKE_CONCURRENCY = 4
 # A wedge this many wakes running is recreated; fewer is a blip.
@@ -29,10 +31,6 @@ WEDGE_RECREATE_AFTER = 2
 # and may make it worse, so hold off and say so.
 PLATFORM_INCIDENT_THRESHOLD = 3
 
-# The sprites-CLI connection-failure signature (exec proxy unreachable): the
-# idle-wedge that a recreate fixes, as opposed to a merge conflict or an auth
-# error, which it would not.
-_WEDGE_MARKERS = ("failed to connect", "failed to start sprite command", "i/o timeout")
 # slop-tick prints these when `claude -p` fails but the tick still exits 0 so it
 # can commit partial work; unsurfaced, an agent whose every tick errors reads
 # as healthy.
@@ -40,11 +38,16 @@ _CLAUDE_ERROR_MARKERS = ("slop-tick: claude exited", "slop-tick: claude exceeded
 _ERROR_LINE = re.compile(r"error|fatal|rejected|exceeds|exceeded|traceback|exited", re.IGNORECASE)
 
 
-def is_wedge(result: ExecResult) -> bool:
-    if result.exit_code == 0:
-        return False
-    blob = f"{result.stderr}\n{result.stdout}".lower()
-    return any(marker in blob for marker in _WEDGE_MARKERS)
+def never_started(result: ExecResult) -> bool:
+    """The exec failed without the sprite ever reporting for duty.
+
+    Asked positively, of `tick_command`'s marker, rather than by matching the
+    platform's error text: the strings change (an unreachable sprite has
+    answered "failed to connect", "i/o timeout" and "connection closed" in turn)
+    but the marker's absence means the same thing every time, and means it for
+    an error nobody has seen yet.
+    """
+    return result.exit_code != 0 and SESSION_MARKER not in result.stdout
 
 
 def claude_failed(result: ExecResult) -> bool:
@@ -55,10 +58,15 @@ def claude_failed(result: ExecResult) -> bool:
 
 
 def classify(result: ExecResult) -> str:
-    """`ok`, `claude-err`, `wedge`, or `fail(<exit code>)`."""
+    """`ok`, `claude-err`, `wedge`, or `fail(<exit code>)`.
+
+    Read the result of a *finished* `tick_once`, retry included: a sprite that
+    never started twice running is wedged, where one that started on the retry
+    was only slow to wake.
+    """
     if result.exit_code == 0:
         return "claude-err" if claude_failed(result) else "ok"
-    return "wedge" if is_wedge(result) else f"fail({result.exit_code})"
+    return "wedge" if never_started(result) else f"fail({result.exit_code})"
 
 
 def failure_tail(result: ExecResult, limit: int = 5) -> list[str]:
@@ -68,7 +76,7 @@ def failure_tail(result: ExecResult, limit: int = 5) -> list[str]:
     mid-run still commits, so a plain tail shows the commit summary and buries
     the reason claude died."""
     lines: list[str] = []
-    for label, blob in (("err", result.stderr), ("out", result.stdout)):
+    for label, blob in (("err", result.stderr), ("out", tick_output(result.stdout))):
         stream = (blob or "").strip().splitlines()
         if not stream:
             continue
@@ -131,12 +139,18 @@ class WakeReport:
 def tick_once(
     sprites: SpriteExecutor, agent: Agent, env: dict[str, str]
 ) -> tuple[ExecResult, bool]:
-    """Run one `slop-tick "tick"`, retrying once on the wedge signature: an idle
-    sprite often warms on the second connect, and a blip must not count toward
-    a recreate. Returns (result, retried)."""
-    cmd = ["bash", "-lc", 'slop-tick "tick"']
+    """Run one `slop-tick "tick"`, retrying once if the sprite never started.
+
+    Resuming a cold sprite takes ~30s and the platform sometimes drops the
+    connection while it does, so the second connect usually lands on a sprite
+    that is now awake. Retrying is safe only because the tick provably did not
+    run; a tick that started and then failed is left alone, wedged or not,
+    since its `claude` may still be running in the sprite. Returns
+    (result, retried).
+    """
+    cmd = tick_command("tick")
     result = sprites.exec(agent.sprite_id, cmd, env=env)
-    if not is_wedge(result):
+    if not never_started(result):
         return result, False
     return sprites.exec(agent.sprite_id, cmd, env=env), True
 
@@ -173,7 +187,7 @@ def run(
             report.statuses[agent.name] = status
             line = f"{agent.name:12s}  {status:12s}  {elapsed:6.1f}s"
             if retried:
-                line += "  (retried i/o-timeout)"
+                line += "  (retried: no session)"
             echo(line)
             if status != "ok":
                 report.failed.append(agent.name)

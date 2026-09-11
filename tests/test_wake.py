@@ -7,14 +7,20 @@ from pathlib import Path
 from slop_salon import wake
 from slop_salon.config import load_config
 from slop_salon.sprites import ExecResult
+from slop_salon.tick import SESSION_MARKER
 
-OK = ExecResult(stdout="[main abc] session\n", stderr="", exit_code=0)
+UP = f"{SESSION_MARKER}\n"
+
+OK = ExecResult(stdout=f"{UP}[main abc] session\n", stderr="", exit_code=0)
+# The sprite never answered, so nothing of the tick ran.
 WEDGE = ExecResult(stdout="", stderr="failed to connect: dial tcp: i/o timeout", exit_code=1)
+DROPPED = ExecResult(stdout="", stderr="Error: connection closed", exit_code=1)
 CLAUDE_ERR = ExecResult(
-    stdout="API Error: 500\n", stderr="slop-tick: claude exited 1\n", exit_code=0
+    stdout=f"{UP}API Error: 500\n", stderr="slop-tick: claude exited 1\n", exit_code=0
 )
+# The tick started, then git refused: the sprite is fine.
 CONFLICT = ExecResult(
-    stdout="", stderr="fatal: Exiting because of an unresolved conflict.", exit_code=128
+    stdout=UP, stderr="fatal: Exiting because of an unresolved conflict.", exit_code=128
 )
 
 
@@ -23,6 +29,31 @@ def test_classify_names_the_four_shapes():
     assert wake.classify(WEDGE) == "wedge"
     assert wake.classify(CLAUDE_ERR) == "claude-err"
     assert wake.classify(CONFLICT) == "fail(128)"
+
+
+def test_a_sprite_that_never_started_is_wedged_whatever_the_platform_called_it():
+    # The three signatures seen so far, and one nobody has seen yet.
+    for stderr in (
+        "failed to connect: dial tcp: i/o timeout",
+        "Error: connection closed",
+        "failed to start sprite command",
+        "Error: something the platform has not said before",
+    ):
+        assert wake.classify(ExecResult(stdout="", stderr=stderr, exit_code=1)) == "wedge"
+
+
+def test_a_failure_after_the_sprite_started_is_not_wedged():
+    # Same transport error, but the tick was already running: a recreate would
+    # destroy work, and a retry would tick the agent twice.
+    dropped_mid_tick = ExecResult(
+        stdout=f"{UP}[main abc] session\n", stderr="Error: connection closed", exit_code=1
+    )
+    assert not wake.never_started(dropped_mid_tick)
+    assert wake.classify(dropped_mid_tick) == "fail(1)"
+
+
+def test_failure_tail_hides_the_session_marker():
+    assert not any(SESSION_MARKER in line for line in wake.failure_tail(CONFLICT))
 
 
 def test_failure_tail_digs_the_error_out_from_under_the_commit_summary():
@@ -84,7 +115,33 @@ def test_run_retries_a_transient_wedge_once_and_reports_it(registry):
     lines: list[str] = []
     report = wake.run(config, sprites, only=["lou"], recreate_fn=lambda n: None, echo=lines.append)
     assert report.ok
-    assert any("retried i/o-timeout" in line for line in lines)
+    assert any("retried: no session" in line for line in lines)
+
+
+def test_run_retries_a_dropped_cold_resume_and_does_not_count_it_as_a_wedge(registry, tmp_path):
+    """The 2026-09-11 failure: the connection dropped while the sprite resumed,
+    the second connect found it awake. Nothing is owed a recreate."""
+    config = load_config(registry)
+    sprites = FakeSprites({"lou": [DROPPED, OK], "mina": [OK], "gert": [OK]})
+    state = tmp_path / "wedges.json"
+    lines: list[str] = []
+    report = wake.run(
+        config, sprites, recreate_fn=lambda n: None, echo=lines.append, state_path=state
+    )
+    assert report.ok and report.statuses["lou"] == "ok"
+    assert wake.load_wedges(state) == {"lou": 0, "mina": 0, "gert": 0}
+
+
+def test_run_does_not_retry_a_tick_that_started(registry):
+    """A second `slop-tick` would run beside the first, which the sprite may
+    still be executing after the client gave up."""
+    config = load_config(registry)
+    sprites = FakeSprites({"lou": [CONFLICT, OK], "mina": [OK], "gert": [OK]})
+    report = wake.run(
+        config, sprites, only=["lou"], recreate_fn=lambda n: None, echo=lambda _: None
+    )
+    assert report.statuses["lou"] == "fail(128)"
+    assert len(sprites.calls) == 1
 
 
 def test_run_goes_red_on_a_claude_error_and_shows_why(registry):

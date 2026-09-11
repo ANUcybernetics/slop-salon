@@ -9,6 +9,7 @@ from typer.testing import CliRunner
 
 from slop_salon.cli import _render_transcripts, app
 from slop_salon.sprites import ExecResult
+from slop_salon.tick import SESSION_MARKER
 
 runner = CliRunner()
 
@@ -31,21 +32,24 @@ def test_status_lists_agents(registry):
 def test_talk_runs_slop_tick_with_the_tick_env(registry):
     with patch("slop_salon.cli.SpritesClient") as mock_class:
         instance = MagicMock()
-        instance.exec.return_value = ExecResult(stdout="done", stderr="", exit_code=0)
+        instance.exec.return_value = ExecResult(
+            stdout=f"{SESSION_MARKER}\ndone", stderr="", exit_code=0
+        )
         mock_class.return_value = instance
         result = runner.invoke(app, ["talk", "lou", "say hi"])
     assert result.exit_code == 0, result.output
     sprite_id, command = instance.exec.call_args.args
     env = instance.exec.call_args.kwargs["env"]
     assert sprite_id == "lou"
-    assert command == ["bash", "-lc", "slop-tick 'say hi'"]
+    assert command == ["bash", "-lc", f"echo '{SESSION_MARKER}'; slop-tick 'say hi'"]
     assert env["AGENT_NAME"] == "lou" and env["ANTHROPIC_MODEL"].startswith("z-ai/")
+    assert SESSION_MARKER not in result.output and "done" in result.output
 
 
 def test_wake_only_ticks_the_named_agents_and_stamps(registry, tmp_path):
     with patch("slop_salon.cli.SpritesClient") as mock_class:
         instance = MagicMock()
-        instance.exec.return_value = ExecResult(stdout="", stderr="", exit_code=0)
+        instance.exec.return_value = ExecResult(stdout=SESSION_MARKER, stderr="", exit_code=0)
         mock_class.return_value = instance
         result = runner.invoke(app, ["wake", "--only", "mina"])
     assert result.exit_code == 0, result.output
@@ -58,9 +62,9 @@ def test_wake_is_red_when_any_agent_fails(registry):
     with patch("slop_salon.cli.SpritesClient") as mock_class:
         instance = MagicMock()
         instance.exec.side_effect = lambda sid, cmd, env=None: (
-            ExecResult(stdout="", stderr="fatal: conflict", exit_code=128)
+            ExecResult(stdout=SESSION_MARKER, stderr="fatal: conflict", exit_code=128)
             if sid == "gert"
-            else ExecResult(stdout="", stderr="", exit_code=0)
+            else ExecResult(stdout=SESSION_MARKER, stderr="", exit_code=0)
         )
         mock_class.return_value = instance
         result = runner.invoke(app, ["wake"])

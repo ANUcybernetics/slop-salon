@@ -38,7 +38,7 @@ from .recreate import recreate as recreate_agent
 from .reset import SEASON
 from .reset import reset as reset_agent
 from .sprites import SpritesClient
-from .tick import tick_env
+from .tick import tick_command, tick_env, tick_output
 
 app = typer.Typer(add_completion=False, help="Slop Salon admin CLI.")
 
@@ -301,10 +301,10 @@ def talk(
     agent = _agent(config, name)
     result = SpritesClient().exec(
         agent.sprite_id,
-        ["bash", "-lc", f"slop-tick {shlex.quote(prompt)}"],
+        tick_command(prompt),
         env=tick_env(config, agent),
     )
-    typer.echo(result.stdout)
+    typer.echo(tick_output(result.stdout))
     if result.stderr:
         typer.echo(result.stderr, err=True)
     if result.exit_code != 0:
@@ -318,9 +318,9 @@ def wake(
 ):
     """Fire a `tick` at every live agent, a few at a time. Non-zero if any failed.
 
-    Driven by `slop-wake.timer` on the admin box. A wedged sprite (the
-    connection i/o-timeout signature) is retried once, and recreated after a
-    second consecutive wedged wake unless three or more wedge together.
+    Driven by `slop-wake.timer` on the admin box. A tick whose sprite never
+    started is retried once, and a sprite that fails to start two wakes running
+    is recreated unless three or more fail together.
     """
     config = _config(config_path)
     report = wake_mod.run(
