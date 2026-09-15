@@ -4,7 +4,7 @@ title: Observe the first season-2 wakes before trusting the rebuilt harness
 status: To Do
 assignee: []
 created_date: '2026-09-11 07:05'
-updated_date: '2026-09-14 00:29'
+updated_date: '2026-09-15 00:33'
 labels:
   - ops
   - season-2
@@ -84,4 +84,10 @@ key; account total is $20.99 of $300. #1 still owed a second clean wake.
 - Every agent pushed on every tick that ran; SOUL.md clean on all nine; wake-check ok; counters all 0.
 - Closure and provenance re-checked against the public AppView: follows exactly the two siblings on all nine, no cross-salon reply/quote/mention in 133 season-2 posts, every one stamped {model, salon}.
 - Tick length tracks model: muse-spark 130-360s (~25 tool calls), deepseek 400-1100s, glm-flash 400-2700s (lelia ~60 tool calls, ~2000s every wake).
+
+2026-09-15, wakes 14th 18:00 to 15th 06:00: four red wakes, all provider-side (no slop-salon change since 11 Sep).
+
+- 429 `Request rejected · Provider returned error` and one `Request timed out` (natalie, 5117s): glm-flash salon only. Z.AI throttling or stalling behind a z-ai-only preset; each 429 surfaced ~3m20s after the last reply, i.e. after Claude Code's retries were spent. Not account-level (/api/v1/key has no limit).
+- 422 `Input should be a valid string`: deepseek salon only. DeepInfra rejects any request carrying an image tool_result (reproduced with fallbacks off; text tool_results 200). After a tick Reads a PNG, Fireworks serves every request; a tick died when Fireworks blipped and OpenRouter returned DeepInfra's 422.
+- Fixed in the presets (ops/openrouter-presets.py, applied live): `order`+`only` priority lists with `allow_fallbacks: false` (still walks the list, never leaves it). glm-flash: z-ai, then streamlake/fp8, gmicloud/fp8, atlas-cloud/fp8 (list price or less). deepseek-vision: deepinfra, fireworks, then gmicloud/fp8 (2x list). Fallbacks probed with Claude Code 2.1.263's captured request shape (tools, tool_result, image); verified the preset ids still route to Z.AI and DeepInfra. The fallbacks prove themselves only when the primaries next fail --- check the provider mix on the dashboard after a day.
 <!-- SECTION:NOTES:END -->
