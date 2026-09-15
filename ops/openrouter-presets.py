@@ -53,18 +53,36 @@ PRESETS = {
         "model": "deepseek/deepseek-v4.1-flash",
         "provider": {"only": ["deepseek"]},
     },
-    # Superseded by V4.1 Flash on 2026-09-10, kept as a one-line way back. The
-    # vision-capable V4 Flash (V4 Flash text-only 404s on any image input,
-    # which killed every DeepSeek tick that Read a PNG). DeepInfra and Fireworks
-    # serve it at list price; SiliconFlow, AtlasCloud and Novita charge double.
+    # The vision-capable V4 Flash (V4 Flash text-only 404s on any image input,
+    # which killed every DeepSeek tick that Read a PNG). `order` with `only` is a
+    # priority list, not load balancing, and `allow_fallbacks: false` still
+    # walks it --- it only forbids hosts outside `only`. DeepInfra 422s any
+    # request carrying an image tool_result, so once a tick Reads a PNG every
+    # request lands on Fireworks, and a Fireworks blip used to kill the tick
+    # with DeepInfra's 422. GMICloud (fp8, twice list price, caches) is the
+    # verified backstop; `/fp8` pins that endpoint so a later fp4 one can't
+    # join. SiliconFlow also passed but caches only 512 tokens; AtlasCloud 400s
+    # on images (measured 2026-09-15).
     "slop-deepseek-vision": {
         "model": "deepseek/deepseek-v4-flash-vision-exp",
-        "provider": {"only": ["deepinfra", "fireworks"]},
+        "provider": {
+            "order": ["deepinfra", "fireworks", "gmicloud/fp8"],
+            "only": ["deepinfra", "fireworks", "gmicloud/fp8"],
+            "allow_fallbacks": False,
+        },
     },
-    # First-party only.
+    # Z.AI first; the rest only when it 429s or stalls, which it did through
+    # 2026-09-14/15 with no fallback to take the tick. Fallbacks are fp8 hosts
+    # that passed Claude Code's captured request shape with tools and images,
+    # render transparent PNGs the way Z.AI does, cache, and cost list price or
+    # less (measured 2026-09-15).
     "slop-glm-flash": {
         "model": "z-ai/glm-5.3-flash",
-        "provider": {"only": ["z-ai"]},
+        "provider": {
+            "order": ["z-ai", "streamlake/fp8", "gmicloud/fp8", "atlas-cloud/fp8"],
+            "only": ["z-ai", "streamlake/fp8", "gmicloud/fp8", "atlas-cloud/fp8"],
+            "allow_fallbacks": False,
+        },
     },
 }
 
