@@ -8,6 +8,7 @@ assembled here from the registry and the admin box's env, and handed to
 from __future__ import annotations
 
 import os
+import re
 import shlex
 import tomllib
 from collections.abc import Mapping
@@ -22,13 +23,15 @@ API_TIMEOUT_MS = "600000"
 # the gateway replaces whatever is sent.
 CONNECTOR_PLACEHOLDER_TOKEN = "sprite"
 
-# The remote shell echoes this before `slop-tick`, so finding it in a result's
-# stdout is proof the sprite accepted the session. A failed exec without it
-# never reached the tick --- the sprite was unreachable, or still resuming from
-# cold --- and can be run again; a failed exec with it did reach the tick,
-# whose `claude` may still be running in the sprite after the client gives up,
-# so running it again would tick the agent twice.
+# The remote shell echoes this, then its own pid, before `slop-tick`, so
+# finding it in a result's stdout is proof the sprite accepted the session. A
+# failed exec without it never reached the tick --- the sprite was unreachable,
+# or still resuming from cold --- and can be run again; a failed exec with it
+# did reach the tick, which keeps running in the sprite after the client's
+# connection drops, so running it again would tick the agent twice. The pid is
+# the platform's session id, which is what reattaching to that tick needs.
 SESSION_MARKER = "slop-exec: session up"
+_SESSION_LINE = re.compile(rf"^{re.escape(SESSION_MARKER)} (\d+)$", re.MULTILINE)
 
 
 def tick_command(prompt: str) -> list[str]:
@@ -36,13 +39,19 @@ def tick_command(prompt: str) -> list[str]:
     return [
         "bash",
         "-lc",
-        f"echo {shlex.quote(SESSION_MARKER)}; slop-tick {shlex.quote(prompt)}",
+        f"echo {shlex.quote(SESSION_MARKER)} $$; slop-tick {shlex.quote(prompt)}",
     ]
+
+
+def session_id(stdout: str) -> str | None:
+    """The sprite session the tick ran in, if it got far enough to say."""
+    match = _SESSION_LINE.search(stdout)
+    return match.group(1) if match else None
 
 
 def tick_output(stdout: str) -> str:
     """`stdout` without the session marker, for anything a human reads."""
-    kept = [line for line in stdout.splitlines() if line.strip() != SESSION_MARKER]
+    kept = [line for line in stdout.splitlines() if not line.startswith(SESSION_MARKER)]
     return "\n".join(kept)
 
 

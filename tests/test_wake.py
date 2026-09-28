@@ -9,7 +9,7 @@ from slop_salon.config import load_config
 from slop_salon.sprites import ExecResult
 from slop_salon.tick import SESSION_MARKER
 
-UP = f"{SESSION_MARKER}\n"
+UP = f"{SESSION_MARKER} 4242\n"
 
 OK = ExecResult(stdout=f"{UP}[main abc] session\n", stderr="", exit_code=0)
 # The sprite never answered, so nothing of the tick ran.
@@ -87,14 +87,29 @@ def test_platform_incident_holds_off_however_long_agents_have_been_wedged():
     assert due == [] and incident
 
 
+# What `sprite sessions attach` says of a session that has already ended.
+GONE = ExecResult(stdout="", stderr="Error: session not found: 4242", exit_code=1)
+
+
 class FakeSprites:
-    def __init__(self, outcomes: dict[str, list[ExecResult]]):
+    def __init__(
+        self,
+        outcomes: dict[str, list[ExecResult]],
+        attaches: dict[str, list[ExecResult]] | None = None,
+    ):
         self.outcomes = outcomes
+        self.attaches = attaches or {}
         self.calls: list[tuple[str, dict[str, str]]] = []
+        self.attached: list[tuple[str, str]] = []
 
     def exec(self, sprite_id, command, env=None):
         self.calls.append((sprite_id, env or {}))
         queue = self.outcomes[sprite_id]
+        return queue.pop(0) if len(queue) > 1 else queue[0]
+
+    def attach(self, sprite_id, session_id):
+        self.attached.append((sprite_id, session_id))
+        queue = self.attaches.get(sprite_id, [GONE])
         return queue.pop(0) if len(queue) > 1 else queue[0]
 
 
@@ -142,6 +157,48 @@ def test_run_does_not_retry_a_tick_that_started(registry):
     )
     assert report.statuses["lou"] == "fail(128)"
     assert len(sprites.calls) == 1
+
+
+DROPPED_MID_TICK = ExecResult(stdout=UP, stderr="Error: connection closed", exit_code=1)
+
+
+def test_run_reattaches_a_tick_whose_connection_dropped_and_takes_its_real_result(registry):
+    config = load_config(registry)
+    sprites = FakeSprites({"lou": [DROPPED_MID_TICK]}, attaches={"lou": [OK]})
+    lines: list[str] = []
+    report = wake.run(config, sprites, only=["lou"], recreate_fn=lambda n: None, echo=lines.append)
+    assert report.ok and report.statuses["lou"] == "ok"
+    assert sprites.attached == [("lou", "4242")] and len(sprites.calls) == 1
+    assert any("(reattached)" in line for line in lines)
+
+
+def test_reattaching_follows_a_tick_through_a_second_drop(registry):
+    config = load_config(registry)
+    sprites = FakeSprites({"lou": [DROPPED_MID_TICK]}, attaches={"lou": [DROPPED_MID_TICK, OK]})
+    report = wake.run(
+        config, sprites, only=["lou"], recreate_fn=lambda n: None, echo=lambda _: None
+    )
+    assert report.ok and len(sprites.attached) == 2
+
+
+def test_a_tick_that_failed_on_its_own_keeps_its_result_when_there_is_no_session(registry):
+    config = load_config(registry)
+    sprites = FakeSprites({"lou": [CONFLICT]})
+    report = wake.run(
+        config, sprites, only=["lou"], recreate_fn=lambda n: None, echo=lambda _: None
+    )
+    assert report.statuses["lou"] == "fail(128)"
+    assert sprites.attached == [("lou", "4242")]
+
+
+def test_reattaching_gives_up_on_a_session_that_keeps_dropping(registry):
+    config = load_config(registry)
+    sprites = FakeSprites({"lou": [DROPPED_MID_TICK]}, attaches={"lou": [DROPPED_MID_TICK]})
+    report = wake.run(
+        config, sprites, only=["lou"], recreate_fn=lambda n: None, echo=lambda _: None
+    )
+    assert report.statuses["lou"] == "fail(1)"
+    assert len(sprites.attached) == wake.MAX_REATTACHES
 
 
 def test_run_goes_red_on_a_claude_error_and_shows_why(registry):

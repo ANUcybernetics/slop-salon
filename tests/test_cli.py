@@ -33,7 +33,7 @@ def test_talk_runs_slop_tick_with_the_tick_env(registry):
     with patch("slop_salon.cli.SpritesClient") as mock_class:
         instance = MagicMock()
         instance.exec.return_value = ExecResult(
-            stdout=f"{SESSION_MARKER}\ndone", stderr="", exit_code=0
+            stdout=f"{SESSION_MARKER} 4242\ndone", stderr="", exit_code=0
         )
         mock_class.return_value = instance
         result = runner.invoke(app, ["talk", "lou", "say hi"])
@@ -41,7 +41,7 @@ def test_talk_runs_slop_tick_with_the_tick_env(registry):
     sprite_id, command = instance.exec.call_args.args
     env = instance.exec.call_args.kwargs["env"]
     assert sprite_id == "lou"
-    assert command == ["bash", "-lc", f"echo '{SESSION_MARKER}'; slop-tick 'say hi'"]
+    assert command == ["bash", "-lc", f"echo '{SESSION_MARKER}' $$; slop-tick 'say hi'"]
     assert env["AGENT_NAME"] == "lou" and env["ANTHROPIC_MODEL"].startswith("z-ai/")
     assert SESSION_MARKER not in result.output and "done" in result.output
 

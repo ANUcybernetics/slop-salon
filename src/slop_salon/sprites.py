@@ -55,6 +55,8 @@ class SpriteExecutor(Protocol):
         self, sprite_id: str, command: list[str], env: dict[str, str] | None = None
     ) -> ExecResult: ...
 
+    def attach(self, sprite_id: str, session_id: str) -> ExecResult: ...
+
 
 class SpritesClient:
     def __init__(self, base_url: str = SPRITES_BASE_URL):
@@ -113,4 +115,18 @@ class SpritesClient:
                     )
             args += ["--env", ",".join(f"{k}={v}" for k, v in env.items())]
         result = subprocess.run([*args, "--", *command], capture_output=True, text=True)
+        return ExecResult(stdout=result.stdout, stderr=result.stderr, exit_code=result.returncode)
+
+    def attach(self, sprite_id: str, session_id: str) -> ExecResult:
+        """Reattach to a running exec session and wait for it to finish.
+
+        The CLI replays the session's output from the start and exits with the
+        remote command's code, so the result reads as if the connection had
+        never dropped. A session that has already ended fails with no output.
+        """
+        result = subprocess.run(
+            ["sprite", "sessions", "attach", "-s", sprite_id, session_id],
+            capture_output=True,
+            text=True,
+        )
         return ExecResult(stdout=result.stdout, stderr=result.stderr, exit_code=result.returncode)

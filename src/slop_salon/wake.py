@@ -22,7 +22,7 @@ from pathlib import Path
 
 from .config import Agent, Config
 from .sprites import ExecResult, SpriteExecutor
-from .tick import SESSION_MARKER, tick_command, tick_env, tick_output
+from .tick import SESSION_MARKER, session_id, tick_command, tick_env, tick_output
 
 WAKE_CONCURRENCY = 4
 # A wedge this many wakes running is recreated; fewer is a blip.
@@ -30,6 +30,9 @@ WEDGE_RECREATE_AFTER = 2
 # This many wedged in one wake is a platform incident: recreating will not help
 # and may make it worse, so hold off and say so.
 PLATFORM_INCIDENT_THRESHOLD = 3
+# A long tick can outlive more than one dropped connection; bounded so a
+# session that keeps dropping cannot hold the wake past the next firing.
+MAX_REATTACHES = 3
 
 # slop-tick prints these when `claude -p` fails but the tick still exits 0 so it
 # can commit partial work; unsurfaced, an agent whose every tick errors reads
@@ -138,21 +141,36 @@ class WakeReport:
 
 def tick_once(
     sprites: SpriteExecutor, agent: Agent, env: dict[str, str]
-) -> tuple[ExecResult, bool]:
-    """Run one `slop-tick "tick"`, retrying once if the sprite never started.
+) -> tuple[ExecResult, list[str]]:
+    """Run one `slop-tick "tick"` to its real end. Returns (result, notes).
 
-    Resuming a cold sprite takes ~30s and the platform sometimes drops the
-    connection while it does, so the second connect usually lands on a sprite
-    that is now awake. Retrying is safe only because the tick provably did not
-    run; a tick that started and then failed is left alone, wedged or not,
-    since its `claude` may still be running in the sprite. Returns
-    (result, retried).
+    A tick that never started is retried once: resuming a cold sprite takes
+    ~30s and the platform sometimes drops the connection while it does, so the
+    second connect usually lands on a sprite that is now awake. Retrying is
+    safe only because the tick provably did not run.
+
+    A tick that started keeps running in the sprite when the connection drops,
+    so a failure after the marker is followed by a reattach to its session,
+    which waits for the tick and replays its output. A tick that genuinely
+    failed has already ended, the attach finds no session, and the original
+    result stands.
     """
     cmd = tick_command("tick")
+    notes: list[str] = []
     result = sprites.exec(agent.sprite_id, cmd, env=env)
-    if not never_started(result):
-        return result, False
-    return sprites.exec(agent.sprite_id, cmd, env=env), True
+    if never_started(result):
+        result = sprites.exec(agent.sprite_id, cmd, env=env)
+        notes.append("retried: no session")
+    for _ in range(MAX_REATTACHES):
+        sid = session_id(result.stdout)
+        if result.exit_code == 0 or sid is None:
+            break
+        attached = sprites.attach(agent.sprite_id, sid)
+        if session_id(attached.stdout) != sid:
+            break
+        result = attached
+        notes.append("reattached")
+    return result, notes
 
 
 def run(
@@ -176,18 +194,18 @@ def run(
     # any sprite is touched.
     envs = {a.name: tick_env(config, a) for a in agents}
 
-    def _tick(agent: Agent) -> tuple[Agent, ExecResult, float, bool]:
+    def _tick(agent: Agent) -> tuple[Agent, ExecResult, float, list[str]]:
         start = time.monotonic()
-        result, retried = tick_once(sprites, agent, envs[agent.name])
-        return agent, result, time.monotonic() - start, retried
+        result, notes = tick_once(sprites, agent, envs[agent.name])
+        return agent, result, time.monotonic() - start, notes
 
     with ThreadPoolExecutor(max_workers=min(WAKE_CONCURRENCY, len(agents))) as pool:
-        for agent, result, elapsed, retried in pool.map(_tick, agents):
+        for agent, result, elapsed, notes in pool.map(_tick, agents):
             status = classify(result)
             report.statuses[agent.name] = status
             line = f"{agent.name:12s}  {status:12s}  {elapsed:6.1f}s"
-            if retried:
-                line += "  (retried: no session)"
+            if notes:
+                line += f"  ({', '.join(notes)})"
             echo(line)
             if status != "ok":
                 report.failed.append(agent.name)

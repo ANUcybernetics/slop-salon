@@ -2,10 +2,19 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
+
 import pytest
 
 from slop_salon.config import load_config
-from slop_salon.tick import CONNECTOR_PLACEHOLDER_TOKEN, tick_env
+from slop_salon.tick import (
+    CONNECTOR_PLACEHOLDER_TOKEN,
+    session_id,
+    tick_command,
+    tick_env,
+    tick_output,
+)
 
 
 def test_connector_provider_sends_a_placeholder_token(registry):
@@ -74,3 +83,20 @@ def test_credentials_auth_is_declared_but_not_built(registry):
     config = load_config(registry)
     with pytest.raises(NotImplementedError):
         tick_env(config, config.agents["lou"])
+
+
+def test_the_tick_shell_reports_its_own_pid_as_the_session_id(tmp_path):
+    # The platform's session id is the pid of the shell `sprite exec` starts,
+    # so `$$` has to reach that shell unexpanded and be expanded there.
+    fake = tmp_path / "slop-tick"
+    fake.write_text('#!/bin/sh\necho "ticked $1"\n')
+    fake.chmod(0o755)
+    env = {**os.environ, "PATH": f"{tmp_path}:{os.environ['PATH']}"}
+    shell = subprocess.Popen(tick_command("tick"), stdout=subprocess.PIPE, text=True, env=env)
+    stdout, _ = shell.communicate()
+    assert session_id(stdout) == str(shell.pid)
+    assert tick_output(stdout) == "ticked tick"
+
+
+def test_no_session_id_without_the_marker():
+    assert session_id("Error: connection closed") is None

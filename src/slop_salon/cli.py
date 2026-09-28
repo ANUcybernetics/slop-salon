@@ -319,8 +319,9 @@ def wake(
     """Fire a `tick` at every live agent, a few at a time. Non-zero if any failed.
 
     Driven by `slop-wake.timer` on the admin box. A tick whose sprite never
-    started is retried once, and a sprite that fails to start two wakes running
-    is recreated unless three or more fail together.
+    started is retried once, one whose connection dropped mid-run is reattached,
+    and a sprite that fails to start two wakes running is recreated unless
+    three or more fail together.
     """
     config = _config(config_path)
     report = wake_mod.run(

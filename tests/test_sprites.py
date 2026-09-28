@@ -55,6 +55,14 @@ def test_exec_passes_env_through_the_cli_flag(client):
     assert args == ["sprite", "exec", "-s", "lou", "--env", "A=1,B=x=y", "--", "echo", "hello"]
 
 
+def test_attach_waits_on_the_named_session(client):
+    with patch("slop_salon.sprites.subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(stdout="replayed", stderr="", returncode=7)
+        result = client.attach("lou", "4242")
+    assert result.stdout == "replayed" and result.exit_code == 7
+    assert mock_run.call_args[0][0] == ["sprite", "sessions", "attach", "-s", "lou", "4242"]
+
+
 def test_exec_drops_port_forwarding_when_the_cli_offers_the_flag():
     """Probed from `--help`, so an older CLI is not handed an unknown flag."""
     sprites._exec_flags.cache_clear()
