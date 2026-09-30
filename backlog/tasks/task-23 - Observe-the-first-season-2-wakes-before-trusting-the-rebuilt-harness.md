@@ -4,7 +4,7 @@ title: Observe the first season-2 wakes before trusting the rebuilt harness
 status: To Do
 assignee: []
 created_date: '2026-09-11 07:05'
-updated_date: '2026-09-15 00:33'
+updated_date: '2026-09-30 03:37'
 labels:
   - ops
   - season-2
@@ -90,4 +90,11 @@ key; account total is $20.99 of $300. #1 still owed a second clean wake.
 - 429 `Request rejected · Provider returned error` and one `Request timed out` (natalie, 5117s): glm-flash salon only. Z.AI throttling or stalling behind a z-ai-only preset; each 429 surfaced ~3m20s after the last reply, i.e. after Claude Code's retries were spent. Not account-level (/api/v1/key has no limit).
 - 422 `Input should be a valid string`: deepseek salon only. DeepInfra rejects any request carrying an image tool_result (reproduced with fallbacks off; text tool_results 200). After a tick Reads a PNG, Fireworks serves every request; a tick died when Fireworks blipped and OpenRouter returned DeepInfra's 422.
 - Fixed in the presets (ops/openrouter-presets.py, applied live): `order`+`only` priority lists with `allow_fallbacks: false` (still walks the list, never leaves it). glm-flash: z-ai, then streamlake/fp8, gmicloud/fp8, atlas-cloud/fp8 (list price or less). deepseek-vision: deepinfra, fireworks, then gmicloud/fp8 (2x list). Fallbacks probed with Claude Code 2.1.263's captured request shape (tools, tool_result, image); verified the preset ids still route to Z.AI and DeepInfra. The fallbacks prove themselves only when the primaries next fail --- check the provider mix on the dashboard after a day.
+
+2026-09-30, the recurring fail(1) \`Error: connection closed\` (lelia 34/58 ticks, mina, germaine, rahel; never muse-spark or natalie), which 9fa34f6's reattach did not catch: memory exhaustion, not the network.
+
+- Every dead tick's transcript ends mid-Bash on a heavy local command (lelia: numpy audio synthesis, ffmpeg at 7864x2600; mina: a python script) and none left a commit. Some left no transcript at all.
+- Reproduced on a throwaway sprite: past ~8 GB (no swap) the exec drops with exactly \`connection closed\`/exit 1, the session then ends 143, and a second blowout rebooted the VM and left it on i/o timeout for ~60s (germaine was in that state after the 12:04 wake). Reattach arrives to \`session not found\`, which tick_once dropped without a note.
+- A memory cgroup is refused by the platform (\`+memory\` to subtree_control is EIO; cpu and pids enable fine). RLIMIT_AS would trip claude's own address-space reservations (VmData 2.3 GB idle, RSS 220 MB).
+- Fixed 215edb4: tick_command writes /tmp/slop-toolcap each tick and runs slop-tick with CLAUDE_CODE_SHELL_PREFIX pointing at it, so every Bash tool call runs under \`ulimit -d\` 5 GiB; claude itself is uncapped. Verified on mabel with 2.1.263: tools and hooks route through it, zsh kept, a 7864x2600 x264 encode passes, a runaway allocation raises MemoryError inside the tool call and claude carries on. 78d19d4 notes \`no session to reattach\` so a lost tick names itself. Canary \`slop wake --only mabel\` ok and pushed.
 <!-- SECTION:NOTES:END -->
