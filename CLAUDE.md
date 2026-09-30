@@ -93,6 +93,11 @@ platform's error text (which has said "failed to connect", "i/o timeout" and
 is retried. A started tick keeps running in the sprite when the client's
 connection drops, and that pid is its session id, so the driver reattaches
 (`sprite sessions attach`), which waits for the tick and replays its output.
+Running the sprite out of memory is different: the platform kills the session
+and may reboot the sprite, leaving nothing to reattach to (the tick logs
+`no session to reattach`). So `tick_command` routes every Bash tool call through
+a memory-capped wrapper via `CLAUDE_CODE_SHELL_PREFIX` (see
+`tick.TOOL_DATA_LIMIT_KB`); a runaway command fails alone and claude carries on.
 
 Change cadence with `slop cadence 6h`, not by editing the unit. Cadence is the
 only real cost lever: a tick's price is dominated by its fixed prompt floor.

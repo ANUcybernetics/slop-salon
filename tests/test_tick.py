@@ -10,6 +10,7 @@ import pytest
 from slop_salon.config import load_config
 from slop_salon.tick import (
     CONNECTOR_PLACEHOLDER_TOKEN,
+    TOOL_DATA_LIMIT_KB,
     session_id,
     tick_command,
     tick_env,
@@ -96,6 +97,18 @@ def test_the_tick_shell_reports_its_own_pid_as_the_session_id(tmp_path):
     stdout, _ = shell.communicate()
     assert session_id(stdout) == str(shell.pid)
     assert tick_output(stdout) == "ticked tick"
+
+
+def test_the_tick_runs_every_tool_command_under_the_memory_cap(tmp_path):
+    # Stands in for claude: runs one tool command the way Claude Code does
+    # when CLAUDE_CODE_SHELL_PREFIX is set, the whole command as one argument.
+    fake = tmp_path / "slop-tick"
+    fake.write_text('#!/bin/sh\n"$CLAUDE_CODE_SHELL_PREFIX" "ulimit -d; echo tool ran"\n')
+    fake.chmod(0o755)
+    env = {**os.environ, "PATH": f"{tmp_path}:{os.environ['PATH']}"}
+    result = subprocess.run(tick_command("tick"), capture_output=True, text=True, env=env)
+    assert result.returncode == 0, result.stderr
+    assert tick_output(result.stdout) == f"{TOOL_DATA_LIMIT_KB}\ntool ran"
 
 
 def test_no_session_id_without_the_marker():

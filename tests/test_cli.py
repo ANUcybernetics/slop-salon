@@ -9,7 +9,7 @@ from typer.testing import CliRunner
 
 from slop_salon.cli import _render_transcripts, app
 from slop_salon.sprites import ExecResult
-from slop_salon.tick import SESSION_MARKER
+from slop_salon.tick import SESSION_MARKER, tick_command
 
 runner = CliRunner()
 
@@ -41,7 +41,7 @@ def test_talk_runs_slop_tick_with_the_tick_env(registry):
     sprite_id, command = instance.exec.call_args.args
     env = instance.exec.call_args.kwargs["env"]
     assert sprite_id == "lou"
-    assert command == ["bash", "-lc", f"echo '{SESSION_MARKER}' $$; slop-tick 'say hi'"]
+    assert command == tick_command("say hi")
     assert env["AGENT_NAME"] == "lou" and env["ANTHROPIC_MODEL"].startswith("z-ai/")
     assert SESSION_MARKER not in result.output and "done" in result.output
 

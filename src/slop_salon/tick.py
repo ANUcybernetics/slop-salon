@@ -33,13 +33,28 @@ CONNECTOR_PLACEHOLDER_TOKEN = "sprite"
 SESSION_MARKER = "slop-exec: session up"
 _SESSION_LINE = re.compile(rf"^{re.escape(SESSION_MARKER)} (\d+)$", re.MULTILINE)
 
+# A sprite that runs out of memory (8 GB, no swap, and the platform refuses a
+# memory cgroup) drops the exec connection, kills the session and can reboot,
+# so one runaway ffmpeg or numpy call loses the whole tick unpushed. Every Bash
+# tool command claude runs goes through this wrapper instead, capped so it
+# fails alone with ENOMEM / MemoryError and claude carries on. RLIMIT_DATA
+# rather than RLIMIT_AS, which ffmpeg's thread stacks and any JS runtime's
+# address-space reservations would trip; claude itself stays uncapped.
+TOOL_DATA_LIMIT_KB = 5 * 1024 * 1024
+TOOLCAP_PATH = "/tmp/slop-toolcap"
+_TOOLCAP = f'#!/bin/bash\nulimit -d {TOOL_DATA_LIMIT_KB}\nexec "${{SHELL:-/bin/bash}}" -c "$1"\n'
+
 
 def tick_command(prompt: str) -> list[str]:
-    """The shell one tick runs in the sprite: report for duty, then tick."""
+    """The shell one tick runs in the sprite: report for duty, write the tool
+    memory cap, then tick with claude pointed at it."""
+    cap, tmp = TOOLCAP_PATH, f"{TOOLCAP_PATH}.$$"
     return [
         "bash",
         "-lc",
-        f"echo {shlex.quote(SESSION_MARKER)} $$; slop-tick {shlex.quote(prompt)}",
+        f"echo {shlex.quote(SESSION_MARKER)} $$; "
+        f"printf %s {shlex.quote(_TOOLCAP)} > {tmp} && chmod +x {tmp} && mv -f {tmp} {cap} && "
+        f"CLAUDE_CODE_SHELL_PREFIX={cap} slop-tick {shlex.quote(prompt)}",
     ]
 
 
