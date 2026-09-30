@@ -167,6 +167,7 @@ def tick_once(
             break
         attached = sprites.attach(agent.sprite_id, sid)
         if session_id(attached.stdout) != sid:
+            notes.append("no session to reattach")
             break
         result = attached
         notes.append("reattached")

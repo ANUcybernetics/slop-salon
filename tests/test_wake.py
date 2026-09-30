@@ -181,6 +181,15 @@ def test_reattaching_follows_a_tick_through_a_second_drop(registry):
     assert report.ok and len(sprites.attached) == 2
 
 
+def test_a_dropped_tick_whose_session_died_says_so(registry):
+    config = load_config(registry)
+    sprites = FakeSprites({"lou": [DROPPED_MID_TICK]})
+    lines: list[str] = []
+    report = wake.run(config, sprites, only=["lou"], recreate_fn=lambda n: None, echo=lines.append)
+    assert report.statuses["lou"] == "fail(1)"
+    assert any("(no session to reattach)" in line for line in lines)
+
+
 def test_a_tick_that_failed_on_its_own_keeps_its_result_when_there_is_no_session(registry):
     config = load_config(registry)
     sprites = FakeSprites({"lou": [CONFLICT]})
