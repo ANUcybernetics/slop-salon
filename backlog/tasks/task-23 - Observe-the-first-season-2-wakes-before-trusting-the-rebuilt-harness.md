@@ -4,7 +4,7 @@ title: Observe the first season-2 wakes before trusting the rebuilt harness
 status: To Do
 assignee: []
 created_date: '2026-09-11 07:05'
-updated_date: '2026-09-30 03:37'
+updated_date: '2026-10-03 01:32'
 labels:
   - ops
   - season-2
@@ -97,4 +97,11 @@ key; account total is $20.99 of $300. #1 still owed a second clean wake.
 - Reproduced on a throwaway sprite: past ~8 GB (no swap) the exec drops with exactly \`connection closed\`/exit 1, the session then ends 143, and a second blowout rebooted the VM and left it on i/o timeout for ~60s (germaine was in that state after the 12:04 wake). Reattach arrives to \`session not found\`, which tick_once dropped without a note.
 - A memory cgroup is refused by the platform (\`+memory\` to subtree_control is EIO; cpu and pids enable fine). RLIMIT_AS would trip claude's own address-space reservations (VmData 2.3 GB idle, RSS 220 MB).
 - Fixed 215edb4: tick_command writes /tmp/slop-toolcap each tick and runs slop-tick with CLAUDE_CODE_SHELL_PREFIX pointing at it, so every Bash tool call runs under \`ulimit -d\` 5 GiB; claude itself is uncapped. Verified on mabel with 2.1.263: tools and hooks route through it, zsh kept, a 7864x2600 x264 encode passes, a runaway allocation raises MemoryError inside the tool call and claude carries on. 78d19d4 notes \`no session to reattach\` so a lost tick names itself. Canary \`slop wake --only mabel\` ok and pushed.
+
+2026-10-03, two red wakes since the tool cap, both `no session to reattach`: germaine 1 Oct 12:36 (69.2s) and rahel 3 Oct 06:59 (1223s). Neither left a commit.
+
+- germaine is not a memory blowout: the marker printed, but no transcript exists for that tick, so claude never got as far as a tool call. The VM dropped just after accepting the session; 69s is also exactly how long every exec against the wedged rahel took to return `connection closed`.
+- rahel's VM did not come back: `cold` for 5h, every exec (even `true`) hung or closed at 69s, `sprite sessions list` timed out, while the other sprites answered. Not the ~60s OOM reboot above. Disk ruled out (2% of 99G); the agents' own `sprite checkpoint`s (rahel v6-v12, made by the agents, not the harness) line up with good ticks, not failures. Recreated by hand (`slop recreate rahel`), which lost the dead tick's transcript.
+- The recreate exposed a silent pin failure: `claude install 2.1.263 --force` fetched the build but left the launcher on the current image's bundled 2.1.251 (~/.local/bin/claude -> sprite-agents/claude) and exited 0. lou and germaine, rebuilt since the image changed, were on 2.1.251 too; all nine are now on 2.1.263. Fixed f22919c: the pin step links the launcher and checks `claude --version`, so a pin that does not take fails the bootstrap.
+- Open: the cap was verified only on 2.1.263. If 2.1.251 ignores CLAUDE_CODE_SHELL_PREFIX, germaine and lou ran uncapped. Watching the 3 Oct 12:04 wake.
 <!-- SECTION:NOTES:END -->
