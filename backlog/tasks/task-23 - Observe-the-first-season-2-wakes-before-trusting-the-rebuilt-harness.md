@@ -4,7 +4,7 @@ title: Observe the first season-2 wakes before trusting the rebuilt harness
 status: To Do
 assignee: []
 created_date: '2026-09-11 07:05'
-updated_date: '2026-10-03 01:32'
+updated_date: '2026-10-03 03:15'
 labels:
   - ops
   - season-2
@@ -104,4 +104,6 @@ key; account total is $20.99 of $300. #1 still owed a second clean wake.
 - rahel's VM did not come back: `cold` for 5h, every exec (even `true`) hung or closed at 69s, `sprite sessions list` timed out, while the other sprites answered. Not the ~60s OOM reboot above. Disk ruled out (2% of 99G); the agents' own `sprite checkpoint`s (rahel v6-v12, made by the agents, not the harness) line up with good ticks, not failures. Recreated by hand (`slop recreate rahel`), which lost the dead tick's transcript.
 - The recreate exposed a silent pin failure: `claude install 2.1.263 --force` fetched the build but left the launcher on the current image's bundled 2.1.251 (~/.local/bin/claude -> sprite-agents/claude) and exited 0. lou and germaine, rebuilt since the image changed, were on 2.1.251 too; all nine are now on 2.1.263. Fixed f22919c: the pin step links the launcher and checks `claude --version`, so a pin that does not take fails the bootstrap.
 - Open: the cap was verified only on 2.1.263. If 2.1.251 ignores CLAUDE_CODE_SHELL_PREFIX, germaine and lou ran uncapped. Watching the 3 Oct 12:04 wake.
+
+2026-10-03 12:04 wake, the first with all nine on 2.1.263: all ok, rahel included (2235s, pushed 02:44Z from the recreated sprite).
 <!-- SECTION:NOTES:END -->
