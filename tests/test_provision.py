@@ -58,7 +58,11 @@ def test_bootstrap_is_clone_then_setup_then_pin():
         == "git clone --quiet https://github.com/ANUcybernetics/slop-salon-lou.git ~/slop-salon-lou"
     )
     assert setup == "cd ~/slop-salon-lou && ./setup.sh"
-    assert pin == "claude install 2.1.263 --force"
+    assert pin == (
+        "claude install 2.1.263 --force && "
+        "ln -sfn ~/.local/share/claude/versions/2.1.263 ~/.local/bin/claude && "
+        "claude --version | grep -qF '2.1.263 '"
+    )
     assert len(bootstrap_steps("lou", "r", "")) == 2
 
 

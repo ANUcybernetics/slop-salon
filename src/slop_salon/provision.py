@@ -129,9 +129,19 @@ def _build_setup_cmd(name: str) -> str:
 
 
 def _build_claude_pin_cmd(version: str) -> str:
-    """`claude install <version>` repoints the launcher at that native build;
-    `--force` reinstalls over whatever the image shipped."""
-    return f"claude install {shlex.quote(version)} --force"
+    """Install that native build and point the launcher at it, then prove it.
+
+    `claude install` fetches the build but leaves a launcher it did not create
+    alone, and the current sprite image links ~/.local/bin/claude to its own
+    bundled copy --- so on a fresh sprite the install alone exits 0 and the
+    old version keeps running. Hence the explicit link and the version check.
+    """
+    v = shlex.quote(version)
+    return (
+        f"claude install {v} --force && "
+        f"ln -sfn ~/.local/share/claude/versions/{v} ~/.local/bin/claude && "
+        f"claude --version | grep -qF {shlex.quote(version + ' ')}"
+    )
 
 
 def bootstrap_steps(name: str, repo: str, claude_version: str) -> list[tuple[str, str]]:
