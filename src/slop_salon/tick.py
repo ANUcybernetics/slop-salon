@@ -18,7 +18,7 @@ from pathlib import Path
 from .config import SUBSCRIPTION_ENV, Agent, Config, Provider
 
 # Generous next to a healthy turn, but a hung request must not eat the tick's
-# whole 2h cap.
+# whole cap.
 API_TIMEOUT_MS = "600000"
 # Any non-empty value: Claude Code refuses to start without a credential, and
 # the gateway replaces whatever is sent.

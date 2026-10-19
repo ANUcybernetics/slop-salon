@@ -14,7 +14,9 @@ ExecStartPre=/home/ben/.dotfiles/bin/wait-for-network
 WorkingDirectory=/home/ben/projects/slop-salon
 Environment=PATH=/home/ben/.local/bin:/usr/local/bin:/usr/bin:/bin
 ExecStart=/home/ben/.local/bin/mise exec -- uv run slop wake
-# Runs inline: firings cannot overlap at a 6h cadence with a 2h tick cap, and
-# it must fail *as this unit* for OnFailure= to see it. The cap backstops a
-# hung `sprite exec`, which has no timeout of its own.
-TimeoutStartSec=3h
+# Runs inline: systemd does not restart a oneshot that is still active, so
+# firings never overlap however long one runs, and it must fail *as this unit*
+# for OnFailure= to see it. The cap backstops a hung `sprite exec`, which has no
+# timeout of its own: generous, three rounds of the 4h tick cap, since nothing
+# waits on a wake.
+TimeoutStartSec=12h

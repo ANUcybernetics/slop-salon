@@ -45,7 +45,7 @@ account.
   model's credential, the Bluesky app password, `GH_TOKEN`,
   `REPLICATE_API_TOKEN`, and the salon (`SLOP_MODEL`, `SLOP_SALON`,
   `SLOP_SIBLINGS`, `SLOP_COLLECTIVE`). Values may not contain commas.
-  `slop-tick` pulls, runs `agent-run` once under a 2h cap, commits and pushes;
+  `slop-tick` pulls, runs `agent-run` once under a 4h cap, commits and pushes;
   git push auth is a credential helper reading `GH_TOKEN` from that environment.
   A codex tick first renders `AGENTS.md` from `CLAUDE.md` (`slop-prompt`, since
   codex has no `@` imports) and writes the Codex login for the life of the tick.

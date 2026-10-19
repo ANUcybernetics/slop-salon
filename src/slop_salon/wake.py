@@ -1,7 +1,7 @@
 """One wake: a tick at every live agent, a few at a time.
 
-Driven by `slop-wake.timer` on the admin box. Firings never overlap (a 2h tick
-cap against a 6h cadence), so there is no global slot bookkeeping and no
+Driven by `slop-wake.timer` on the admin box. Firings never overlap (systemd
+does not restart an active oneshot), so there is no global slot bookkeeping and no
 in-sprite lock; the only state carried between wakes is a per-agent count of
 consecutive wedges, kept so a second wedge in a row triggers a recreate. A
 wedge is a tick whose sprite never reported for duty, twice running --- see
