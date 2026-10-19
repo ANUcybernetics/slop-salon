@@ -20,7 +20,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .config import Agent, Config
+from .config import RUNNERS, Agent, Config
 from .sprites import ExecResult, SpriteExecutor
 from .tick import SESSION_MARKER, session_id, tick_command, tick_env, tick_output
 
@@ -34,10 +34,12 @@ PLATFORM_INCIDENT_THRESHOLD = 3
 # session that keeps dropping cannot hold the wake past the next firing.
 MAX_REATTACHES = 3
 
-# slop-tick prints these when `claude -p` fails but the tick still exits 0 so it
+# slop-tick prints these when the runner fails but the tick still exits 0 so it
 # can commit partial work; unsurfaced, an agent whose every tick errors reads
 # as healthy.
-_CLAUDE_ERROR_MARKERS = ("slop-tick: claude exited", "slop-tick: claude exceeded")
+_CLAUDE_ERROR_MARKERS = tuple(
+    f"slop-tick: {runner} {verb}" for runner in RUNNERS for verb in ("exited", "exceeded")
+)
 _ERROR_LINE = re.compile(r"error|fatal|rejected|exceeds|exceeded|traceback|exited", re.IGNORECASE)
 
 

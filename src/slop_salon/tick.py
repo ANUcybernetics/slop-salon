@@ -7,6 +7,7 @@ assembled here from the registry and the admin box's env, and handed to
 
 from __future__ import annotations
 
+import base64
 import os
 import re
 import shlex
@@ -14,7 +15,7 @@ import tomllib
 from collections.abc import Mapping
 from pathlib import Path
 
-from .config import Agent, Config
+from .config import SUBSCRIPTION_ENV, Agent, Config, Provider
 
 # Generous next to a healthy turn, but a hung request must not eat the tick's
 # whole 2h cap.
@@ -90,6 +91,36 @@ def _require(environ: Mapping[str, str], key: str) -> str:
     return value
 
 
+def _auth_env(provider: Provider, src: Mapping[str, str]) -> dict[str, str]:
+    """The variables that authorise the model, for the provider's route."""
+    if provider.auth == "subscription":
+        credential = _require(src, SUBSCRIPTION_ENV[provider.runner])
+        if provider.runner == "claude":
+            return {"CLAUDE_CODE_OAUTH_TOKEN": credential}
+        # Codex reads its login from a file, which slop-tick writes for the
+        # life of the tick. Base64 because the JSON has commas.
+        auth_json = Path(credential).expanduser().read_bytes()
+        return {"SLOP_CODEX_AUTH": base64.b64encode(auth_json).decode()}
+
+    if provider.auth == "connector":
+        token = CONNECTOR_PLACEHOLDER_TOKEN
+    else:
+        token = _require(src, provider.secret_env)
+    env = {
+        "ANTHROPIC_BASE_URL": provider.base_url,
+        "ANTHROPIC_AUTH_TOKEN": token,
+        # Explicitly empty, not merely absent, or Claude Code may fall back to
+        # an Anthropic login.
+        "ANTHROPIC_API_KEY": "",
+        "ANTHROPIC_MODEL": provider.model,
+        "ANTHROPIC_SMALL_FAST_MODEL": provider.model,
+        "API_TIMEOUT_MS": API_TIMEOUT_MS,
+    }
+    if provider.context_window:
+        env["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] = str(provider.context_window)
+    return env
+
+
 def tick_env(
     config: Config,
     agent: Agent,
@@ -105,32 +136,20 @@ def tick_env(
     """
     src = os.environ if environ is None else environ
     provider = config.provider_for(agent.name)
-
-    if provider.auth == "connector":
-        token = CONNECTOR_PLACEHOLDER_TOKEN
-    elif provider.auth == "secret_env":
-        token = _require(src, provider.secret_env)
-    else:
-        raise NotImplementedError(
-            f"provider {provider.name!r}: auth = 'credentials' is declared but not built"
-        )
-
     siblings = [config.agents[s].handle for s in agent.siblings]
     collective = [a.handle for a in config.agents.values()]
-    env = {
+    return {
         "AGENT_NAME": agent.name,
         "BSKY_HANDLE": agent.handle,
         "BSKY_PASSWORD": bsky_password(agent.name, secrets_path),
         "GH_TOKEN": _require(src, "SLOP_GH_TOKEN"),
         "REPLICATE_API_TOKEN": _require(src, "SLOP_REPLICATE_API_TOKEN"),
-        "ANTHROPIC_BASE_URL": provider.base_url,
-        "ANTHROPIC_AUTH_TOKEN": token,
-        # Explicitly empty, not merely absent, or Claude Code may fall back to
-        # an Anthropic login.
-        "ANTHROPIC_API_KEY": "",
-        "ANTHROPIC_MODEL": provider.model,
-        "ANTHROPIC_SMALL_FAST_MODEL": provider.model,
-        "API_TIMEOUT_MS": API_TIMEOUT_MS,
+        # Which CLI runs the tick, and the `agent-run` profile and model it
+        # runs under.
+        "SLOP_RUNNER": provider.runner,
+        "AGENT_PROFILE": provider.profile,
+        "AGENT_MODEL": provider.model,
+        **_auth_env(provider, src),
         # The provenance stamp `bsky` writes into every post, and the salon
         # boundary it enforces on follows, replies and quotes.
         "SLOP_MODEL": provider.model_id,
@@ -138,6 +157,3 @@ def tick_env(
         "SLOP_SIBLINGS": " ".join(siblings),
         "SLOP_COLLECTIVE": " ".join(collective),
     }
-    if provider.context_window:
-        env["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] = str(provider.context_window)
-    return env

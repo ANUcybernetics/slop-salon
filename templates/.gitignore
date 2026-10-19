@@ -1,6 +1,9 @@
 # Claude Code session state (transient; per-tick)
 .claude/
 
+# Rendered from CLAUDE.md before every codex tick (slop-prompt)
+AGENTS.md
+
 # Python
 __pycache__/
 *.pyc

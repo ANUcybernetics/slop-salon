@@ -105,12 +105,17 @@ def logs(
     sessions: int = typer.Option(1, "--sessions", "-n", help="Recent tick sessions, newest first"),
     config_path: str = CONFIG_OPTION,
 ):
-    """Print recent claude tick transcripts from the agent's sprite, rendered as turns."""
+    """Print recent tick transcripts from the agent's sprite, rendered as turns."""
     config = _config(config_path)
     agent = _agent(config, name)
-    # One JSONL transcript per session under ~/.claude/projects/<munged cwd>/.
+    # One JSONL transcript per session: claude's under
+    # ~/.claude/projects/<munged cwd>/, codex's under ~/.codex/sessions/<date>/.
+    if config.provider_for(name).runner == "codex":
+        transcripts = "~/.codex/sessions/*/*/*/rollout-*.jsonl"
+    else:
+        transcripts = f"~/.claude/projects/*slop-salon-{shlex.quote(name)}/*.jsonl"
     remote = (
-        f"ls -t ~/.claude/projects/*slop-salon-{shlex.quote(name)}/*.jsonl 2>/dev/null "
+        f"ls -t {transcripts} 2>/dev/null "
         f"| head -{max(1, sessions)} | while read -r f; do "
         f'echo "{_SLOPLOG_DELIM}$(basename "$f") '
         '$(date -u -r "$f" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)>>>"; '
@@ -161,6 +166,8 @@ def _render_session(header: str, raw_lines: list[str]) -> str:
 def _render_entry(obj: dict) -> list[str]:
     typ = obj.get("type")
     ts = _short_ts(obj.get("timestamp", ""))
+    if typ == "response_item":
+        return _render_codex_item(ts, obj.get("payload") or {})
     content = (obj.get("message") or {}).get("content")
     if typ == "user":
         if isinstance(content, str):
@@ -194,6 +201,31 @@ def _render_entry(obj: dict) -> list[str]:
     return []
 
 
+def _render_codex_item(ts: str, item: dict) -> list[str]:
+    """One item of a codex rollout, in the same shape as a claude turn."""
+    kind = item.get("type")
+    if kind == "message":
+        text = _oneline(_block_text(item))
+        if not text:
+            return []
+        if item.get("role") == "assistant":
+            return [f"{ts}  assistant  {_truncate(text, 800)}"]
+        if item.get("role") == "user":
+            return [f"{ts}  user       {_truncate(text, 500)}"]
+        return []
+    if kind == "reasoning":
+        think = _oneline(" ".join(part.get("text", "") for part in item.get("summary") or []))
+        return [f"{ts}    ~  {_truncate(think, 240)}"] if think else []
+    if kind in ("function_call", "custom_tool_call"):
+        args = _oneline(_compact(item.get("arguments", item.get("input"))))
+        return [f"{ts}    -> {item.get('name', '?')}({_truncate(args, 200)})"]
+    if kind in ("function_call_output", "custom_tool_call_output"):
+        output = item.get("output")
+        text = output if isinstance(output, str) else _block_text({"content": output})
+        return [f"{ts}    <- {_truncate(_oneline(text), 300)}"]
+    return []
+
+
 def _block_text(block: dict) -> str:
     content = block.get("content")
     if isinstance(content, str):
@@ -202,7 +234,7 @@ def _block_text(block: dict) -> str:
         return " ".join(
             part.get("text", "")
             for part in content
-            if isinstance(part, dict) and part.get("type") == "text"
+            if isinstance(part, dict) and part.get("type") in ("text", "input_text", "output_text")
         )
     return ""
 

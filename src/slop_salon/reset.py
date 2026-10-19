@@ -31,7 +31,7 @@ from .recreate import recreate
 from .sprites import SpriteExecutor, SpritesClient
 from .tools.bsky import DEFAULT_TIMEOUT, Session, create_session
 
-SEASON = 2
+SEASON = 3
 RESET_COMMIT_MESSAGE = f"Season {SEASON}: fresh start"
 MARKER_TEXT = (
     f"season {SEASON} starts here. everything before this post is an earlier season, "
@@ -221,7 +221,9 @@ def preflight_sprite(sprites: SpriteExecutor, sprite_id: str, repo_dir: str, str
     """Refuse a sprite mid-tick; with `strict`, also one holding unpushed commits
     (the tag would miss them)."""
     running = _sprite_sh(
-        sprites, sprite_id, "pgrep -f '[c]laude -p' || pgrep -f '[c]laude --print' || true"
+        sprites,
+        sprite_id,
+        "pgrep -f '[c]laude -p' || pgrep -f '[c]laude --print' || pgrep -f '[c]odex exec' || true",
     )
     if running.stdout.strip():
         raise SystemExit(f"{sprite_id}: a tick is running; wait for it before resetting")

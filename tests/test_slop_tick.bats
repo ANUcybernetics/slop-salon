@@ -15,13 +15,22 @@ setup() {
     git commit -q -m "seed"
 
     STUB_DIR="$(mktemp -d)"
-    # Stub claude: record argv, then write a tick artifact so a commit happens.
-    cat > "$STUB_DIR/claude" <<'EOF'
+    # Stub agent-run: record argv and what the agent could see, then write a
+    # tick artifact so a commit happens.
+    cat > "$STUB_DIR/agent-run" <<'EOF'
 #!/usr/bin/env bash
-printf '%s\n' "$@" > "$HOME/claude-argv.txt"
+printf '%s\n' "$@" > "$HOME/agent-argv.txt"
+cat "$HOME/.codex/auth.json" > "$HOME/auth-seen.txt" 2>/dev/null || true
+echo "${SLOP_CODEX_AUTH:-unset}" > "$HOME/auth-env-seen.txt"
 echo "tick-output" > "$PWD/tick-$$.txt"
 EOF
-    chmod +x "$STUB_DIR/claude"
+    chmod +x "$STUB_DIR/agent-run"
+
+    cat > "$STUB_DIR/slop-prompt" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "$HOME/slop-prompt-argv.txt"
+EOF
+    chmod +x "$STUB_DIR/slop-prompt"
 
     # Wrap git so push/pull are no-ops (no remote in test).
     REAL_GIT="$(command -v git)"
@@ -41,12 +50,19 @@ EOF
 
     export HOME="$TEST_HOME"
     export AGENT_NAME
+    export AGENT_PROFILE="claude-sub"
+    unset SLOP_RUNNER SLOP_CODEX_AUTH CLAUDE_CODE_SHELL_PREFIX
     export PATH="$STUB_DIR:$PATH"
     SLOP_TICK="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)/templates/slop-tick"
 }
 
 teardown() {
     rm -rf "$TEST_HOME" "$STUB_DIR"
+}
+
+codex_tick() {
+    export SLOP_RUNNER=codex AGENT_PROFILE=codex-sub
+    export SLOP_CODEX_AUTH="$(printf '{"auth_mode":"chatgpt"}' | base64 -w0)"
 }
 
 @test "fails without AGENT_NAME" {
@@ -62,34 +78,73 @@ teardown() {
     [[ "$output" == *"usage"* ]]
 }
 
-@test "runs claude -p with the prompt, the env's model and the denied tools, then commits and pushes" {
-    export ANTHROPIC_MODEL="z-ai/glm-5.3-flash@preset/x"
+@test "fails without AGENT_PROFILE" {
+    unset AGENT_PROFILE
+    run "$SLOP_TICK" "tick"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"AGENT_PROFILE"* ]]
+}
+
+@test "runs agent-run with the profile, the denied tools and the prompt, then commits and pushes" {
     run "$SLOP_TICK" "tick"
     [ "$status" -eq 0 ]
-    argv="$(cat "$HOME/claude-argv.txt")"
-    [[ "$argv" == *"-p"* ]]
-    [[ "$argv" == *"tick"* ]]
-    [[ "$argv" == *"--model"* ]]
-    [[ "$argv" == *"z-ai/glm-5.3-flash@preset/x"* ]]
-    [[ "$argv" == *"--disallowedTools"* ]]
-    [[ "$argv" == *"AskUserQuestion"* ]]
+    argv="$(cat "$HOME/agent-argv.txt")"
+    [[ "$argv" == *"--profile"$'\n'"claude-sub"* ]]
+    [[ "$argv" == *"--bypass-permissions"* ]]
+    [[ "$argv" == *"--claude-disallowed-tools"$'\n'"AskUserQuestion"* ]]
+    [ "$(tail -1 "$HOME/agent-argv.txt")" = "tick" ]
     git log --oneline | grep -q "session"
     grep -q "git pull" "$HOME/git-calls.txt"
     grep -q "git push" "$HOME/git-calls.txt"
-}
-
-@test "passes no --model when ANTHROPIC_MODEL is unset" {
-    unset ANTHROPIC_MODEL
-    run "$SLOP_TICK" "tick"
-    [ "$status" -eq 0 ]
-    ! grep -q -- "--model" "$HOME/claude-argv.txt"
 }
 
 @test "SLOP_DENIED_TOOLS overrides the denied-tool list" {
     export SLOP_DENIED_TOOLS="AskUserQuestion,WebSearch"
     run "$SLOP_TICK" "tick"
     [ "$status" -eq 0 ]
-    grep -q "AskUserQuestion,WebSearch" "$HOME/claude-argv.txt"
+    grep -q "AskUserQuestion,WebSearch" "$HOME/agent-argv.txt"
+}
+
+@test "a codex tick renders AGENTS.md and holds the login only for the tick" {
+    codex_tick
+    run "$SLOP_TICK" "tick"
+    [ "$status" -eq 0 ]
+    grep -q "agents-md" "$HOME/slop-prompt-argv.txt"
+    [ "$(cat "$HOME/auth-seen.txt")" = '{"auth_mode":"chatgpt"}' ]
+    [ "$(cat "$HOME/auth-env-seen.txt")" = "unset" ]
+    [ ! -e "$HOME/.codex/auth.json" ]
+    ! grep -q -- "--claude-disallowed-tools" "$HOME/agent-argv.txt"
+    [ "$(tail -1 "$HOME/agent-argv.txt")" = "tick" ]
+}
+
+@test "a codex tick runs under the memory cap when one is given" {
+    codex_tick
+    cat > "$STUB_DIR/toolcap" <<'EOF'
+#!/bin/bash
+echo capped > "$HOME/capped.txt"
+exec bash -c "$1"
+EOF
+    chmod +x "$STUB_DIR/toolcap"
+    export CLAUDE_CODE_SHELL_PREFIX="$STUB_DIR/toolcap"
+    run "$SLOP_TICK" "a prompt with 'quotes' and spaces"
+    [ "$status" -eq 0 ]
+    [ -f "$HOME/capped.txt" ]
+    [ "$(tail -1 "$HOME/agent-argv.txt")" = "a prompt with 'quotes' and spaces" ]
+}
+
+@test "a codex tick without its login fails before the agent runs" {
+    codex_tick
+    unset SLOP_CODEX_AUTH
+    run "$SLOP_TICK" "tick"
+    [ "$status" -ne 0 ]
+    [ ! -f "$HOME/agent-argv.txt" ]
+}
+
+@test "an unknown runner fails" {
+    export SLOP_RUNNER=gemini
+    run "$SLOP_TICK" "tick"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"unknown SLOP_RUNNER"* ]]
 }
 
 @test "commits pre-tick leftovers before pulling" {
@@ -101,18 +156,15 @@ teardown() {
 }
 
 @test "skips the commit when nothing changed" {
-    cat > "$STUB_DIR/claude" <<'EOF'
-#!/usr/bin/env bash
-exit 0
-EOF
+    printf '#!/usr/bin/env bash\nexit 0\n' > "$STUB_DIR/agent-run"
     run "$SLOP_TICK" "tick"
     [ "$status" -eq 0 ]
     [ "$(git log --oneline | wc -l)" -eq 1 ]
     ! grep -q "git push" "$HOME/git-calls.txt" 2>/dev/null
 }
 
-@test "a failed claude still commits partial work and says so on stderr" {
-    cat > "$STUB_DIR/claude" <<'EOF'
+@test "a failed agent still commits partial work and says so on stderr" {
+    cat > "$STUB_DIR/agent-run" <<'EOF'
 #!/usr/bin/env bash
 echo "partial" > "$PWD/partial.txt"
 exit 1

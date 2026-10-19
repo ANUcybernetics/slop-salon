@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import re
+import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -66,6 +68,31 @@ def test_bootstrap_is_clone_then_setup_then_pin():
     assert len(bootstrap_steps("lou", "r", "")) == 2
 
 
+def test_bootstrap_pins_codex_and_installs_the_dispatcher(tmp_path):
+    steps = dict(
+        bootstrap_steps(
+            "gert",
+            "r",
+            "",
+            "0.163.0",
+            {"~/.local/bin/agent-run": ("#!/bin/sh\necho 'it''s' \"$@\"\n", "755")},
+        )
+    )
+    assert steps["pin codex 0.163.0"] == (
+        "npm install --global --silent --prefix ~/.local/share/codex/0.163.0 "
+        "@openai/codex@0.163.0 && "
+        "ln -sfn ~/.local/share/codex/0.163.0/bin/codex ~/.local/bin/codex && "
+        "codex --version | grep -qxF 'codex-cli 0.163.0'"
+    )
+    # The install writes the file byte for byte, with its mode, whatever it quotes.
+    install = steps["install ~/.local/bin/agent-run"]
+    env = {**os.environ, "HOME": str(tmp_path)}
+    subprocess.run(["bash", "-c", install], check=True, env=env)
+    written = tmp_path / ".local" / "bin" / "agent-run"
+    assert written.read_text() == "#!/bin/sh\necho 'it''s' \"$@\"\n"
+    assert written.stat().st_mode & 0o777 == 0o755
+
+
 def test_bootstrap_sprite_labels_fences_then_runs_the_steps(registry):
     config = load_config(registry)
     sprites = MagicMock()
@@ -74,8 +101,24 @@ def test_bootstrap_sprite_labels_fences_then_runs_the_steps(registry):
     sprites.set_labels.assert_called_once_with("lou", ["slop", "salon=one"])
     sprites.set_network_policy.assert_called_once_with("lou", EGRESS_RULES)
     assert [c.args[1][2] for c in sprites.exec.call_args_list] == [
-        cmd for _, cmd in bootstrap_steps("lou", "ANUcybernetics/slop-salon-lou", "2.1.263")
+        cmd
+        for _, cmd in bootstrap_steps(
+            "lou",
+            "ANUcybernetics/slop-salon-lou",
+            "2.1.263",
+            "0.163.0",
+            prov.agent_run_files(),
+        )
     ]
+
+
+def test_bootstrap_fails_before_touching_the_sprite_without_the_dispatcher(registry, monkeypatch):
+    monkeypatch.setattr(prov, "AGENT_RUN_FILES", {"~/x": (registry.parent / "no-such-file", "755")})
+    config = load_config(registry)
+    sprites = MagicMock()
+    with pytest.raises(FileNotFoundError):
+        bootstrap_sprite(sprites, config, config.agents["lou"])
+    sprites.set_labels.assert_not_called()
 
 
 def test_bootstrap_sprite_raises_on_a_failed_step(registry):
@@ -96,6 +139,10 @@ def test_egress_rules_include_platform_defaults_and_the_tools_hosts():
         "api.replicate.com",
         "*.replicate.delivery",
         "downloads.claude.ai",
+        "api.anthropic.com",
+        "chatgpt.com",
+        "auth.openai.com",
+        "registry.npmjs.org",
     ):
         assert needed in domains
     assert all(r.get("action") == "allow" for r in EGRESS_RULES[1:])

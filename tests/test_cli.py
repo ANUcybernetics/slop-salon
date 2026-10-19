@@ -10,6 +10,7 @@ from typer.testing import CliRunner
 from slop_salon.cli import _render_transcripts, app
 from slop_salon.sprites import ExecResult
 from slop_salon.tick import SESSION_MARKER, tick_command
+from tests.conftest import use_provider
 
 runner = CliRunner()
 
@@ -141,3 +142,64 @@ def test_drift_reports_clean_and_drift(registry):
     assert result.exit_code == 0, result.output
     assert "SOUL.md         clean" in result.output
     assert "CLAUDE.md       drift (+1/-" in result.output
+
+
+def test_logs_reads_and_renders_a_codex_agents_rollouts(registry):
+    use_provider(registry, "two", "luna")
+    rollout = "\n".join(
+        [
+            "<<<SLOPLOG rollout-2026-10-21T00-00-00-01a1.jsonl 2026-10-21T00:10:00Z>>>",
+            json.dumps({"type": "session_meta", "payload": {"id": "x"}}),
+            json.dumps(
+                {
+                    "timestamp": "2026-10-21T00:00:01.000Z",
+                    "type": "response_item",
+                    "payload": {
+                        "type": "message",
+                        "role": "user",
+                        "content": [{"type": "input_text", "text": "tick"}],
+                    },
+                }
+            ),
+            json.dumps(
+                {
+                    "timestamp": "2026-10-21T00:00:02.000Z",
+                    "type": "response_item",
+                    "payload": {
+                        "type": "function_call",
+                        "name": "exec_command",
+                        "arguments": '{"cmd":"bsky timeline"}',
+                    },
+                }
+            ),
+            json.dumps(
+                {
+                    "timestamp": "2026-10-21T00:00:03.000Z",
+                    "type": "response_item",
+                    "payload": {"type": "function_call_output", "output": "two posts"},
+                }
+            ),
+            json.dumps(
+                {
+                    "timestamp": "2026-10-21T00:00:04.000Z",
+                    "type": "response_item",
+                    "payload": {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": "Made a study."}],
+                    },
+                }
+            ),
+        ]
+    )
+    with patch("slop_salon.cli.SpritesClient") as mock_class:
+        instance = MagicMock()
+        instance.exec.return_value = ExecResult(stdout=rollout, stderr="", exit_code=0)
+        mock_class.return_value = instance
+        result = runner.invoke(app, ["logs", "gert"])
+    assert result.exit_code == 0, result.output
+    assert "~/.codex/sessions/" in instance.exec.call_args.args[1][2]
+    assert "00:00:01  user       tick" in result.output
+    assert '-> exec_command({"cmd":"bsky timeline"})' in result.output
+    assert "<- two posts" in result.output
+    assert "assistant  Made a study." in result.output

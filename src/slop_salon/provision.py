@@ -1,12 +1,14 @@
 """Provisioning: the agent repo is the source, the sprite is a cache built from it.
 
-A sprite is create + clone + `setup.sh`, and nothing else; `recreate` runs the
-same `bootstrap_sprite`. The bash that runs inside the sprite is built by pure
+A sprite is create + clone + `setup.sh` + the pinned runners and the
+`agent-run` dispatcher, and nothing else; `recreate` runs the same
+`bootstrap_sprite`. The bash that runs inside the sprite is built by pure
 `_build_*` functions so each is testable on its own.
 """
 
 from __future__ import annotations
 
+import base64
 import os
 import shlex
 import subprocess
@@ -28,6 +30,13 @@ EGRESS_RULES: list[dict[str, str]] = [
         {"domain": d, "action": "allow"}
         for d in (
             "api.sprites.dev",
+            # The subscription runners: Claude Code's API, and Codex's
+            # ChatGPT backend and the token refresh it calls.
+            "api.anthropic.com",
+            "chatgpt.com",
+            "*.chatgpt.com",
+            "auth.openai.com",
+            "api.openai.com",
             # Bluesky: auth entry point, the PDS shards, the AppView, blobs, video.
             "bsky.social",
             "*.bsky.network",
@@ -39,10 +48,11 @@ EGRESS_RULES: list[dict[str, str]] = [
             "*.replicate.delivery",
             "replicate.delivery",
             # Installers and system packages. `claude install` fetches its
-            # native build from downloads.claude.ai.
+            # native build from downloads.claude.ai, the codex pin from npm.
             "downloads.claude.ai",
             "claude.ai",
             "*.claude.ai",
+            "registry.npmjs.org",
             "astral.sh",
             "*.astral.sh",
             "archive.ubuntu.com",
@@ -144,20 +154,77 @@ def _build_claude_pin_cmd(version: str) -> str:
     )
 
 
-def bootstrap_steps(name: str, repo: str, claude_version: str) -> list[tuple[str, str]]:
+def _build_codex_pin_cmd(version: str) -> str:
+    """Install that codex release in its own prefix, link the launcher at it
+    (the sprite image ships its own codex there), then prove it."""
+    v = shlex.quote(version)
+    prefix = f"~/.local/share/codex/{v}"
+    return (
+        f"npm install --global --silent --prefix {prefix} @openai/codex@{v} && "
+        f"ln -sfn {prefix}/bin/codex ~/.local/bin/codex && "
+        f"codex --version | grep -qxF {shlex.quote('codex-cli ' + version)}"
+    )
+
+
+def _build_install_file_cmd(dest: str, content: str, mode: str) -> str:
+    """Write `content` to `dest` atomically. Base64 keeps any quoting in the
+    file out of the shell."""
+    encoded = base64.b64encode(content.encode()).decode()
+    return (
+        f"mkdir -p $(dirname {dest}) && "
+        f"echo {encoded} | base64 -d > {dest}.tmp && chmod {mode} {dest}.tmp && "
+        f"mv -f {dest}.tmp {dest}"
+    )
+
+
+# The headless-agent dispatcher `slop-tick` runs, and its profile registry,
+# copied from the admin box's dotfiles at bootstrap like a version pin.
+AGENT_RUN_FILES = {
+    "~/.local/bin/agent-run": (Path("~/.dotfiles/bin/agent-run"), "755"),
+    "~/.config/agent-run/profiles.toml": (Path("~/.dotfiles/agent-run/profiles.toml"), "644"),
+}
+
+
+def agent_run_files() -> dict[str, tuple[str, str]]:
+    """dest -> (content, mode) for the dispatcher. Raises on the admin box if a
+    source is missing, so call it before anything destructive."""
+    return {
+        dest: (source.expanduser().read_text(), mode)
+        for dest, (source, mode) in AGENT_RUN_FILES.items()
+    }
+
+
+def bootstrap_steps(
+    name: str,
+    repo: str,
+    claude_version: str,
+    codex_version: str = "",
+    installs: dict[str, tuple[str, str]] | None = None,
+) -> list[tuple[str, str]]:
     """(label, bash) pairs that turn an empty sprite into a ticking one."""
     steps = [("clone repo", _build_clone_cmd(name, repo)), ("run setup.sh", _build_setup_cmd(name))]
     if claude_version:
         steps.append((f"pin claude {claude_version}", _build_claude_pin_cmd(claude_version)))
+    if codex_version:
+        steps.append((f"pin codex {codex_version}", _build_codex_pin_cmd(codex_version)))
+    for dest, (content, mode) in (installs or {}).items():
+        steps.append((f"install {dest}", _build_install_file_cmd(dest, content, mode)))
     return steps
 
 
 def bootstrap_sprite(sprites: SpritesClient, config: Config, agent: Agent) -> None:
     """Label, fence and populate a freshly created sprite. Shared by `new` and
     `recreate`, so a rebuilt sprite is byte-for-byte a fresh one."""
+    steps = bootstrap_steps(
+        agent.name,
+        agent.github_repo,
+        config.claude_version,
+        config.codex_version,
+        agent_run_files(),
+    )
     sprites.set_labels(agent.sprite_id, [AGENT_LABEL, f"salon={agent.salon}"])
     sprites.set_network_policy(agent.sprite_id, EGRESS_RULES)
-    for label, command in bootstrap_steps(agent.name, agent.github_repo, config.claude_version):
+    for label, command in steps:
         typer.echo(f"  -> {label}")
         result = sprites.exec(agent.sprite_id, ["bash", "-lc", command])
         if result.exit_code != 0:
@@ -183,6 +250,7 @@ def provision_agent(
     from .tick import tick_env
 
     tick_env(config, agent)
+    agent_run_files()
     gh_token = os.environ["SLOP_GH_TOKEN"]
     files = build_template_files(config, agent, templates_dir, souls_dir)
 

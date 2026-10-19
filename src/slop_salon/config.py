@@ -7,22 +7,28 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
-AUTH_MODES = ("connector", "secret_env", "credentials")
+RUNNERS = ("claude", "codex")
+AUTH_MODES = ("connector", "secret_env", "subscription")
+# The admin env var each runner's subscription credential is read from.
+SUBSCRIPTION_ENV = {"claude": "SLOP_CLAUDE_OAUTH_TOKEN", "codex": "SLOP_CODEX_AUTH_PATH"}
 
 
 @dataclass(frozen=True)
 class Provider:
-    """Where an agent's thinking comes from: an endpoint, a model, an auth mode.
+    """Where an agent's thinking comes from: a runner, a model, an auth mode.
 
     `connector` sends a placeholder token that the sprites.dev gateway
     overrides with the org's stored key. `secret_env` names the admin-side env
-    var `slop wake` passes as the bearer token at tick time. `credentials` is
-    reserved for a subscription OAuth profile and is not implemented.
+    var `slop wake` passes as the bearer token at tick time. Both reach an
+    Anthropic-compatible `base_url` through the claude runner. `subscription`
+    runs the runner on Ben's own plan, with the credential named in
+    `SUBSCRIPTION_ENV` passed at tick time.
     """
 
     name: str
-    base_url: str
     model: str
+    runner: str = "claude"
+    base_url: str = ""
     auth: str = "connector"
     secret_env: str = ""
     context_window: int = 0
@@ -31,6 +37,12 @@ class Provider:
     def model_id(self) -> str:
         """The model without its OpenRouter preset suffix --- the provenance stamp."""
         return self.model.split("@", 1)[0]
+
+    @property
+    def profile(self) -> str:
+        """The `agent-run` profile the tick runs under: the runner's subscription
+        route, or `claude-api`, which inherits the ANTHROPIC_* the tick sets."""
+        return f"{self.runner}-sub" if self.auth == "subscription" else "claude-api"
 
 
 @dataclass(frozen=True)
@@ -74,6 +86,7 @@ class Config:
     souls: dict[str, Soul] = field(default_factory=dict)
     default_provider: str = ""
     claude_version: str = ""
+    codex_version: str = ""
 
     def provider_for(self, agent_name: str) -> Provider:
         """The agent's own `provider`, then its salon's, then `default_provider`."""
@@ -92,9 +105,11 @@ class Config:
 
 
 def _parse_provider(name: str, fields: dict) -> Provider:
-    for key in ("base_url", "model"):
-        if not fields.get(key):
-            raise ValueError(f"provider {name!r}: `{key}` is required")
+    if not fields.get("model"):
+        raise ValueError(f"provider {name!r}: `model` is required")
+    runner = fields.get("runner", "claude")
+    if runner not in RUNNERS:
+        raise ValueError(f"provider {name!r}: unknown runner {runner!r} (want one of {RUNNERS})")
     auth = fields.get("auth", "connector")
     if auth not in AUTH_MODES:
         raise ValueError(f"provider {name!r}: unknown auth {auth!r} (want one of {AUTH_MODES})")
@@ -103,10 +118,19 @@ def _parse_provider(name: str, fields: dict) -> Provider:
         raise ValueError(
             f"provider {name!r}: `secret_env` is required by, and only by, auth = 'secret_env'"
         )
+    base_url = fields.get("base_url", "")
+    if (auth == "subscription") == bool(base_url):
+        raise ValueError(
+            f"provider {name!r}: `base_url` is required by every auth but 'subscription', "
+            "which talks to the runner's own service"
+        )
+    if runner == "codex" and auth != "subscription":
+        raise ValueError(f"provider {name!r}: the codex runner only has auth = 'subscription'")
     return Provider(
         name=name,
-        base_url=fields["base_url"].rstrip("/"),
         model=fields["model"],
+        runner=runner,
+        base_url=base_url.rstrip("/"),
         auth=auth,
         secret_env=secret_env,
         context_window=int(fields.get("context_window", 0)),
@@ -179,6 +203,7 @@ def load_config(path: Path | str = "slop_salon.toml") -> Config:
         souls=souls,
         default_provider=default_provider,
         claude_version=data.get("claude_version", ""),
+        codex_version=data.get("codex_version", ""),
     )
 
 

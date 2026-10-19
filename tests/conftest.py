@@ -6,6 +6,7 @@ import pytest
 
 REGISTRY = """
 claude_version = "2.1.263"
+codex_version = "0.163.0"
 default_provider = "gw"
 
 [providers.gw]
@@ -19,6 +20,16 @@ base_url = "https://openrouter.ai/api/"
 model = "meta/muse-spark-1.3-contributor"
 auth = "secret_env"
 secret_env = "TEST_OPENROUTER_KEY"
+
+[providers.haiku]
+runner = "claude"
+model = "claude-haiku-5-5"
+auth = "subscription"
+
+[providers.luna]
+runner = "codex"
+model = "gpt-6-luna"
+auth = "subscription"
 
 [salons.one]
 label = "One"
@@ -85,6 +96,17 @@ def _isolate_state(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "xdg_state"))
 
 
+def use_provider(registry, salon: str, provider: str) -> None:
+    """Point `salon` at `provider` in the test registry."""
+    text = registry.read_text()
+    block = f"[salons.{salon}]\n"
+    head, tail = text.split(block, 1)
+    tail = tail.replace('provider = "gw"', f'provider = "{provider}"', 1).replace(
+        'provider = "direct"', f'provider = "{provider}"', 1
+    )
+    registry.write_text(head + block + tail)
+
+
 @pytest.fixture
 def registry(tmp_path, monkeypatch):
     """A two-salon registry with secrets and templates, as the cwd."""
@@ -105,5 +127,19 @@ def registry(tmp_path, monkeypatch):
     monkeypatch.setenv("SLOP_REPLICATE_API_TOKEN", "r8_test")
     monkeypatch.setenv("TEST_OPENROUTER_KEY", "sk-or-test")
     monkeypatch.setenv("SPRITES_API_TOKEN", "sprites-test")
+    monkeypatch.setenv("SLOP_CLAUDE_OAUTH_TOKEN", "sk-ant-oat-test")
+    codex_auth = tmp_path / "codex-auth.json"
+    codex_auth.write_text('{"auth_mode": "chatgpt", "tokens": {}}')
+    monkeypatch.setenv("SLOP_CODEX_AUTH_PATH", str(codex_auth))
+    # The dispatcher is copied from the admin box's dotfiles; stand it in here.
+    (tmp_path / "agent-run").write_text("#!/usr/bin/env -S uv run --script\n")
+    (tmp_path / "profiles.toml").write_text("version = 1\n")
+    monkeypatch.setattr(
+        "slop_salon.provision.AGENT_RUN_FILES",
+        {
+            "~/.local/bin/agent-run": (tmp_path / "agent-run", "755"),
+            "~/.config/agent-run/profiles.toml": (tmp_path / "profiles.toml", "644"),
+        },
+    )
     monkeypatch.chdir(tmp_path)
     return tmp_path / "slop_salon.toml"

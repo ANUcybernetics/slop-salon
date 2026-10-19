@@ -31,6 +31,15 @@ def test_provider_precedence_is_agent_then_salon_then_default(registry):
     assert config.claude_version == "2.1.263"
 
 
+def test_the_dispatcher_profile_follows_runner_and_auth(registry):
+    providers = load_config(registry).providers
+    assert providers["gw"].profile == "claude-api"
+    assert providers["direct"].profile == "claude-api"
+    assert providers["haiku"].profile == "claude-sub"
+    assert providers["luna"].profile == "codex-sub"
+    assert providers["luna"].base_url == ""
+
+
 def test_model_id_drops_the_preset_suffix(registry):
     config = load_config(registry)
     assert config.provider_for("lou").model_id == "z-ai/glm-5.3-flash"
@@ -42,6 +51,10 @@ def test_model_id_drops_the_preset_suffix(registry):
     ("snippet", "expected"),
     [
         ('[providers.x]\nmodel = "m"\n', "`base_url` is required"),
+        ('[providers.x]\nbase_url = "u"\n', "`model` is required"),
+        ('[providers.x]\nmodel = "m"\nrunner = "gemini"\n', "unknown runner"),
+        ('[providers.x]\nbase_url = "u"\nmodel = "m"\nauth = "subscription"\n', "`base_url`"),
+        ('[providers.x]\nbase_url = "u"\nmodel = "m"\nrunner = "codex"\n', "codex runner"),
         ('[providers.x]\nbase_url = "u"\nmodel = "m"\nauth = "magic"\n', "unknown auth"),
         ('[providers.x]\nbase_url = "u"\nmodel = "m"\nauth = "secret_env"\n', "secret_env"),
         ('[providers.x]\nbase_url = "u"\nmodel = "m"\nsecret_env = "K"\n', "secret_env"),
@@ -107,6 +120,13 @@ def test_real_registry_souls_and_providers_exist():
         assert (REAL_REGISTRY.parent / "souls" / f"{soul}.md").is_file()
     for name in config.agents:
         provider = config.provider_for(name)
-        assert provider.auth == "connector"
-        assert provider.base_url.startswith("https://api.sprites.dev/v1/gateway/")
+        if provider.auth == "connector":
+            assert provider.base_url.startswith("https://api.sprites.dev/v1/gateway/")
     assert config.claude_version
+    assert config.codex_version
+
+
+def test_real_registry_salons_each_run_a_different_model():
+    config = load_config(REAL_REGISTRY)
+    models = [config.providers[s.provider].model for s in config.salons.values()]
+    assert len(set(models)) == len(models)

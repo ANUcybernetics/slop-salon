@@ -28,6 +28,8 @@ def test_classify_names_the_four_shapes():
     assert wake.classify(OK) == "ok"
     assert wake.classify(WEDGE) == "wedge"
     assert wake.classify(CLAUDE_ERR) == "claude-err"
+    codex_err = ExecResult(stdout=UP, stderr="slop-tick: codex exceeded 2h, killed\n", exit_code=0)
+    assert wake.classify(codex_err) == "claude-err"
     assert wake.classify(CONFLICT) == "fail(128)"
 
 

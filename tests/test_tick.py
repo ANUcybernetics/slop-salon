@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import os
 import subprocess
 
@@ -16,6 +17,7 @@ from slop_salon.tick import (
     tick_env,
     tick_output,
 )
+from tests.conftest import use_provider
 
 
 def test_connector_provider_sends_a_placeholder_token(registry):
@@ -78,12 +80,55 @@ def test_a_missing_bluesky_password_is_named(registry):
         tick_env(config, config.agents["lou"])
 
 
-def test_credentials_auth_is_declared_but_not_built(registry):
-    text = registry.read_text().replace('auth = "connector"', 'auth = "credentials"')
-    registry.write_text(text)
+def test_connector_ticks_run_claude_under_the_api_profile(registry):
+    env = tick_env(load_config(registry), load_config(registry).agents["lou"])
+    assert env["SLOP_RUNNER"] == "claude"
+    assert env["AGENT_PROFILE"] == "claude-api"
+    assert env["AGENT_MODEL"] == "z-ai/glm-5.3-flash@preset/slop-glm-flash"
+
+
+def test_a_claude_subscription_passes_the_oauth_token_and_no_endpoint(registry):
+    use_provider(registry, "one", "haiku")
     config = load_config(registry)
-    with pytest.raises(NotImplementedError):
-        tick_env(config, config.agents["lou"])
+    env = tick_env(config, config.agents["lou"])
+    assert env["SLOP_RUNNER"] == "claude"
+    assert env["AGENT_PROFILE"] == "claude-sub"
+    assert env["AGENT_MODEL"] == "claude-haiku-5-5"
+    assert env["SLOP_MODEL"] == "claude-haiku-5-5"
+    assert env["CLAUDE_CODE_OAUTH_TOKEN"] == "sk-ant-oat-test"
+    assert not any(k.startswith("ANTHROPIC_") for k in env)
+
+
+def test_a_codex_subscription_passes_the_login_file_comma_free(registry):
+    use_provider(registry, "two", "luna")
+    config = load_config(registry)
+    env = tick_env(config, config.agents["gert"])
+    assert env["SLOP_RUNNER"] == "codex"
+    assert env["AGENT_PROFILE"] == "codex-sub"
+    assert env["AGENT_MODEL"] == "gpt-6-luna"
+    assert (
+        base64.b64decode(env["SLOP_CODEX_AUTH"])
+        == (registry.parent / "codex-auth.json").read_bytes()
+    )
+    assert not any("," in v for v in env.values())
+    assert not any(k.startswith("ANTHROPIC_") for k in env)
+
+
+@pytest.mark.parametrize(
+    ("salon", "provider", "agent", "missing"),
+    [
+        ("one", "haiku", "lou", "SLOP_CLAUDE_OAUTH_TOKEN"),
+        ("two", "luna", "gert", "SLOP_CODEX_AUTH_PATH"),
+    ],
+)
+def test_a_missing_subscription_credential_is_named(
+    registry, monkeypatch, salon, provider, agent, missing
+):
+    use_provider(registry, salon, provider)
+    monkeypatch.delenv(missing)
+    config = load_config(registry)
+    with pytest.raises(RuntimeError, match=missing):
+        tick_env(config, config.agents[agent])
 
 
 def test_the_tick_shell_reports_its_own_pid_as_the_session_id(tmp_path):

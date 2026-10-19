@@ -3,9 +3,10 @@
 #
 # Called by `slop wake` (with the prompt "tick") or `slop talk` (with an admin
 # prompt), via `sprite exec`. Everything it needs arrives in the environment:
-# AGENT_NAME, the ANTHROPIC_* endpoint and model, and the tick's secrets
-# (BSKY_PASSWORD, GH_TOKEN, REPLICATE_API_TOKEN). Nothing is read from disk but
-# this repo. Stateless: pull, run `claude -p` once, commit and push.
+# AGENT_NAME, the runner, `agent-run` profile and model, the model's
+# credential, and the tick's secrets (BSKY_PASSWORD, GH_TOKEN,
+# REPLICATE_API_TOKEN). Nothing is read from disk but this repo. Stateless:
+# pull, run the agent once, commit and push.
 set -euo pipefail
 
 : "${AGENT_NAME:?AGENT_NAME not set}"
@@ -24,19 +25,47 @@ if ! git diff --quiet HEAD || [[ -n "$(git ls-files --others --exclude-standard)
 fi
 git pull --rebase --quiet
 
+# `agent-run` owns the auth boundary and spells the call for the runner; its
+# options are per-runner, and it refuses one meant for the other.
+RUNNER="${SLOP_RUNNER:-claude}"
+RUN=(agent-run --profile "${AGENT_PROFILE:?AGENT_PROFILE not set}" --cwd "$PWD" --bypass-permissions)
+case "$RUNNER" in
+claude)
+  # AskUserQuestion is taken away rather than discouraged: nobody is there to
+  # answer.
+  RUN+=(--claude-disallowed-tools "${SLOP_DENIED_TOOLS:-AskUserQuestion}" "$1")
+  ;;
+codex)
+  # Codex reads AGENTS.md and has no `@` imports, so inline them (gitignored,
+  # rewritten every tick). A stale one beats no tick.
+  slop-prompt agents-md --root "$PWD" || echo "slop-tick: slop-prompt failed, AGENTS.md may be stale" >&2
+  # Codex logs in from a file; it exists only for the life of this tick.
+  mkdir -p "$HOME/.codex"
+  (umask 077 && base64 -d <<<"${SLOP_CODEX_AUTH:?SLOP_CODEX_AUTH not set}" >"$HOME/.codex/auth.json")
+  trap 'rm -f "$HOME/.codex/auth.json"' EXIT
+  unset SLOP_CODEX_AUTH
+  RUN+=("$1")
+  # CLAUDE_CODE_SHELL_PREFIX caps each claude tool command's memory; codex has
+  # no such hook, so the cap goes on codex and everything it spawns.
+  if [[ -n "${CLAUDE_CODE_SHELL_PREFIX:-}" ]]; then
+    RUN=("$CLAUDE_CODE_SHELL_PREFIX" "$(printf '%q ' "${RUN[@]}")")
+  fi
+  ;;
+*)
+  echo "slop-tick: unknown SLOP_RUNNER '$RUNNER' (want claude or codex)" >&2
+  exit 1
+  ;;
+esac
+
 # A hard wall-clock cap so a wedged tick cannot stall the wake driver; on hit
-# the run is killed (timeout exit 124). AskUserQuestion is taken away rather
-# than discouraged: nobody is there to answer.
+# the run is killed (timeout exit 124).
 TICK_TIMEOUT="${SLOP_TICK_TIMEOUT:-2h}"
 rc=0
-timeout --kill-after=15 "$TICK_TIMEOUT" \
-  claude -p "$1" \
-  ${ANTHROPIC_MODEL:+--model "$ANTHROPIC_MODEL"} \
-  --disallowedTools "${SLOP_DENIED_TOOLS:-AskUserQuestion}" || rc=$?
+timeout --kill-after=15 "$TICK_TIMEOUT" "${RUN[@]}" || rc=$?
 if [[ $rc -eq 124 ]]; then
-  echo "slop-tick: claude exceeded ${TICK_TIMEOUT}, killed" >&2
+  echo "slop-tick: $RUNNER exceeded ${TICK_TIMEOUT}, killed" >&2
 elif [[ $rc -ne 0 ]]; then
-  echo "slop-tick: claude exited $rc" >&2
+  echo "slop-tick: $RUNNER exited $rc" >&2
 fi
 
 # Reap orphan BashTool shells claude leaves behind (they are session leaders).

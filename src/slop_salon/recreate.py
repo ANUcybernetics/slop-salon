@@ -14,7 +14,7 @@ from pathlib import Path
 import typer
 
 from .config import load_config
-from .provision import bootstrap_sprite
+from .provision import agent_run_files, bootstrap_sprite
 from .sprites import AGENT_LABEL, SpritesClient
 
 
@@ -34,6 +34,7 @@ def recreate(
     from .tick import tick_env
 
     tick_env(config, agent)
+    agent_run_files()
     sprites = sprites or SpritesClient()
 
     typer.echo(f"[1/3] Destroying sprite {agent.sprite_id!r}")
@@ -45,6 +46,6 @@ def recreate(
     typer.echo(f"[2/3] Creating sprite {agent.sprite_id!r}")
     sprites.create_sprite(agent.sprite_id, labels=[AGENT_LABEL, f"salon={agent.salon}"])
 
-    typer.echo("[3/3] Bootstrapping: policy, clone, setup.sh, claude pin")
+    typer.echo("[3/3] Bootstrapping: policy, clone, setup.sh, runner pins, agent-run")
     bootstrap_sprite(sprites, config, agent)
     typer.echo(f"Recreated {name}.")
