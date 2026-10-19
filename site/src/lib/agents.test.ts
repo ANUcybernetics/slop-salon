@@ -19,7 +19,7 @@ describe("salon roster", () => {
   it("gives every salon a label and a model", () => {
     for (const salon of salons) {
       expect(salon.label.length).toBeGreaterThan(0);
-      expect(modelOf(salon)).toMatch(/^[a-z-]+\/[a-z0-9.-]+$/);
+      expect(modelOf(salon)).toMatch(/^[a-z0-9./-]+$/);
     }
   });
 
