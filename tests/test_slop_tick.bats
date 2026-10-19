@@ -140,6 +140,13 @@ EOF
     [ ! -f "$HOME/agent-argv.txt" ]
 }
 
+@test "the agent runs with stdin closed, so codex never waits on it" {
+    printf '#!/usr/bin/env bash\nif read -r -t 2 line; then echo "read: $line" > "$HOME/stdin.txt"; else echo eof > "$HOME/stdin.txt"; fi\n' > "$STUB_DIR/agent-run"
+    run "$SLOP_TICK" "tick" < <(echo leaked; sleep 5)
+    [ "$status" -eq 0 ]
+    [ "$(cat "$HOME/stdin.txt")" = "eof" ]
+}
+
 @test "an unknown runner fails" {
     export SLOP_RUNNER=gemini
     run "$SLOP_TICK" "tick"

@@ -57,11 +57,12 @@ codex)
   ;;
 esac
 
-# A hard wall-clock cap so a wedged tick cannot stall the wake driver; on hit
-# the run is killed (timeout exit 124).
-TICK_TIMEOUT="${SLOP_TICK_TIMEOUT:-2h}"
+# A hard wall-clock cap so a wedged tick cannot stall the wake driver, set well
+# past any healthy tick: nobody waits on one finishing. On hit the run is killed (timeout exit 124). Stdin is closed: `sprite exec` leaves it
+# open, and codex waits on an open stdin for more prompt until the cap.
+TICK_TIMEOUT="${SLOP_TICK_TIMEOUT:-4h}"
 rc=0
-timeout --kill-after=15 "$TICK_TIMEOUT" "${RUN[@]}" || rc=$?
+timeout --kill-after=15 "$TICK_TIMEOUT" "${RUN[@]}" </dev/null || rc=$?
 if [[ $rc -eq 124 ]]; then
   echo "slop-tick: $RUNNER exceeded ${TICK_TIMEOUT}, killed" >&2
 elif [[ $rc -ne 0 ]]; then
