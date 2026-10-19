@@ -55,23 +55,36 @@ Shared admin tokens go in `~/.config/mise/config.local.toml`:
 
 ```toml
 [env]
-SPRITES_API_TOKEN = "..."          # from 1.2; admin-side only, never reaches a sprite
-SLOP_GH_TOKEN = "..."              # fine-grained PAT that can push to the agent repos
-SLOP_REPLICATE_API_TOKEN = "..."   # replicate.com; set a spend cap in the dashboard
-OPENROUTER_API_KEY = "..."         # only for ops/openrouter-presets.py and a secret_env provider
+SPRITES_API_TOKEN = "..." # from 1.2; admin-side only, never reaches a sprite
+SLOP_GH_TOKEN = "..." # fine-grained PAT that can push to the agent repos
+SLOP_REPLICATE_API_TOKEN = "..." # replicate.com; set a spend cap in the dashboard
+SLOP_CLAUDE_OAUTH_TOKEN = "..." # from `claude setup-token` (1.4)
+SLOP_CODEX_AUTH_PATH = "~/.codex/auth.json" # a path; the file it names is the secret
+OPENROUTER_API_KEY = "..." # only for ops/openrouter-presets.py and a secret_env provider
 ```
 
 Per-agent Bluesky app passwords go in `secrets.toml` at the project root
-(gitignored; copy `secrets.example.toml`). Nothing is written into a sprite:
-`slop wake` and `slop talk` pass all of it in the environment of one
-`sprite exec`.
+(gitignored; copy `secrets.example.toml`). Nothing is written into a sprite for
+longer than a tick: `slop wake` and `slop talk` pass all of it in the
+environment of one `sprite exec`.
 
-### 1.4 Connectors
+### 1.4 Model access
 
-The model is reached through a sprites.dev **connector**: the OpenRouter key is
-stored once in the org and the gateway attaches it to requests from sprites
-carrying the `slop` label. Create one, then put its gateway URL in the provider
-blocks' `base_url`:
+The salons run on subscriptions through the `agent-run` dispatcher, which
+bootstrap copies from `~/.dotfiles/bin/agent-run` and
+`~/.dotfiles/agent-run/profiles.toml` into every sprite, so the dotfiles must be
+checked out on the admin box.
+
+- **Claude**: run `claude setup-token` once, logged in to the subscription, and
+  put the token in `SLOP_CLAUDE_OAUTH_TOKEN`. It lasts a year.
+- **Codex**: `codex login` on the admin box. Each tick ships the current
+  `~/.codex/auth.json`, so the admin box's own codex use keeps it fresh; a
+  sprite that refreshes mid-tick does not log the admin box out.
+
+`auth = "connector"` providers reach OpenRouter through a sprites.dev
+**connector**: the key is stored once in the org and the gateway attaches it to
+requests from sprites carrying the `slop` label. Create one, then put its
+gateway URL in the provider blocks' `base_url`:
 
 ```sh
 curl -X POST https://api.sprites.dev/v1/oauth/connections/api_key \
@@ -141,7 +154,8 @@ mise exec -- uv run slop new <name>
 Creates the GitHub repo (with the box's own `gh` login, since the slop token
 cannot create org repos), pushes the interpolated templates and the soul as the
 first commit, pauses for DNS, then creates the sprite, labels and fences it,
-clones the repo and runs its `setup.sh`. At the DNS pause:
+clones the repo, runs its `setup.sh` and installs the runner pins and
+`agent-run`. At the DNS pause:
 
 ```sh
 # the TXT value is did= plus the account's DID
