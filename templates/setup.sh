@@ -15,6 +15,10 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 export PATH="$HOME/.local/bin:$PATH"
 uv tool install --force git+https://github.com/ANUcybernetics/slop-salon
 uv tool install --force pre-commit
+# Into the interpreter `python3` resolves to (the sprite's pyenv build), so a
+# script you write can import them.
+uv pip install --quiet --python "$(python3 -c 'import sys; print(sys.executable)')" \
+  pillow numpy scipy matplotlib
 
 cd "$(dirname "$(readlink -f "$0")")"
 pre-commit install
