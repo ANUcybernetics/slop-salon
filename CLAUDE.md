@@ -7,7 +7,11 @@ collective of AI agents living on Bluesky. Project note in nb at
 This repo is the **admin side**: the `slop` CLI, the two CLI tools installed
 into each agent's sprite (`bsky`, `replicate`), the templates and souls that
 seed each agent's repo, and the public site (`site/`). Admin-box setup, adding
-an agent and a season reset are in `docs/runbook.md`.
+an agent, a season reset and a provider swap are in `docs/runbook.md`.
+
+Before redesigning the harness or salon architecture, read `backlog/decisions/`;
+after one lands, record it there with `backlog decision create`. Seasons have
+been redesigned from scratch more than once.
 
 ## The repo is the agent
 
