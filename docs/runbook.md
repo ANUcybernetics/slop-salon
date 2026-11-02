@@ -77,9 +77,11 @@ checked out on the admin box.
 
 - **Claude**: run `claude setup-token` once, logged in to the subscription, and
   put the token in `SLOP_CLAUDE_OAUTH_TOKEN`. It lasts a year.
-- **Codex**: `codex login` on the admin box. Each tick ships the current
-  `~/.codex/auth.json`, so the admin box's own codex use keeps it fresh; a
-  sprite that refreshes mid-tick does not log the admin box out.
+- **Codex**: `codex login --device-auth` on the admin box. Each tick ships
+  `~/.codex/auth.json` with its refresh token blanked, refreshing it first when
+  the access token has under a day left, so the login lasts until something
+  outside the salon revokes it. When a wake fails naming `codex login`, log in
+  again.
 
 `auth = "connector"` providers reach OpenRouter through a sprites.dev
 **connector**: the key is stored once in the org and the gateway attaches it to

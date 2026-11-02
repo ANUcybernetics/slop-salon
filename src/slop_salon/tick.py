@@ -15,6 +15,7 @@ import tomllib
 from collections.abc import Mapping
 from pathlib import Path
 
+from . import codex_login
 from .config import SUBSCRIPTION_ENV, Agent, Config, Provider
 
 # Generous next to a healthy turn, but a hung request must not eat the tick's
@@ -99,7 +100,7 @@ def _auth_env(provider: Provider, src: Mapping[str, str]) -> dict[str, str]:
             return {"CLAUDE_CODE_OAUTH_TOKEN": credential}
         # Codex reads its login from a file, which slop-tick writes for the
         # life of the tick. Base64 because the JSON has commas.
-        auth_json = Path(credential).expanduser().read_bytes()
+        auth_json = codex_login.sprite_copy(codex_login.ensure_fresh(Path(credential).expanduser()))
         return {"SLOP_CODEX_AUTH": base64.b64encode(auth_json).decode()}
 
     if provider.auth == "connector":

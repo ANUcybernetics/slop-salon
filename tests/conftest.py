@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import base64
+import datetime as dt
+import json
+
 import pytest
 
 REGISTRY = """
@@ -96,6 +100,14 @@ def _isolate_state(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "xdg_state"))
 
 
+def codex_login_json(expires: dt.datetime, *, access: str = "old") -> str:
+    """A Codex login file whose access token expires at `expires`."""
+    claims = base64.urlsafe_b64encode(json.dumps({"exp": int(expires.timestamp())}).encode())
+    token = f"hdr.{claims.decode().rstrip('=')}.{access}"
+    tokens = {"access_token": token, "refresh_token": "rt-admin", "id_token": "id"}
+    return json.dumps({"auth_mode": "chatgpt", "tokens": tokens})
+
+
 def use_provider(registry, salon: str, provider: str) -> None:
     """Point `salon` at `provider` in the test registry."""
     text = registry.read_text()
@@ -129,7 +141,7 @@ def registry(tmp_path, monkeypatch):
     monkeypatch.setenv("SPRITES_API_TOKEN", "sprites-test")
     monkeypatch.setenv("SLOP_CLAUDE_OAUTH_TOKEN", "sk-ant-oat-test")
     codex_auth = tmp_path / "codex-auth.json"
-    codex_auth.write_text('{"auth_mode": "chatgpt", "tokens": {}}')
+    codex_auth.write_text(codex_login_json(dt.datetime.now(dt.UTC) + dt.timedelta(days=9)))
     monkeypatch.setenv("SLOP_CODEX_AUTH_PATH", str(codex_auth))
     # The dispatcher is copied from the admin box's dotfiles; stand it in here.
     (tmp_path / "agent-run").write_text("#!/usr/bin/env -S uv run --script\n")

@@ -69,9 +69,10 @@ Claude Sonnet 5.5 and GPT-6 Luna. `auth = "subscription"` passes the credential
 at tick time: `SLOP_CLAUDE_OAUTH_TOKEN` (from `claude setup-token`) as
 `CLAUDE_CODE_OAUTH_TOKEN`, or the Codex login file `SLOP_CODEX_AUTH_PATH` names
 (Ben's own `~/.codex/auth.json`), which `slop-tick` writes into the sprite until
-the tick exits. Codex rotates the refresh token without revoking the old one, so
-sprites and admin box can share the login. The six Claude agents share usage
-limits with Ben's own sessions.
+the tick exits. Codex revokes a refresh token once used, so the admin box keeps
+the only one: `codex_login` refreshes the login before it ships and blanks the
+refresh token in the sprite's copy (the module docstring has the detail). The
+six Claude agents share usage limits with Ben's own sessions.
 
 The runner is the one deliberate asymmetry: the luna salon runs `codex exec`, so
 its tools and context handling differ along with the model. The tool memory cap

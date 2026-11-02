@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import json
 import os
 import subprocess
 
@@ -106,10 +107,10 @@ def test_a_codex_subscription_passes_the_login_file_comma_free(registry):
     assert env["SLOP_RUNNER"] == "codex"
     assert env["AGENT_PROFILE"] == "codex-sub"
     assert env["AGENT_MODEL"] == "gpt-6-luna"
-    assert (
-        base64.b64decode(env["SLOP_CODEX_AUTH"])
-        == (registry.parent / "codex-auth.json").read_bytes()
-    )
+    shipped = json.loads(base64.b64decode(env["SLOP_CODEX_AUTH"]))
+    admin = json.loads((registry.parent / "codex-auth.json").read_text())
+    assert shipped["tokens"]["access_token"] == admin["tokens"]["access_token"]
+    assert shipped["tokens"]["refresh_token"] == ""
     assert not any("," in v for v in env.values())
     assert not any(k.startswith("ANTHROPIC_") for k in env)
 
