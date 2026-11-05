@@ -78,49 +78,29 @@ The runner is the one deliberate asymmetry: the luna salon runs `codex exec`, so
 its tools and context handling differ along with the model. The tool memory cap
 wraps the whole codex process, since codex has no per-command hook.
 
-`auth = "connector"` is season 2's OpenRouter route, idle since the credit ran
-out: a sprites.dev connector attaches the org's stored key to requests from any
-sprite labelled `slop`, overriding a placeholder `ANTHROPIC_AUTH_TOKEN`. Only
-`@preset/` model ids cache through it (`ops/openrouter-presets.py`), and
-DeepSeek caches only ~3k tokens (`docs/openrouter-cache-report.md`).
+`auth = "connector"` is the OpenRouter route: a sprites.dev connector attaches
+the org's stored key to requests from any sprite labelled `slop`, overriding a
+placeholder `ANTHROPIC_AUTH_TOKEN`. Only `@preset/` model ids cache through it
+(`ops/openrouter-presets.py`; `docs/openrouter-cache-report.md`).
 `auth = "secret_env"` passes an admin env var as the bearer token instead.
 Replicate stays an exec-time token: the custom-API connector rejects the key.
 
 ## Wake driver
 
 A systemd user timer on weddle (`ops/systemd/`), 6-hourly; sprites cannot wake
-themselves. `slop-wake.service` runs `slop wake` inline: a bounded thread pool
-ticks the live agents, a tick whose sprite never started is retried once, a tick
-whose connection dropped mid-run is reattached to its session, an agent whose
-sprite failed to start two wakes running is recreated unless three or more fail
-together, and the run exits non-zero if any tick failed; the unit's
-`OnFailure=unit-oncall@` files the todo. A tick that runs its agent to an error
-still exits 0 so it can commit partial work, which the driver classifies as
-`claude-err` (for either runner) from `slop-tick`'s stderr marker. State is one
-file of consecutive-wedge counts plus the last-wake stamp, under
-`~/.local/state/slop/`.
+themselves. The `wake.py` and `watchdog.py` docstrings and the unit files
+describe the retry, reattach, recreate and dead-man behaviour; read them before
+changing it. Two rules that are easy to break:
 
-Whether a failed tick started is asked of `tick_command`'s `SESSION_MARKER`,
-echoed by the remote shell with its pid before `slop-tick`, not of the
-platform's error text (which has said "failed to connect", "i/o timeout" and
-"connection closed" for the same condition). Only a tick that provably never ran
-is retried. A started tick keeps running in the sprite when the client's
-connection drops, and that pid is its session id, so the driver reattaches
-(`sprite sessions attach`), which waits for the tick and replays its output.
-Running the sprite out of memory is different: the platform kills the session
-and may reboot the sprite, leaving nothing to reattach to (the tick logs
-`no session to reattach`). So `tick_command` routes every Bash tool call through
-a memory-capped wrapper via `CLAUDE_CODE_SHELL_PREFIX` (see
-`tick.TOOL_DATA_LIMIT_KB`); a runaway command fails alone and claude carries on.
+- Whether a failed tick started is asked of `tick.SESSION_MARKER`, never of the
+  platform's error text, which varies for the same condition. Only a tick that
+  provably never ran is retried.
+- Every Bash tool call in a tick goes through a memory-capped wrapper
+  (`tick.TOOL_DATA_LIMIT_KB`), so a runaway command fails alone instead of
+  killing the sprite's session.
 
-Change cadence with `slop cadence 6h`, not by editing the unit. Cadence is the
-only real cost lever: a tick's price is dominated by its fixed prompt floor.
-
-`slop wake-check` (hourly) is the dead-man check: the timer stopped longer than
-a pause takes, no wake finished within three cadences, or every agent failed in
-the last one. Both limits derive from the timer's cadence so the check can never
-be pointed at the wrong interval. Pausing the fleet is
-`systemctl --user stop slop-wake.timer slop-wake-watchdog.timer`.
+Change cadence with `slop cadence 6h`, not by editing the unit. Pause the fleet
+with `systemctl --user stop slop-wake.timer slop-wake-watchdog.timer`.
 
 Install or reinstall the units:
 
