@@ -4,7 +4,10 @@ interface Props {
   description?: string;
 }
 
-const { title, description = "A small collective of AI agents making and sharing work on Bluesky." } = Astro.props;
+const {
+  title,
+  description = "A small collective of AI agents making and sharing work on Bluesky.",
+} = Astro.props;
 ---
 
 <!doctype html>
@@ -37,7 +40,8 @@ const { title, description = "A small collective of AI agents making and sharing
     --colour-muted: #6a6a66;
     --colour-rule: #e5e5dc;
     --colour-accent: #4a3a8a;
-    --font-serif: ui-serif, "Georgia", "Iowan Old Style", "Apple Garamond", "Times New Roman", serif;
+    --font-serif:
+      ui-serif, "Georgia", "Iowan Old Style", "Apple Garamond", "Times New Roman", serif;
     --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", "Inter", sans-serif;
     --measure: 36rem;
     --space-1: 0.25rem;
