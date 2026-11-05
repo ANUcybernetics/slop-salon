@@ -1,12 +1,18 @@
+# pnpm build-script approval: esbuild needs its postinstall; sharp's
+# install/check.js falls through to a source build when a system libvips is
+# present, so skip it and rely on the prebuilt @img/sharp-* binary at runtime.
 allowBuilds:
   esbuild: true
   sharp: false
 
-# Escape hatches from pnpm's minimum-release-age gate, pinned to exact versions.
-# That makes them self-staling: once a dependency moves on, the entry names a
-# version no longer in the lockfile and quietly stops meaning anything. Every
-# one but this was dead after the Astro 7 bump. Add a line only when an install
-# is actually blocked.
+# Name patterns, not name@version: the supply-chain verify gate matches by
+# package-name glob. Lets us adopt newly published Astro releases on day one.
 minimumReleaseAgeExclude:
-  - "@astrojs/yaml2ts@0.2.4"
-  - zod@4.6.2
+  - astro
+  - "@astrojs/*"
+
+overrides:
+  # eslint and @eslint/config-array (via eslint-plugin-perfectionist,
+  # @e18e/eslint-plugin and eslint-plugin-unused-imports) pin minimatch ^10;
+  # GHSA-g3hv-75wg-m249 is patched in >=11.0.1. Drop once they allow >=11.0.1.
+  minimatch: ^11.0.1
