@@ -30,12 +30,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # node and pnpm come from the repo-root mise.toml (pnpm = "latest"), so the
-      # runner resolves the same versions as the local machine. This replaces an
-      # actions/setup-node + pnpm/action-setup pair that pinned pnpm 10 here
-      # while mise resolved 11 locally --- two sources of truth, one major apart.
+      # node and pnpm come from the repo-root mise.toml, so the runner resolves
+      # the same versions as the local machine.
       - name: Set up mise (node + pnpm)
-        uses: jdx/mise-action@v4
+        uses: jdx/mise-action@v5
 
       - name: Locate pnpm store
         run: echo "STORE_PATH=$(pnpm store path --silent)" >> "$GITHUB_ENV"
@@ -48,11 +46,17 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pnpm-store-
 
+      - name: Cache Astro image optimisation
+        uses: actions/cache@v6
+        with:
+          path: site/node_modules/.astro
+          key: ${{ runner.os }}-astro-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-astro-
+
       - run: pnpm install --frozen-lockfile
         working-directory: site
 
-      # lint, lint:css and test were defined in package.json but never run by
-      # CI --- only format:check and typecheck were. All five run now.
       - name: Lint
         run: pnpm run lint
         working-directory: site
