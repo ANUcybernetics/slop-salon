@@ -1,7 +1,7 @@
 [tools]
 python = "3.14"
 uv = "0.12.1"
-node = "24"
+node = "26"
 pnpm = "latest"
 # `tests/test_slop_tick.bats` needs it; without a pin, `bats` is an unresolved
 # shim and the shell-script suite silently doesn't get run.
