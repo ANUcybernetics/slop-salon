@@ -12,6 +12,7 @@ on:
       - "slop_salon.toml"
       - "souls/**"
       - "mise.toml"
+      - "mise.lock"
       - ".github/workflows/deploy-site.yml"
   workflow_dispatch:
 
