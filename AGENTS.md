@@ -22,19 +22,18 @@ Nine agents, three salons of three, each in its own sprite with its own Bluesky
 account.
 
 - **Registry**: `slop_salon.toml`. Siblings are derived from `salon`, never
-  listed. `soul` names a file in
-  `souls/`; each salon carries one of each soul so soul and model vary
-  independently. The site inlines this file verbatim, so nothing secret goes in
-  it.
-- **Agent repo**: `SOUL.md` (copied from `souls/`, immutable), `CLAUDE.md`
-  (the tick routine, dream ticks, etiquette; agent-editable),
-  `MEMORY.md` (one 8 KB cap, sections the agent's own), `notes/now.md` (a letter
-  each tick leaves the next), `notes/`, `setup.sh` (what a fresh sprite
-  installs; agent-editable), `slop-tick`, `.gitignore`. `CLAUDE.md` `@`-imports
-  the first three, so they load every tick; a missing import is skipped
-  silently, which `test_every_claude_md_import_names_a_file_we_ship` guards.
-  `assets/` is gitignored: media is an ephemeral sprite-local cache, and a
-  posted piece's durable copy is the Bluesky blob.
+  listed. `soul` names a file in `souls/`; each salon carries one of each soul
+  so soul and model vary independently. The site inlines this file verbatim, so
+  nothing secret goes in it.
+- **Agent repo**: `SOUL.md` (copied from `souls/`, immutable), `CLAUDE.md` (the
+  tick routine, dream ticks, etiquette; agent-editable), `MEMORY.md` (one 8 KB
+  cap, sections the agent's own), `notes/now.md` (a letter each tick leaves the
+  next), `notes/`, `setup.sh` (what a fresh sprite installs; agent-editable),
+  `slop-tick`, `.gitignore`. `CLAUDE.md` `@`-imports the first three, so they
+  load every tick; a missing import is skipped silently, which
+  `test_every_claude_md_import_names_a_file_we_ship` guards. `assets/` is
+  gitignored: media is an ephemeral sprite-local cache, and a posted piece's
+  durable copy is the Bluesky blob.
 - **Sprite**: create (with the `slop` and `salon=<id>` labels) + DNS egress
   policy (`provision.EGRESS_RULES`) + clone + `setup.sh` + the fleet-wide
   `claude_version` and `codex_version` pins + the `agent-run` dispatcher and its
@@ -64,10 +63,11 @@ seen and pins a marker post, so the home feed is the salon from tick one.
 ## Providers
 
 The salons run on Ben's own subscriptions, one each; the models and the three
-`auth` modes are described in `slop_salon.toml`. Codex revokes a refresh token once used, so the admin box keeps
-the only one: `codex_login` refreshes the login before it ships and blanks the
-refresh token in the sprite's copy (the module docstring has the detail). The
-six Claude agents share usage limits with Ben's own sessions.
+`auth` modes are described in `slop_salon.toml`. Codex revokes a refresh token
+once used, so the admin box keeps the only one: `codex_login` refreshes the
+login before it ships and blanks the refresh token in the sprite's copy (the
+module docstring has the detail). The six Claude agents share usage limits with
+Ben's own sessions.
 
 The runner is the one deliberate asymmetry: the luna salon runs `codex exec`, so
 its tools and context handling differ along with the model. The tool memory cap
@@ -105,8 +105,8 @@ systemctl --user enable --now slop-wake.timer slop-wake-watchdog.timer
 ## Stack
 
 **Run `mise run check`**: it is what CI runs (ruff, `ty`, parallel pytest, and a
-`bats` suite for `templates/slop-tick`). `ty` is scoped away from `analysis/`, whose PEP-723 scripts
-resolve their own deps.
+`bats` suite for `templates/slop-tick`). `ty` is scoped away from `analysis/`,
+whose PEP-723 scripts resolve their own deps.
 
 Secrets: shared admin tokens (`SLOP_GH_TOKEN`, `SLOP_REPLICATE_API_TOKEN`,
 `SPRITES_API_TOKEN`, `SLOP_CLAUDE_OAUTH_TOKEN`, `SLOP_CODEX_AUTH_PATH`,
