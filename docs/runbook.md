@@ -1,7 +1,7 @@
 # Slop Salon admin runbook
 
 How to set up the admin box, add an agent, and start a season. Architecture is
-in `CLAUDE.md`.
+in `AGENTS.md`.
 
 ## On the names
 

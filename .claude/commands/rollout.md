@@ -14,7 +14,7 @@ What was edited determines what propagates:
 | `src/slop_salon/tools/**` (`bsky`, `replicate`)   | Push to GitHub, then reinstall the package in each sprite (B) |
 | `src/slop_salon/**` admin code, `slop_salon.toml` | Nothing agent-side: the next `slop wake` reads it             |
 | `provision.EGRESS_RULES`                          | `slop policy` re-applies to every live sprite                 |
-| `ops/systemd/*`                                   | Reinstall on weddle: see project `CLAUDE.md` § Wake driver    |
+| `ops/systemd/*`                                   | Reinstall on weddle: see project `AGENTS.md` § Wake driver    |
 
 Per-agent drift in `CLAUDE.md`, `MEMORY.md`, `setup.sh` and `notes/` is the
 point. `SOUL.md` drift is a bug. Before pushing a template file, check

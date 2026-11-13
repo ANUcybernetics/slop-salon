@@ -1,6 +1,6 @@
 [Unit]
 Description=Dead-man check: is the Slop Salon tick pipeline actually alive?
-Documentation=file:///home/ben/projects/slop-salon/CLAUDE.md
+Documentation=file:///home/ben/projects/slop-salon/AGENTS.md
 OnFailure=unit-oncall@%n.service
 OnSuccess=unit-oncall-clear@%n.service
 

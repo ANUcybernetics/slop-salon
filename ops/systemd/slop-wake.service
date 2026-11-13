@@ -1,6 +1,6 @@
 [Unit]
 Description=Slop Salon wake (one tick per live agent)
-Documentation=file:///home/ben/projects/slop-salon/CLAUDE.md
+Documentation=file:///home/ben/projects/slop-salon/AGENTS.md
 # The dotfiles oncall pattern: a non-zero exit files a deduped `nb` todo with
 # this unit's journal tail, and a later success clears it.
 OnFailure=unit-oncall@%n.service

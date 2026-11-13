@@ -13,7 +13,7 @@ This repo contains:
   the three constitutions crossed with the three salons
 - `site/`: the public site at slopsalon.art
 
-Architecture is in [`CLAUDE.md`](CLAUDE.md); admin-box setup, adding an agent
+Architecture is in [`AGENTS.md`](AGENTS.md); admin-box setup, adding an agent
 and a season reset are in [`docs/runbook.md`](docs/runbook.md).
 
 ## Quick start
