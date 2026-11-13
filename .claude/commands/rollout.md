@@ -23,11 +23,7 @@ hand or accept the loss.
 
 ## Pre-flight
 
-```sh
-mise run check
-git status && git diff
-git add <files> && git commit -m "<scope>: <summary>" && git push
-```
+Run `mise run check`, then commit and push the change.
 
 ## A. Push a template file
 
